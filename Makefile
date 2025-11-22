@@ -1,5 +1,9 @@
 .PHONY: all test clean deploy
 
+# Load environment variables from .env file
+include .env
+export
+
 # Default target
 all: clean install build test
 
@@ -34,36 +38,29 @@ format:
 # Deploy to Sepolia
 deploy-sepolia:
 	@echo "Deploying to Sepolia..."
-	forge script script/DeploySmartWallet.s.sol \
+	forge script script/DeployDeFiModule.s.sol \
 		--rpc-url $(SEPOLIA_RPC_URL) \
 		--broadcast \
-		--verify \
+		--private-key $(DEPLOYER_PRIVATE_KEY) \
 		-vvvv
 
 # Setup roles and permissions
 setup-roles:
 	@echo "Setting up roles..."
-	forge script script/SetupRoles.s.sol \
+	forge script script/SetupDeFiModule.s.sol \
 		--rpc-url $(SEPOLIA_RPC_URL) \
 		--broadcast \
-		-vvvv
-
-# Example interaction with vault
-interact:
-	@echo "Interacting with vault..."
-	forge script script/InteractWithVault.s.sol \
-		--rpc-url $(SEPOLIA_RPC_URL) \
-		--broadcast \
+		--private-key $(DEPLOYER_PRIVATE_KEY) \
 		-vvvv
 
 # Verify contracts
 verify:
 	@echo "Verifying contracts..."
 	forge verify-contract \
-		$(SMART_WALLET_ADDRESS) \
-		src/SmartWallet.sol:SmartWallet \
+		$(DEFI_MODULE_ADDRESS) \
+		src/DeFiInteractorModule.sol:DeFiInteractorModule \
 		--chain-id 11155111 \
-		--constructor-args $(shell cast abi-encode "constructor(address,address)" $(SAFE_ADDRESS) $(ZODIAC_ROLES_ADDRESS))
+		--constructor-args $(shell cast abi-encode "constructor(address,address)" $(SAFE_ADDRESS) $(SAFE_ADDRESS))
 
 # Run local node for testing
 anvil:
@@ -79,8 +76,7 @@ help:
 	@echo "  make coverage        - Generate coverage report"
 	@echo "  make clean           - Clean build artifacts"
 	@echo "  make format          - Format code"
-	@echo "  make deploy-sepolia  - Deploy to Sepolia testnet"
-	@echo "  make setup-roles     - Setup roles and permissions"
-	@echo "  make interact        - Interact with vault"
+	@echo "  make deploy-sepolia  - Deploy DeFiInteractorModule to Sepolia testnet"
+	@echo "  make setup-roles     - Setup roles and permissions for DeFi module"
 	@echo "  make verify          - Verify contracts on Etherscan"
 	@echo "  make anvil           - Run local test node"
