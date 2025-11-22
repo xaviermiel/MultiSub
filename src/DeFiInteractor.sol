@@ -183,17 +183,17 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     // ============ Emergency Controls ============
 
     /**
-     * @notice Pause all operations (only Safe can call)
+     * @notice Pause all operations (only owner can call)
      */
-    function pause() external onlySafe {
+    function pause() external onlyOwner {
         _pause();
         emit EmergencyPaused(msg.sender, block.timestamp);
     }
 
     /**
-     * @notice Unpause all operations (only Safe can call)
+     * @notice Unpause all operations (only owner can call)
      */
-    function unpause() external onlySafe {
+    function unpause() external onlyOwner {
         _unpause();
         emit EmergencyUnpaused(msg.sender, block.timestamp);
     }
@@ -235,7 +235,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     // ============ Sub-Account Configuration ============
 
     /**
-     * @notice Set custom limits for a sub-account (only Safe can call)
+     * @notice Set custom limits for a sub-account (only owner can call)
      * @param subAccount The sub-account address to configure
      * @param maxDepositBps Maximum deposit percentage in basis points (max 10000)
      * @param maxWithdrawBps Maximum withdrawal percentage in basis points (max 10000)
@@ -248,7 +248,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         uint256 maxWithdrawBps,
         uint256 maxLossBps,
         uint256 windowDuration
-    ) external onlySafe {
+    ) external onlyOwner {
         if (subAccount == address(0)) revert InvalidAddress();
         // Validate limits: BPS cannot exceed 100%, window must be at least 1 hour
         if (maxDepositBps > 10000 || maxWithdrawBps > 10000 || maxLossBps > 10000 || windowDuration < 1 hours) {
@@ -296,7 +296,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     }
 
     /**
-     * @notice Set allowed addresses for a sub-account (only Safe can call)
+     * @notice Set allowed addresses for a sub-account (only owner can call)
      * @param subAccount The sub-account address to configure
      * @param targets Array of target addresses to allow/disallow
      * @param allowed Whether to allow or disallow these addresses
@@ -305,7 +305,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         address subAccount,
         address[] calldata targets,
         bool allowed
-    ) external onlySafe {
+    ) external onlyOwner {
         if (subAccount == address(0)) revert InvalidAddress();
 
         for (uint256 i = 0; i < targets.length; i++) {
