@@ -124,10 +124,6 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     event ProtocolExecuted(
         address indexed subAccount,
         address indexed target,
-        uint256 portfolioValueBefore,
-        uint256 portfolioValueAfter,
-        uint256 valueLost,
-        uint256 cumulativeLossInWindow,
         uint256 timestamp
     );
 
@@ -648,9 +644,6 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         // This ensures only owner-approved protocols can be executed
         if (!allowedAddresses[msg.sender][target]) revert AddressNotAllowed();
 
-        // // Get sub-account limits
-        // (, , uint256 maxLossBps, uint256 windowDuration) = getSubAccountLimits(msg.sender);
-
         // Block raw approve/increaseAllowance calls in calldata - use approveProtocol() instead
         if (data.length >= 4) {
             bytes4 selector = bytes4(data[:4]);
@@ -659,52 +652,15 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             }
         }
 
-        // // Get portfolio value before execution
-        // uint256 portfolioValueBefore = getPortfolioValue();
-
-        // // Reset window if expired or first time
-        // if (block.timestamp >= executionWindowStart[msg.sender] + windowDuration ||
-        //     executionWindowStart[msg.sender] == 0) {
-        //     valueLostInWindow[msg.sender] = 0;
-        //     executionWindowStart[msg.sender] = block.timestamp;
-        //     executionWindowPortfolioValue[msg.sender] = portfolioValueBefore;
-        //     emit ExecutionWindowReset(msg.sender, block.timestamp, portfolioValueBefore);
-        // }
-
         // Execute the call through the module
         bool success = exec(target, 0, data, ISafe.Operation.Call);
 
         if (!success) revert TransactionFailed();
 
-        // // Get portfolio value after execution
-        // uint256 portfolioValueAfter = getPortfolioValue();
-
-        // // Calculate value lost (if any)
-        // uint256 valueLost = 0;
-        // if (portfolioValueAfter < portfolioValueBefore) {
-        //     valueLost = portfolioValueBefore - portfolioValueAfter;
-        // }
-
-        // // Update cumulative loss tracking
-        // uint256 cumulativeLoss = valueLostInWindow[msg.sender] + valueLost;
-
-        // // Check against max loss limit
-        // uint256 windowPortfolioValue = executionWindowPortfolioValue[msg.sender];
-        // uint256 maxLoss = Math.mulDiv(windowPortfolioValue, maxLossBps, 10000, Math.Rounding.Floor);
-
-        // if (cumulativeLoss > maxLoss) revert ExceedsMaxLoss();
-
-        // // Update cumulative tracking
-        // valueLostInWindow[msg.sender] = cumulativeLoss;
-
         // Emit event
         emit ProtocolExecuted(
             msg.sender,
             target,
-            0,
-            0,
-            0,
-            0,
             block.timestamp
         );
 
