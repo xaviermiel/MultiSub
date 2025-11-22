@@ -3,7 +3,7 @@
 > A secure self-custody DeFi wallet built as a **custom Zodiac module**, combining Safe multisig security with delegated permission-restricted interactions.
 
 [![Solidity](https://img.shields.io/badge/solidity-0.8.20-blue)]()
-[![Tests](https://img.shields.io/badge/tests-36%2F36%20passing-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-44%2F44%20passing-brightgreen)]()
 [![License](https://img.shields.io/badge/license-MIT-blue)]()
 [![Zodiac](https://img.shields.io/badge/zodiac-module-purple)]()
 
@@ -70,16 +70,16 @@ forge script script/SetupDeFiModule.s.sol --broadcast
 
 ## Key Features
 
-### 🎯 Streamlined Roles
+### Streamlined Roles
 - **DEFI_EXECUTE_ROLE (1)**: Approve tokens & execute protocol operations
 - **DEFI_TRANSFER_ROLE (2)**: Transfer tokens from Safe
 
-### 🔐 Granular Controls
+### Granular Controls
 - **Per-Sub-Account Allowlists**: Each sub-account has its own protocol whitelist
 - **Custom Limits**: Configurable deposit/withdraw/loss percentages per sub-account
 - **Time Windows**: Rolling 24-hour windows prevent rapid drain attacks
 
-### 🛡️ Security
+### Security
 - Separate approval workflow (prevents approval draining)
 - Time-windowed cumulative limits (prevents rapid drain attacks)
 - Emergency pause mechanism
@@ -122,8 +122,7 @@ cast send $MODULE "transferToken(address,address,uint256)" \
 ## Default Limits
 
 If not configured, sub-accounts use:
-- **Max Deposit**: 10% per 24 hours
-- **Max Withdraw**: 5% per 24 hours
+- **Max transfer**: 1% per 24 hours
 - **Max Loss**: 5% per 24 hours
 - **Window**: 24 hours (86400 seconds)
 
@@ -156,35 +155,12 @@ forge test --gas-report
 forge test --match-test testGrantRole -vvv
 ```
 
-**Status**: 25/25 tests passing ✅
-
 ## Use Cases
 
 - **Individual Users**: Mobile DeFi with cold storage security
 - **Family Wallets**: Each member with custom limits
 - **DAOs**: Delegate treasury management with controls
 - **Institutions**: Operational DeFi with compliance
-
-## Documentation
-
-| Document | Purpose |
-|----------|---------|
-| **[PROJECT_GUIDE.md](./PROJECT_GUIDE.md)** | Complete technical & non-technical guide |
-| **[DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md)** | Step-by-step deployment instructions |
-| **README.md** (this file) | Quick overview |
-
-## Emergency Controls
-
-```bash
-# Pause all operations
-cast send $MODULE "pause()"
-
-# Revoke compromised sub-account
-cast send $MODULE "revokeRole(address,uint16)" $COMPROMISED_ACCOUNT 1
-
-# Disable module entirely (from Safe)
-cast send $SAFE "disableModule(address,address)" $PREV_MODULE $MODULE
-```
 
 ## Security
 
@@ -264,5 +240,3 @@ MIT License - see [LICENSE](./LICENSE)
 ---
 
 **Built with Zodiac for secure DeFi self-custody** 🛡️
-
-For detailed information, see [PROJECT_GUIDE.md](./PROJECT_GUIDE.md) and [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md)
