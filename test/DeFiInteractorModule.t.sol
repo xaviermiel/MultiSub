@@ -85,6 +85,51 @@ contract MockProtocol {
 }
 
 /**
+ * @title MockChainlinkPriceFeed
+ * @notice Mock Chainlink price feed for testing
+ */
+contract MockChainlinkPriceFeed {
+    int256 public price;
+    uint8 public decimals;
+    uint256 public updatedAt;
+
+    constructor(int256 _price, uint8 _decimals) {
+        price = _price;
+        decimals = _decimals;
+        updatedAt = block.timestamp;
+    }
+
+    function latestRoundData()
+        external
+        view
+        returns (
+            uint80 roundId,
+            int256 answer,
+            uint256 startedAt,
+            uint256 _updatedAt,
+            uint80 answeredInRound
+        )
+    {
+        return (
+            1,
+            price,
+            block.timestamp,
+            updatedAt,
+            1
+        );
+    }
+
+    function setPrice(int256 _price) external {
+        price = _price;
+        updatedAt = block.timestamp;
+    }
+
+    function setUpdatedAt(uint256 _updatedAt) external {
+        updatedAt = _updatedAt;
+    }
+}
+
+/**
  * @title DeFiInteractorModuleTest
  * @notice Tests for DeFiInteractorModule
  */
@@ -93,6 +138,7 @@ contract DeFiInteractorModuleTest is Test {
     MockSafe public safe;
     MockERC20 public token;
     MockProtocol public protocol;
+    MockChainlinkPriceFeed public priceFeed;
 
     address public owner;
     address public subAccount1;
@@ -117,6 +163,10 @@ contract DeFiInteractorModuleTest is Test {
         token = new MockERC20();
         protocol = new MockProtocol();
 
+        // Deploy mock Chainlink price feed
+        // Price: $1.00 with 8 decimals (standard for USD pairs)
+        priceFeed = new MockChainlinkPriceFeed(1_00000000, 8);
+
         // Enable module on Safe
         safe.enableModule(address(module));
 
@@ -126,6 +176,9 @@ contract DeFiInteractorModuleTest is Test {
         // Set initial Safe value (simulate Chainlink update)
         // Portfolio value: $1,000,000 USD (with 18 decimals)
         module.updateSafeValue(1_000_000 * 10**18);
+
+        // Set price feed for token
+        module.setTokenPriceFeed(address(token), address(priceFeed));
     }
 
     // ============ Module Setup Tests ============
@@ -528,6 +581,9 @@ contract DeFiInteractorModuleTest is Test {
         // Fast forward past window (24 hours)
         vm.warp(block.timestamp + 25 hours);
 
+        // Update price feed timestamp to keep it fresh
+        priceFeed.setUpdatedAt(block.timestamp);
+
         // Update Safe value (simulate Chainlink update)
         module.updateSafeValue(2_000_000 * 10**18);
 
@@ -545,24 +601,124 @@ contract DeFiInteractorModuleTest is Test {
         module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
         module.setAllowedAddresses(subAccount1, _createAddressArray(address(protocol)), true);
 
-        // Set limits: 10% loss allowed, 5% transfer allowed
+        // Set limits: 10% loss allowed (= $100k on $1M portfolio), 5% transfer allowed
         module.setSubAccountLimits(subAccount1, 1000, 500, 1 days);
 
-        // Make multiple small approvals
+        // Make multiple approvals - each 30k tokens at $1 = $30k USD each
+        // Total: $90k (within $100k limit)
         vm.startPrank(subAccount1);
-        module.approveProtocol(address(token), address(protocol), 3000 * 10**18);
-        module.approveProtocol(address(token), address(protocol), 3000 * 10**18);
-        module.approveProtocol(address(token), address(protocol), 3000 * 10**18);
+        module.approveProtocol(address(token), address(protocol), 30_000 * 10**18);
+        module.approveProtocol(address(token), address(protocol), 30_000 * 10**18);
+        module.approveProtocol(address(token), address(protocol), 30_000 * 10**18);
         vm.stopPrank();
 
         // Cumulative should be tracked
         uint256 cumulative = module.valueApprovedInWindow(subAccount1);
         assertGt(cumulative, 0);
 
-        // Next approval that pushes over limit should fail
+        // Next approval of $15k would push total to $105k, exceeding $100k limit
         vm.prank(subAccount1);
         vm.expectRevert(DeFiInteractorModule.ExceedsApprovalLimit.selector);
-        module.approveProtocol(address(token), address(protocol), 5000 * 10**18);
+        module.approveProtocol(address(token), address(protocol), 15_000 * 10**18);
+    }
+
+    // ============ Chainlink Price Feed Tests ============
+
+    function testSetTokenPriceFeed() public {
+        MockERC20 newToken = new MockERC20();
+        MockChainlinkPriceFeed newPriceFeed = new MockChainlinkPriceFeed(2_00000000, 8); // $2.00
+
+        module.setTokenPriceFeed(address(newToken), address(newPriceFeed));
+
+        address feedAddress = address(module.tokenPriceFeeds(address(newToken)));
+        assertEq(feedAddress, address(newPriceFeed));
+    }
+
+    function testSetMultiplePriceFeeds() public {
+        address[] memory tokens = new address[](2);
+        address[] memory feeds = new address[](2);
+
+        tokens[0] = address(new MockERC20());
+        tokens[1] = address(new MockERC20());
+        feeds[0] = address(new MockChainlinkPriceFeed(1_50000000, 8)); // $1.50
+        feeds[1] = address(new MockChainlinkPriceFeed(3_00000000, 8)); // $3.00
+
+        module.setTokenPriceFeeds(tokens, feeds);
+
+        assertEq(address(module.tokenPriceFeeds(tokens[0])), feeds[0]);
+        assertEq(address(module.tokenPriceFeeds(tokens[1])), feeds[1]);
+    }
+
+    function testRemoveTokenPriceFeed() public {
+        module.removeTokenPriceFeed(address(token));
+        assertEq(address(module.tokenPriceFeeds(address(token))), address(0));
+    }
+
+    function testApprovalFailsWithoutPriceFeed() public {
+        MockERC20 newToken = new MockERC20();
+        newToken.transfer(address(safe), 10000 * 10**18);
+
+        module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
+        module.setAllowedAddresses(subAccount1, _createAddressArray(address(protocol)), true);
+
+        // Try to approve without setting price feed
+        vm.prank(subAccount1);
+        vm.expectRevert(DeFiInteractorModule.NoPriceFeedSet.selector);
+        module.approveProtocol(address(newToken), address(protocol), 1000 * 10**18);
+    }
+
+    function testStalePriceFeedRejected() public {
+        module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
+        module.setAllowedAddresses(subAccount1, _createAddressArray(address(protocol)), true);
+
+        // Fast forward 25 hours to make current price feed stale
+        vm.warp(block.timestamp + 25 hours);
+
+        // Update Safe value to keep it fresh (only price feed should be stale)
+        module.updateSafeValue(1_000_000 * 10**18);
+
+        // Should fail due to stale price (price feed wasn't updated)
+        vm.prank(subAccount1);
+        vm.expectRevert(DeFiInteractorModule.StalePriceFeed.selector);
+        module.approveProtocol(address(token), address(protocol), 1000 * 10**18);
+    }
+
+    function testNegativePriceRejected() public {
+        // Set negative price
+        priceFeed.setPrice(-100000000);
+
+        module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
+        module.setAllowedAddresses(subAccount1, _createAddressArray(address(protocol)), true);
+
+        // Should fail due to invalid price
+        vm.prank(subAccount1);
+        vm.expectRevert(DeFiInteractorModule.InvalidPrice.selector);
+        module.approveProtocol(address(token), address(protocol), 1000 * 10**18);
+    }
+
+    function testDifferentPriceDecimalsHandling() public {
+        // Create price feed with 18 decimals (non-standard)
+        MockChainlinkPriceFeed highDecimalFeed = new MockChainlinkPriceFeed(1_000000000000000000, 18);
+
+        MockERC20 newToken = new MockERC20();
+        newToken.transfer(address(safe), 10000 * 10**18);
+
+        module.setTokenPriceFeed(address(newToken), address(highDecimalFeed));
+        module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
+        module.setAllowedAddresses(subAccount1, _createAddressArray(address(protocol)), true);
+
+        // Should work with different decimals
+        vm.prank(subAccount1);
+        module.approveProtocol(address(newToken), address(protocol), 1000 * 10**18);
+
+        // Verify value was tracked
+        assertGt(module.valueApprovedInWindow(subAccount1), 0);
+    }
+
+    function testSetMaxPriceFeedAge() public {
+        uint256 newAge = 12 hours;
+        module.setMaxPriceFeedAge(newAge);
+        assertEq(module.maxPriceFeedAge(), newAge);
     }
 
     // Helper function

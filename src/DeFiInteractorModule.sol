@@ -4,10 +4,12 @@ pragma solidity ^0.8.20;
 import {Module} from "./base/Module.sol";
 import {IMorphoVault} from "./interfaces/IMorphoVault.sol";
 import {ISafe} from "./interfaces/ISafe.sol";
+import {AggregatorV3Interface} from "./interfaces/AggregatorV3Interface.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /**
@@ -82,6 +84,12 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
     /// @notice Maximum age for SafeValue before it's considered stale (default: 15 minutes)
     uint256 public maxSafeValueAge = 15 minutes;
+
+    /// @notice Maximum age for Chainlink price feed data (default: 24 hours)
+    uint256 public maxPriceFeedAge = 24 hours;
+
+    /// @notice Mapping of token address to Chainlink price feed
+    mapping(address => AggregatorV3Interface) public tokenPriceFeeds;
 
     /// @notice Per-sub-account allowed addresses: subAccount => target address => allowed
     mapping(address => mapping(address => bool)) public allowedAddresses;
@@ -207,6 +215,20 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         uint256 newAge
     );
 
+    event MaxPriceFeedAgeUpdated(
+        uint256 oldAge,
+        uint256 newAge
+    );
+
+    event TokenPriceFeedSet(
+        address indexed token,
+        address indexed priceFeed
+    );
+
+    event TokenPriceFeedRemoved(
+        address indexed token
+    );
+
     error TransactionFailed();
     error ApprovalFailed();
     error InvalidLimitConfiguration();
@@ -222,6 +244,10 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     error StalePortfolioValue();
     error ExceedsApprovalLimit();
     error ExceedsPortfolioLimit();
+    error InvalidPriceFeed();
+    error StalePriceFeed();
+    error InvalidPrice();
+    error NoPriceFeedSet();
 
     /**
      * @notice Initialize the DeFi Interactor Module
@@ -717,6 +743,56 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         emit MaxSafeValueAgeUpdated(oldAge, newMaxAge);
     }
 
+    /**
+     * @notice Set the maximum age for Chainlink price feed data
+     * @dev Only callable by the owner (Safe)
+     * @param newMaxAge The new maximum age in seconds
+     */
+    function setMaxPriceFeedAge(uint256 newMaxAge) external onlyOwner {
+        uint256 oldAge = maxPriceFeedAge;
+        maxPriceFeedAge = newMaxAge;
+        emit MaxPriceFeedAgeUpdated(oldAge, newMaxAge);
+    }
+
+    /**
+     * @notice Set the Chainlink price feed for a token
+     * @dev Only callable by the owner (Safe)
+     * @param token The token address
+     * @param priceFeed The Chainlink price feed address
+     */
+    function setTokenPriceFeed(address token, address priceFeed) external onlyOwner {
+        if (token == address(0)) revert InvalidAddress();
+        if (priceFeed == address(0)) revert InvalidPriceFeed();
+        tokenPriceFeeds[token] = AggregatorV3Interface(priceFeed);
+        emit TokenPriceFeedSet(token, priceFeed);
+    }
+
+    /**
+     * @notice Set multiple token price feeds at once
+     * @dev Only callable by the owner (Safe)
+     * @param tokens Array of token addresses
+     * @param priceFeeds Array of Chainlink price feed addresses
+     */
+    function setTokenPriceFeeds(address[] calldata tokens, address[] calldata priceFeeds) external onlyOwner {
+        if (tokens.length != priceFeeds.length) revert InvalidLimitConfiguration();
+        for (uint256 i = 0; i < tokens.length; i++) {
+            if (tokens[i] == address(0)) revert InvalidAddress();
+            if (priceFeeds[i] == address(0)) revert InvalidPriceFeed();
+            tokenPriceFeeds[tokens[i]] = AggregatorV3Interface(priceFeeds[i]);
+            emit TokenPriceFeedSet(tokens[i], priceFeeds[i]);
+        }
+    }
+
+    /**
+     * @notice Remove the price feed for a token
+     * @dev Only callable by the owner (Safe)
+     * @param token The token address
+     */
+    function removeTokenPriceFeed(address token) external onlyOwner {
+        delete tokenPriceFeeds[token];
+        emit TokenPriceFeedRemoved(token);
+    }
+
     // ============ Portfolio Value Tracking ============
 
     /**
@@ -758,24 +834,49 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     }
 
     /**
-     * @notice Calculate USD value of a token amount using current Safe value
-     * @dev This is a simplified calculation assuming token is part of tracked portfolio
+     * @notice Calculate USD value of a token amount using Chainlink price feeds
+     * @dev Requires price feed to be set for the token
      * @param token The token address
-     * @param amount The token amount
-     * @return valueUSD The approximate USD value with 18 decimals
+     * @param amount The token amount (in token's native decimals)
+     * @return valueUSD The USD value with 18 decimals
      */
     function _estimateTokenValueUSD(address token, uint256 amount) internal view returns (uint256 valueUSD) {
-        // Get token balance in Safe
-        uint256 safeBalance = IERC20(token).balanceOf(avatar);
+        if (amount == 0) return 0;
 
-        if (safeBalance == 0) return 0;
+        // Get price feed for token
+        AggregatorV3Interface priceFeed = tokenPriceFeeds[token];
+        if (address(priceFeed) == address(0)) revert NoPriceFeedSet();
 
-        // Get current portfolio value
-        uint256 portfolioValue = _getPortfolioValue();
+        // Get latest price data
+        (
+            uint80 roundId,
+            int256 answer,
+            ,
+            uint256 updatedAt,
+            uint80 answeredInRound
+        ) = priceFeed.latestRoundData();
 
-        // Estimate: (amount / safeBalance) * portfolioValue
-        // This assumes the token represents its proportional share of portfolio value
-        valueUSD = Math.mulDiv(amount, portfolioValue, safeBalance, Math.Rounding.Ceil);
+        // Validate price data
+        if (answer <= 0) revert InvalidPrice();
+        if (updatedAt == 0) revert StalePriceFeed();
+        if (answeredInRound < roundId) revert StalePriceFeed();
+        if (block.timestamp - updatedAt > maxPriceFeedAge) revert StalePriceFeed();
+
+        // Get price feed decimals (usually 8 for USD feeds)
+        uint8 priceDecimals = priceFeed.decimals();
+        uint256 price = uint256(answer);
+
+        // Get token decimals
+        uint8 tokenDecimals = IERC20Metadata(token).decimals();
+
+        // Calculate USD value with 18 decimals
+        // Formula: (amount * price * 10^18) / (10^tokenDecimals * 10^priceDecimals)
+        valueUSD = Math.mulDiv(
+            amount * price,
+            10 ** 18,
+            10 ** uint256(tokenDecimals + priceDecimals),
+            Math.Rounding.Ceil  // Round up for conservative estimates
+        );
     }
 
     /**
