@@ -19,7 +19,7 @@ staging-settings:
   user-workflow:
     workflow-name: "safe-value-sepolia"
   workflow-artifacts:
-    workflow-path: "./main.ts"
+    workflow-path: "./safe-monitor.ts"
     config-path: "./config.sepolia.json"
     secrets-path: ""
     
@@ -29,6 +29,6 @@ production-settings:
   user-workflow:
     workflow-name: "safe-value-ethereun-mainnet"
   workflow-artifacts:
-    workflow-path: "./main.ts"
-    config-path: "./config.sepolia.json"
+    workflow-path: "./safe-monitor.ts"
+    config-path: "./config.ethereum-mainnet.json"
     secrets-path: ""
