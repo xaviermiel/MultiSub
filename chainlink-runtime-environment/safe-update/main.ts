@@ -2,6 +2,7 @@ import {
 	bytesToHex,
 	cre,
 	encodeCallMsg,
+	EVMLog,
 	getNetwork,
 	hexToBase64,
 	LAST_FINALIZED_BLOCK_NUMBER,
@@ -426,27 +427,26 @@ const onProtocolExecuted = (runtime: Runtime<Config>, payload: any): string => {
 }
 
 const initWorkflow = (config: Config) => {
-	const network = getNetwork({
-		chainFamily: 'evm',
-		chainSelectorName: config.chainSelectorName,
-		isTestnet: true,
-	})
+  const network = getNetwork({
+    chainFamily: "evm",
+    chainSelectorName: config.chainSelectorName,
+    isTestnet: true,
+  })
 
-	if (!network) {
-		throw new Error(`Network not found for chain selector name: ${config.chainSelectorName}`)
-	}
+  if (!network) {
+    throw new Error(`Network not found: ${config.chainSelectorName}`)
+  }
 
-	// TODO: EVM Log Trigger for TypeScript SDK (No EVMLogTriggerCapability) 
-	// the Go documentation: https://docs.chain.link/cre/guides/workflow/using-triggers/evm-log-trigger-go
-	//
-	// const logTrigger = new cre.capabilities.EVMLogTriggerCapability({
-	//   chainSelector: network.chainSelector.selector,
-	//   addresses: [config.moduleAddress],
-	//   topics: [keccak256(toHex('ProtocolExecuted(address,address,uint256)'))],
-	// })
-	// return [cre.handler(logTrigger.trigger({}), onProtocolExecuted)]
+  const evmClient = new cre.capabilities.EVMClient(network.chainSelector.selector)
 
-	throw new Error('EVMLogTriggerCapability not yet available in TypeScript CRE SDK. Please check Chainlink documentation for updates.')
+  return [
+    cre.handler(
+      evmClient.logTrigger({
+        addresses: [config.moduleAddress],
+      }),
+      onProtocolExecuted
+    ),
+  ]
 }
 
 export async function main() {
