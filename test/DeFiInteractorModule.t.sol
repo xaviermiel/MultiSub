@@ -122,6 +122,10 @@ contract DeFiInteractorModuleTest is Test {
 
         // Transfer tokens to Safe
         token.transfer(address(safe), 100000 * 10**18);
+
+        // Set initial Safe value (simulate Chainlink update)
+        // Portfolio value: $1,000,000 USD (with 18 decimals)
+        module.updateSafeValue(1_000_000 * 10**18);
     }
 
     // ============ Module Setup Tests ============
@@ -171,30 +175,28 @@ contract DeFiInteractorModuleTest is Test {
     // ============ Sub-Account Limits Tests ============
 
     function testSetSubAccountLimits() public {
-        module.setSubAccountLimits(subAccount1, 1500, 1000, 800, 2 days);
+        module.setSubAccountLimits(subAccount1, 1500, 1000, 2 days);
 
-        (uint256 maxDeposit, uint256 maxWithdraw, uint256 maxLoss, uint256 window) =
+        (uint256 maxLoss, uint256 maxTransfer, uint256 window) =
             module.getSubAccountLimits(subAccount1);
 
-        assertEq(maxDeposit, 1500);
-        assertEq(maxWithdraw, 1000);
-        assertEq(maxLoss, 800);
+        assertEq(maxLoss, 1500);
+        assertEq(maxTransfer, 1000);
         assertEq(window, 2 days);
     }
 
     function testDefaultLimits() public view {
-        (uint256 maxDeposit, uint256 maxWithdraw, uint256 maxLoss, uint256 window) =
+        (uint256 maxLoss, uint256 maxTransfer, uint256 window) =
             module.getSubAccountLimits(subAccount1);
 
-        assertEq(maxDeposit, module.DEFAULT_MAX_DEPOSIT_BPS());
-        assertEq(maxWithdraw, module.DEFAULT_MAX_WITHDRAW_BPS());
         assertEq(maxLoss, module.DEFAULT_MAX_LOSS_BPS());
+        assertEq(maxTransfer, module.DEFAULT_MAX_TRANSFER_BPS());
         assertEq(window, module.DEFAULT_LIMIT_WINDOW_DURATION());
     }
 
     function testSetSubAccountLimitsInvalid() public {
         vm.expectRevert(DeFiInteractorModule.InvalidLimitConfiguration.selector);
-        module.setSubAccountLimits(subAccount1, 15000, 1000, 800, 2 days); // >100%
+        module.setSubAccountLimits(subAccount1, 15000, 1000, 2 days); // >100%
     }
 
     // ============ Allowed Addresses Tests ============
@@ -411,5 +413,162 @@ contract DeFiInteractorModuleTest is Test {
         address[] memory tokens = new address[](0);
         uint256[] memory balances = module.getTokenBalances(tokens);
         assertEq(balances.length, 0);
+    }
+
+    // ============ Portfolio Value Tracking Tests ============
+
+    function testPortfolioValueTracking() public {
+        // Check initial portfolio value
+        (uint256 totalValue, uint256 lastUpdated, uint256 updateCount) = module.getSafeValue();
+        assertEq(totalValue, 1_000_000 * 10**18);
+        assertGt(lastUpdated, 0);
+        assertEq(updateCount, 1);
+    }
+
+    function testApprovalWithPortfolioLimit() public {
+        // Grant role
+        module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
+        module.setAllowedAddresses(subAccount1, _createAddressArray(address(protocol)), true);
+
+        // Set limits: 10% loss allowed, 5% transfer allowed
+        module.setSubAccountLimits(subAccount1, 1000, 500, 1 days);
+
+        // Approve 10000 tokens (should be within limit)
+        vm.prank(subAccount1);
+        module.approveProtocol(address(token), address(protocol), 10000 * 10**18);
+
+        // Check cumulative approved value was tracked
+        assertGt(module.valueApprovedInWindow(subAccount1), 0);
+    }
+
+    function testApprovalExceedsPortfolioLimit() public {
+        // Grant role
+        module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
+        module.setAllowedAddresses(subAccount1, _createAddressArray(address(protocol)), true);
+
+        // Set very low limits: 1% loss allowed, 0.5% transfer allowed
+        module.setSubAccountLimits(subAccount1, 100, 50, 1 days);
+
+        // Try to approve 50000 tokens (should exceed 1% of portfolio)
+        vm.prank(subAccount1);
+        vm.expectRevert(DeFiInteractorModule.ExceedsApprovalLimit.selector);
+        module.approveProtocol(address(token), address(protocol), 50000 * 10**18);
+    }
+
+    function testTransferWithPortfolioLimit() public {
+        // Grant role
+        module.grantRole(subAccount1, module.DEFI_TRANSFER_ROLE());
+
+        // Set limits: 10% loss allowed, 5% transfer allowed
+        module.setSubAccountLimits(subAccount1, 1000, 500, 1 days);
+
+        // Transfer 5000 tokens (should be within limit)
+        vm.prank(subAccount1);
+        module.transferToken(address(token), recipient, 5000 * 10**18);
+
+        // Check cumulative transferred value was tracked
+        assertGt(module.valueTransferredInWindow(subAccount1), 0);
+    }
+
+    function testTransferExceedsPortfolioLimit() public {
+        // Grant role
+        module.grantRole(subAccount1, module.DEFI_TRANSFER_ROLE());
+
+        // Set very low limits: 1% loss allowed, 1% transfer allowed
+        module.setSubAccountLimits(subAccount1, 100, 100, 1 days);
+
+        // Try to transfer 20000 tokens (should exceed 1% of portfolio)
+        vm.prank(subAccount1);
+        vm.expectRevert(DeFiInteractorModule.ExceedsPortfolioLimit.selector);
+        module.transferToken(address(token), recipient, 20000 * 10**18);
+    }
+
+    function testStalePortfolioValue() public {
+        // Grant role
+        module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
+        module.setAllowedAddresses(subAccount1, _createAddressArray(address(protocol)), true);
+
+        // Fast forward 16 minutes (beyond default 15 minute staleness)
+        vm.warp(block.timestamp + 16 minutes);
+
+        // Try to approve - should fail with stale value
+        vm.prank(subAccount1);
+        vm.expectRevert(DeFiInteractorModule.StalePortfolioValue.selector);
+        module.approveProtocol(address(token), address(protocol), 1000 * 10**18);
+    }
+
+    function testUpdateMaxSafeValueAge() public {
+        // Update to 10 minutes
+        module.setMaxSafeValueAge(10 minutes);
+        assertEq(module.maxSafeValueAge(), 10 minutes);
+
+        // Grant role
+        module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
+        module.setAllowedAddresses(subAccount1, _createAddressArray(address(protocol)), true);
+
+        // Fast forward 6 minutes (should be OK with 10 minute limit)
+        vm.warp(block.timestamp + 6 minutes);
+
+        // Should succeed now
+        vm.prank(subAccount1);
+        module.approveProtocol(address(token), address(protocol), 1000 * 10**18);
+    }
+
+    function testPortfolioWindowReset() public {
+        // Grant role
+        module.grantRole(subAccount1, module.DEFI_TRANSFER_ROLE());
+
+        // Make a transfer
+        vm.prank(subAccount1);
+        module.transferToken(address(token), recipient, 1000 * 10**18);
+
+        uint256 firstWindowValue = module.valueTransferredInWindow(subAccount1);
+        assertGt(firstWindowValue, 0);
+
+        // Fast forward past window (24 hours)
+        vm.warp(block.timestamp + 25 hours);
+
+        // Update Safe value (simulate Chainlink update)
+        module.updateSafeValue(2_000_000 * 10**18);
+
+        // Make another transfer - should reset window
+        vm.prank(subAccount1);
+        module.transferToken(address(token), recipient, 1000 * 10**18);
+
+        // Window should have reset
+        uint256 newPortfolioValue = module.executionWindowPortfolioValue(subAccount1);
+        assertEq(newPortfolioValue, 2_000_000 * 10**18);
+    }
+
+    function testCumulativeApprovals() public {
+        // Grant role
+        module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
+        module.setAllowedAddresses(subAccount1, _createAddressArray(address(protocol)), true);
+
+        // Set limits: 10% loss allowed, 5% transfer allowed
+        module.setSubAccountLimits(subAccount1, 1000, 500, 1 days);
+
+        // Make multiple small approvals
+        vm.startPrank(subAccount1);
+        module.approveProtocol(address(token), address(protocol), 3000 * 10**18);
+        module.approveProtocol(address(token), address(protocol), 3000 * 10**18);
+        module.approveProtocol(address(token), address(protocol), 3000 * 10**18);
+        vm.stopPrank();
+
+        // Cumulative should be tracked
+        uint256 cumulative = module.valueApprovedInWindow(subAccount1);
+        assertGt(cumulative, 0);
+
+        // Next approval that pushes over limit should fail
+        vm.prank(subAccount1);
+        vm.expectRevert(DeFiInteractorModule.ExceedsApprovalLimit.selector);
+        module.approveProtocol(address(token), address(protocol), 5000 * 10**18);
+    }
+
+    // Helper function
+    function _createAddressArray(address addr) internal pure returns (address[] memory) {
+        address[] memory arr = new address[](1);
+        arr[0] = addr;
+        return arr;
     }
 }

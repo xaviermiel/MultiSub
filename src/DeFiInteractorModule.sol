@@ -51,20 +51,16 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     /// @notice Default maximum percentage of portfolio value loss allowed per window (basis points)
     uint256 public constant DEFAULT_MAX_LOSS_BPS = 500; // 5%
 
-    /// @notice Default maximum percentage of assets a sub-account can deposit (basis points)
-    uint256 public constant DEFAULT_MAX_DEPOSIT_BPS = 1000; // 10%
-
-    /// @notice Default maximum percentage of assets a sub-account can withdraw (basis points)
-    uint256 public constant DEFAULT_MAX_WITHDRAW_BPS = 500; // 5%
+    /// @notice Default maximum percentage of assets a sub-account can transfer (basis points)
+    uint256 public constant DEFAULT_MAX_TRANSFER_BPS = 1000; // 1%
 
     /// @notice Default time window for cumulative limit tracking (24 hours)
     uint256 public constant DEFAULT_LIMIT_WINDOW_DURATION = 1 days;
 
     /// @notice Configuration for sub-account limits
     struct SubAccountLimits {
-        uint256 maxDepositBps;      // Maximum deposit percentage in basis points
-        uint256 maxWithdrawBps;     // Maximum withdrawal percentage in basis points
         uint256 maxLossBps;         // Maximum portfolio value loss in basis points
+        uint256 maxTransferBps;     // Maximum portfolio value transfer in basis points        
         uint256 windowDuration;     // Time window duration in seconds
         bool isConfigured;          // Whether limits have been explicitly set
     }
@@ -72,14 +68,20 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     /// @notice Per-sub-account limit configuration
     mapping(address => SubAccountLimits) public subAccountLimits;
 
-    // /// @notice Portfolio value at start of execution window: subAccount => value
-    // mapping(address => uint256) public executionWindowPortfolioValue;
+    /// @notice Portfolio value at start of execution window: subAccount => value
+    mapping(address => uint256) public executionWindowPortfolioValue;
 
-    // /// @notice Window start time for executions: subAccount => timestamp
-    // mapping(address => uint256) public executionWindowStart;
+    /// @notice Window start time for executions: subAccount => timestamp
+    mapping(address => uint256) public executionWindowStart;
 
-    // /// @notice Cumulative value lost in current window: subAccount => amount
-    // mapping(address => uint256) public valueLostInWindow;
+    /// @notice Cumulative USD value approved in current window: subAccount => amount (18 decimals)
+    mapping(address => uint256) public valueApprovedInWindow;
+
+    /// @notice Cumulative USD value transferred in current window: subAccount => amount (18 decimals)
+    mapping(address => uint256) public valueTransferredInWindow;
+
+    /// @notice Maximum age for SafeValue before it's considered stale (default: 15 minutes)
+    uint256 public maxSafeValueAge = 15 minutes;
 
     /// @notice Per-sub-account allowed addresses: subAccount => target address => allowed
     mapping(address => mapping(address => bool)) public allowedAddresses;
@@ -102,9 +104,8 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     event RoleRevoked(address indexed member, uint16 indexed roleId, uint256 timestamp);
     event SubAccountLimitsSet(
         address indexed subAccount,
-        uint256 maxDepositBps,
-        uint256 maxWithdrawBps,
         uint256 maxLossBps,
+        uint256 maxTransferBps,
         uint256 windowDuration,
         uint256 timestamp
     );
@@ -176,6 +177,36 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         address indexed newUpdater
     );
 
+    event PortfolioWindowReset(
+        address indexed subAccount,
+        uint256 newWindowStart,
+        uint256 portfolioValueUSD,
+        uint256 timestamp
+    );
+
+    event ApprovalValueChecked(
+        address indexed subAccount,
+        address indexed token,
+        uint256 approvalAmountUSD,
+        uint256 cumulativeApprovedUSD,
+        uint256 portfolioValueUSD,
+        uint256 limitBps
+    );
+
+    event TransferValueChecked(
+        address indexed subAccount,
+        address indexed token,
+        uint256 transferAmountUSD,
+        uint256 cumulativeTransferredUSD,
+        uint256 portfolioValueUSD,
+        uint256 limitBps
+    );
+
+    event MaxSafeValueAgeUpdated(
+        uint256 oldAge,
+        uint256 newAge
+    );
+
     error TransactionFailed();
     error ApprovalFailed();
     error InvalidLimitConfiguration();
@@ -188,6 +219,9 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     error ExceedsTransferLimit();
     error OnlyAuthorizedUpdater();
     error InvalidUpdaterAddress();
+    error StalePortfolioValue();
+    error ExceedsApprovalLimit();
+    error ExceedsPortfolioLimit();
 
     /**
      * @notice Initialize the DeFi Interactor Module
@@ -261,37 +295,33 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     /**
      * @notice Set custom limits for a sub-account (only owner can call)
      * @param subAccount The sub-account address to configure
-     * @param maxDepositBps Maximum deposit percentage in basis points (max 10000)
-     * @param maxWithdrawBps Maximum withdrawal percentage in basis points (max 10000)
      * @param maxLossBps Maximum portfolio loss percentage in basis points (max 10000)
+     * @param maxTransferBps Maximum transfer percentage in basis points (max 10000)
      * @param windowDuration Time window duration in seconds (min 1 hour)
      */
     function setSubAccountLimits(
         address subAccount,
-        uint256 maxDepositBps,
-        uint256 maxWithdrawBps,
         uint256 maxLossBps,
+        uint256 maxTransferBps,
         uint256 windowDuration
     ) external onlyOwner {
         if (subAccount == address(0)) revert InvalidAddress();
         // Validate limits: BPS cannot exceed 100%, window must be at least 1 hour
-        if (maxDepositBps > 10000 || maxWithdrawBps > 10000 || maxLossBps > 10000 || windowDuration < 1 hours) {
+        if (maxLossBps > 10000 || maxTransferBps > 10000 || windowDuration < 1 hours) {
             revert InvalidLimitConfiguration();
         }
 
         subAccountLimits[subAccount] = SubAccountLimits({
-            maxDepositBps: maxDepositBps,
-            maxWithdrawBps: maxWithdrawBps,
             maxLossBps: maxLossBps,
+            maxTransferBps: maxTransferBps,
             windowDuration: windowDuration,
             isConfigured: true
         });
 
         emit SubAccountLimitsSet(
             subAccount,
-            maxDepositBps,
-            maxWithdrawBps,
             maxLossBps,
+            maxTransferBps,
             windowDuration,
             block.timestamp
         );
@@ -300,23 +330,21 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     /**
      * @notice Get the effective limits for a sub-account
      * @param subAccount The sub-account address
-     * @return maxDepositBps The maximum deposit percentage in basis points
-     * @return maxWithdrawBps The maximum withdrawal percentage in basis points
      * @return maxLossBps The maximum portfolio loss percentage in basis points
+     * @return maxTransferBps The maximum transfer percentage in basis points
      * @return windowDuration The time window duration in seconds
      */
     function getSubAccountLimits(address subAccount) public view returns (
-        uint256 maxDepositBps,
-        uint256 maxWithdrawBps,
         uint256 maxLossBps,
+        uint256 maxTransferBps,
         uint256 windowDuration
     ) {
         SubAccountLimits memory limits = subAccountLimits[subAccount];
         if (limits.isConfigured) {
-            return (limits.maxDepositBps, limits.maxWithdrawBps, limits.maxLossBps, limits.windowDuration);
+            return (limits.maxLossBps, limits.maxTransferBps, limits.windowDuration);
         }
         // Return defaults if not configured
-        return (DEFAULT_MAX_DEPOSIT_BPS, DEFAULT_MAX_WITHDRAW_BPS, DEFAULT_MAX_LOSS_BPS, DEFAULT_LIMIT_WINDOW_DURATION);
+        return (DEFAULT_MAX_LOSS_BPS, DEFAULT_MAX_TRANSFER_BPS, DEFAULT_LIMIT_WINDOW_DURATION);
     }
 
     /**
@@ -359,6 +387,38 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         // This ensures only owner-approved protocols can receive token approvals
         if (!allowedAddresses[msg.sender][target]) revert AddressNotAllowed();
 
+        // Reset portfolio window if needed
+        _resetPortfolioWindowIfNeeded(msg.sender);
+
+        // Estimate USD value of the approval amount
+        uint256 approvalValueUSD = _estimateTokenValueUSD(token, amount);
+
+        // Get sub-account limits
+        (uint256 maxLossBps, , ) = getSubAccountLimits(msg.sender);
+
+        // Get current portfolio value and calculate limit
+        uint256 portfolioValue = executionWindowPortfolioValue[msg.sender];
+        uint256 maxApprovalValue = Math.mulDiv(portfolioValue, maxLossBps, 10000, Math.Rounding.Floor);
+
+        // Update cumulative approved value
+        uint256 newCumulativeApproved = valueApprovedInWindow[msg.sender] + approvalValueUSD;
+
+        // Check if approval exceeds limit
+        if (newCumulativeApproved > maxApprovalValue) revert ExceedsApprovalLimit();
+
+        // Update tracking
+        valueApprovedInWindow[msg.sender] = newCumulativeApproved;
+
+        // Emit tracking event
+        emit ApprovalValueChecked(
+            msg.sender,
+            token,
+            approvalValueUSD,
+            newCumulativeApproved,
+            portfolioValue,
+            maxLossBps
+        );
+
         // Execute approval through the module to Safe
         bytes memory approveData = abi.encodeWithSelector(
             IERC20.approve.selector,
@@ -396,10 +456,39 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         IERC20 tokenContract = IERC20(token);
         uint256 safeBalanceBefore = tokenContract.balanceOf(avatar);
 
-        // Get sub-account specific limits (use maxWithdrawBps for transfers)
-        (, uint256 maxTransferBps, , uint256 windowDuration) = getSubAccountLimits(msg.sender);
+        // Get sub-account specific limits (use maxTransferBps for transfers)
+        (, uint256 maxTransferBps, uint256 windowDuration) = getSubAccountLimits(msg.sender);
 
-        // Reset window if expired or first time
+        // Reset portfolio window if needed
+        _resetPortfolioWindowIfNeeded(msg.sender);
+
+        // Estimate USD value of the transfer amount
+        uint256 transferValueUSD = _estimateTokenValueUSD(token, amount);
+
+        // Get current portfolio value and calculate USD limit
+        uint256 portfolioValue = executionWindowPortfolioValue[msg.sender];
+        uint256 maxTransferValueUSD = Math.mulDiv(portfolioValue, maxTransferBps, 10000, Math.Rounding.Floor);
+
+        // Update cumulative transferred value (USD)
+        uint256 newCumulativeTransferredUSD = valueTransferredInWindow[msg.sender] + transferValueUSD;
+
+        // Check if transfer exceeds USD limit
+        if (newCumulativeTransferredUSD > maxTransferValueUSD) revert ExceedsPortfolioLimit();
+
+        // Update tracking
+        valueTransferredInWindow[msg.sender] = newCumulativeTransferredUSD;
+
+        // Emit tracking event
+        emit TransferValueChecked(
+            msg.sender,
+            token,
+            transferValueUSD,
+            newCumulativeTransferredUSD,
+            portfolioValue,
+            maxTransferBps
+        );
+
+        // Reset token-specific window if expired or first time (for per-token tracking)
         if (block.timestamp >= transferWindowStart[msg.sender][token] + windowDuration ||
             transferWindowStart[msg.sender][token] == 0) {
             transferredInWindow[msg.sender][token] = 0;
@@ -408,7 +497,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             emit TransferWindowReset(msg.sender, token, block.timestamp);
         }
 
-        // Calculate cumulative limit based on balance at window start
+        // Calculate cumulative limit based on balance at window start (per-token check)
         uint256 windowBalance = transferWindowBalance[msg.sender][token];
         uint256 cumulativeTransfer = transferredInWindow[msg.sender][token] + amount;
         uint256 maxTransfer = Math.mulDiv(windowBalance, maxTransferBps, 10000, Math.Rounding.Floor);
@@ -615,6 +704,78 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         address oldUpdater = authorizedUpdater;
         authorizedUpdater = newUpdater;
         emit AuthorizedUpdaterChanged(oldUpdater, newUpdater);
+    }
+
+    /**
+     * @notice Set the maximum age for Safe value before considered stale
+     * @dev Only callable by the owner (Safe)
+     * @param newMaxAge The new maximum age in seconds
+     */
+    function setMaxSafeValueAge(uint256 newMaxAge) external onlyOwner {
+        uint256 oldAge = maxSafeValueAge;
+        maxSafeValueAge = newMaxAge;
+        emit MaxSafeValueAgeUpdated(oldAge, newMaxAge);
+    }
+
+    // ============ Portfolio Value Tracking ============
+
+    /**
+     * @notice Get current portfolio value and ensure it's not stale
+     * @return portfolioValueUSD Current portfolio value in USD with 18 decimals
+     */
+    function _getPortfolioValue() internal view returns (uint256 portfolioValueUSD) {
+        if (safeValue.lastUpdated == 0) revert StalePortfolioValue();
+        if (block.timestamp - safeValue.lastUpdated > maxSafeValueAge) {
+            revert StalePortfolioValue();
+        }
+        return safeValue.totalValueUSD;
+    }
+
+    /**
+     * @notice Reset portfolio tracking window for a sub-account if expired
+     * @param subAccount The sub-account address
+     */
+    function _resetPortfolioWindowIfNeeded(address subAccount) internal {
+        (, , uint256 windowDuration) = getSubAccountLimits(subAccount);
+
+        if (block.timestamp >= executionWindowStart[subAccount] + windowDuration ||
+            executionWindowStart[subAccount] == 0) {
+
+            uint256 currentPortfolioValue = _getPortfolioValue();
+
+            executionWindowStart[subAccount] = block.timestamp;
+            executionWindowPortfolioValue[subAccount] = currentPortfolioValue;
+            valueApprovedInWindow[subAccount] = 0;
+            valueTransferredInWindow[subAccount] = 0;
+
+            emit PortfolioWindowReset(
+                subAccount,
+                block.timestamp,
+                currentPortfolioValue,
+                block.timestamp
+            );
+        }
+    }
+
+    /**
+     * @notice Calculate USD value of a token amount using current Safe value
+     * @dev This is a simplified calculation assuming token is part of tracked portfolio
+     * @param token The token address
+     * @param amount The token amount
+     * @return valueUSD The approximate USD value with 18 decimals
+     */
+    function _estimateTokenValueUSD(address token, uint256 amount) internal view returns (uint256 valueUSD) {
+        // Get token balance in Safe
+        uint256 safeBalance = IERC20(token).balanceOf(avatar);
+
+        if (safeBalance == 0) return 0;
+
+        // Get current portfolio value
+        uint256 portfolioValue = _getPortfolioValue();
+
+        // Estimate: (amount / safeBalance) * portfolioValue
+        // This assumes the token represents its proportional share of portfolio value
+        valueUSD = Math.mulDiv(amount, portfolioValue, safeBalance, Math.Rounding.Ceil);
     }
 
     /**
