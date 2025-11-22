@@ -17,18 +17,18 @@
 # ==========================================================================
 staging-settings:
   user-workflow:
-    workflow-name: "safe-value-staging"
+    workflow-name: "safe-value-sepolia"
   workflow-artifacts:
     workflow-path: "./main.ts"
-    config-path: "./config.staging.json"
+    config-path: "./config.sepolia.json"
     secrets-path: ""
     
 
 # ==========================================================================
 production-settings:
   user-workflow:
-    workflow-name: "safe-value-production"
+    workflow-name: "safe-value-ethereun-mainnet"
   workflow-artifacts:
     workflow-path: "./main.ts"
-    config-path: "./config.production.json"
+    config-path: "./config.sepolia.json"
     secrets-path: ""
