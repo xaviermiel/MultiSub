@@ -110,8 +110,8 @@ contract DeFiInteractorModuleTest is Test {
         owners[0] = owner;
         safe = new MockSafe(owners, 1);
 
-        // Deploy module (Safe is both avatar, but THIS is owner for testing)
-        module = new DeFiInteractorModule(address(safe), owner);
+        // Deploy module (Safe is avatar, THIS is owner for testing, THIS is also authorized updater for testing)
+        module = new DeFiInteractorModule(address(safe), owner, owner);
 
         // Deploy mock token and protocol
         token = new MockERC20();

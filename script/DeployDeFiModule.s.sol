@@ -13,15 +13,17 @@ contract DeployDeFiModule is Script {
     function run() external {
         // Get deployment parameters from environment
         address safe = vm.envAddress("SAFE_ADDRESS");
+        address authorizedUpdater = vm.envAddress("AUTHORIZED_UPDATER");
 
         console.log("Deploying DeFiInteractorModule with:");
         console.log("  Safe (Avatar/Owner):", safe);
+        console.log("  Authorized Updater:", authorizedUpdater);
 
         vm.startBroadcast();
 
         // Deploy DeFiInteractorModule
-        // Avatar = Safe, Owner = Safe (for configuration)
-        DeFiInteractorModule module = new DeFiInteractorModule(safe, safe);
+        // Avatar = Safe, Owner = Safe (for configuration), AuthorizedUpdater = Chainlink CRE Proxy
+        DeFiInteractorModule module = new DeFiInteractorModule(safe, safe, authorizedUpdater);
         console.log("DeFiInteractorModule deployed at:", address(module));
 
         vm.stopBroadcast();

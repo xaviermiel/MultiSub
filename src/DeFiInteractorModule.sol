@@ -25,6 +25,21 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     /// @notice Role ID for token transfers
     uint16 public constant DEFI_TRANSFER_ROLE = 2;
 
+    // ============ Safe Value Storage ============
+
+    /// @notice Struct to store Safe's USD value data
+    struct SafeValue {
+        uint256 totalValueUSD;  // Total USD value with 18 decimals (e.g., 1000.50 USD = 1000500000000000000000)
+        uint256 lastUpdated;    // Timestamp of last update
+        uint256 updateCount;    // Number of updates received
+    }
+
+    /// @notice Safe's current USD value (avatar address is the Safe)
+    SafeValue public safeValue;
+
+    /// @notice Authorized updater (Chainlink CRE proxy contract)
+    address public authorizedUpdater;
+
     // /// @notice Price oracle for portfolio valuation
     // IPriceOracle public priceOracle;
 
@@ -151,6 +166,17 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         uint256 timestamp
     );
 
+    event SafeValueUpdated(
+        uint256 totalValueUSD,
+        uint256 timestamp,
+        uint256 updateCount
+    );
+
+    event AuthorizedUpdaterChanged(
+        address indexed oldUpdater,
+        address indexed newUpdater
+    );
+
     error TransactionFailed();
     error ApprovalFailed();
     error InvalidLimitConfiguration();
@@ -161,17 +187,22 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     error ApprovalNotAllowed();
     error ApprovalExceedsLimit();
     error ExceedsTransferLimit();
+    error OnlyAuthorizedUpdater();
+    error InvalidUpdaterAddress();
 
     /**
      * @notice Initialize the DeFi Interactor Module
      * @param _avatar The Safe address (avatar)
      * @param _owner The owner address (typically the Safe itself)
+     * @param _authorizedUpdater The Chainlink CRE proxy address authorized to update Safe value
      */
-    constructor(address _avatar, address _owner)
+    constructor(address _avatar, address _owner, address _authorizedUpdater)
         Module(_avatar, _avatar, _owner)
     {
         // Avatar and target are the same (the Safe)
         // Owner is typically the Safe for configuration functions
+        if (_authorizedUpdater == address(0)) revert InvalidUpdaterAddress();
+        authorizedUpdater = _authorizedUpdater;
     }
 
     // ============ Emergency Controls ============
@@ -516,5 +547,74 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         // Note: Return data is not captured with execTransactionFromModule
         // This is a limitation of the Safe interface
         return "";
+    }
+
+    // ============ Safe Value Storage Functions ============
+
+    /**
+     * @notice Update the USD value for the Safe
+     * @dev Only callable by the authorized updater (Chainlink CRE proxy)
+     * @param totalValueUSD The total USD value with 18 decimals
+     */
+    function updateSafeValue(uint256 totalValueUSD) external {
+        if (msg.sender != authorizedUpdater) revert OnlyAuthorizedUpdater();
+
+        safeValue.totalValueUSD = totalValueUSD;
+        safeValue.lastUpdated = block.timestamp;
+        safeValue.updateCount += 1;
+
+        emit SafeValueUpdated(
+            totalValueUSD,
+            block.timestamp,
+            safeValue.updateCount
+        );
+    }
+
+    /**
+     * @notice Get the current USD value of the Safe
+     * @return totalValueUSD The total USD value with 18 decimals
+     * @return lastUpdated Timestamp of last update
+     * @return updateCount Number of updates
+     */
+    function getSafeValue()
+        external
+        view
+        returns (
+            uint256 totalValueUSD,
+            uint256 lastUpdated,
+            uint256 updateCount
+        )
+    {
+        return (
+            safeValue.totalValueUSD,
+            safeValue.lastUpdated,
+            safeValue.updateCount
+        );
+    }
+
+    /**
+     * @notice Check if the Safe value is stale (not updated in specified time)
+     * @param maxAge Maximum age in seconds before considered stale
+     * @return isStale True if the data is stale
+     */
+    function isValueStale(uint256 maxAge)
+        external
+        view
+        returns (bool isStale)
+    {
+        if (safeValue.lastUpdated == 0) return true; // Never updated
+        return (block.timestamp - safeValue.lastUpdated) > maxAge;
+    }
+
+    /**
+     * @notice Set the authorized updater address
+     * @dev Only callable by the owner (Safe)
+     * @param newUpdater The new authorized updater address
+     */
+    function setAuthorizedUpdater(address newUpdater) external onlyOwner {
+        if (newUpdater == address(0)) revert InvalidUpdaterAddress();
+        address oldUpdater = authorizedUpdater;
+        authorizedUpdater = newUpdater;
+        emit AuthorizedUpdaterChanged(oldUpdater, newUpdater);
     }
 }
