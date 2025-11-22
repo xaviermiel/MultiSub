@@ -208,33 +208,72 @@ const getSafeAddress = (runtime: Runtime<Config>): string => {
 		isTestnet: true,
 	})
 
+	runtime.log('0')
+
 	if (!network) {
 		throw new Error(`Network not found for chain selector name: ${runtime.config.chainSelectorName}`)
 	}
 
 	const evmClient = new cre.capabilities.EVMClient(network.chainSelector.selector)
+	runtime.log('1')
+	runtime.log(`Network: ${network.chainSelector.selector}`)
+	runtime.log(`Module address: ${runtime.config.moduleAddress}`)
+
+	// First, try to call getTokenBalances to verify contract exists and responds
+	runtime.log('Testing contract with getTokenBalances...')
+	try {
+		const testCallData = encodeFunctionData({
+			abi: DeFiInteractorModule,
+			functionName: 'getTokenBalances',
+			args: [[]],
+		})
+		const testCall = evmClient
+			.callContract(runtime, {
+				call: encodeCallMsg({
+					from: zeroAddress,
+					to: runtime.config.moduleAddress as Address,
+					data: testCallData,
+				}),
+				blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
+			})
+			.result()
+		runtime.log('Contract responds to getTokenBalances - contract exists!')
+	} catch (testError) {
+		runtime.log(`Contract test failed: ${testError}`)
+	}
 
 	const callData = encodeFunctionData({
 		abi: DeFiInteractorModule,
 		functionName: 'avatar',
 	})
+	runtime.log('2')
+	runtime.log(`Call data for avatar(): ${callData}`)
 
-	const contractCall = evmClient
-		.callContract(runtime, {
-			call: encodeCallMsg({
-				from: zeroAddress,
-				to: runtime.config.moduleAddress as Address,
-				data: callData,
-			}),
-			blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
-		})
-		.result()
+	let contractCall
+	try {
+		contractCall = evmClient
+			.callContract(runtime, {
+				call: encodeCallMsg({
+					from: zeroAddress,
+					to: runtime.config.moduleAddress as Address,
+					data: callData,
+				}),
+				blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
+			})
+			.result()
+		runtime.log('3 - avatar() call succeeded')
+	} catch (error) {
+		runtime.log(`Error calling avatar(): ${error}`)
+		runtime.log(`Error details: ${JSON.stringify(error, null, 2)}`)
+		throw error
+	}
 
 	const safeAddress = decodeFunctionResult({
 		abi: DeFiInteractorModule,
 		functionName: 'avatar',
 		data: bytesToHex(contractCall.data),
 	})
+	runtime.log('4')
 
 	return safeAddress
 }
