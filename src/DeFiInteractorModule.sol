@@ -4,7 +4,6 @@ pragma solidity ^0.8.20;
 import {Module} from "./base/Module.sol";
 import {IMorphoVault} from "./interfaces/IMorphoVault.sol";
 import {ISafe} from "./interfaces/ISafe.sol";
-import {IPriceOracle} from "./interfaces/IPriceOracle.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
