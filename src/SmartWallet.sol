@@ -2,13 +2,14 @@
 pragma solidity ^0.8.20;
 
 import {IZodiacRoles} from "./interfaces/IZodiacRoles.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /**
  * @title SmartWallet
  * @notice Core contract for managing delegated DeFi interactions through a Safe multisig
  * @dev This contract acts as the interactor between sub-accounts and the Safe+Zodiac system
  */
-contract SmartWallet {
+contract SmartWallet is ReentrancyGuard {
     /// @notice The Safe multisig that owns this wallet
     address public immutable safe;
 
@@ -24,18 +25,36 @@ contract SmartWallet {
     /// @notice Mapping of whitelisted protocol addresses
     mapping(address => bool) public whitelistedProtocols;
 
+    event SubAccountAdded(address indexed subAccount);
+    event SubAccountRemoved(address indexed subAccount);
+    event ProtocolWhitelisted(address indexed protocol);
+    event ProtocolRemoved(address indexed protocol);
+    event DelegatedTxExecuted(
+        address indexed subAccount,
+        address indexed target,
+        bytes data,
+        bool success,
+        bytes returnData
+    );
+
+    error Unauthorized();
+    error InvalidAddress();
+    error ProtocolNotWhitelisted();
+    error SubAccountNotEnabled();
+    error TransactionFailed(bytes returnData);
+
     modifier onlySafe() {
-        if (msg.sender != safe) revert;
+        if (msg.sender != safe) revert Unauthorized();
         _;
     }
 
     modifier onlySubAccount() {
-        if (!subAccounts[msg.sender]) revert;
+        if (!subAccounts[msg.sender]) revert SubAccountNotEnabled();
         _;
     }
 
     constructor(address _safe, address _rolesModifier) {
-        if (_safe == address(0) || _rolesModifier == address(0)) revert;
+        if (_safe == address(0) || _rolesModifier == address(0)) revert InvalidAddress();
         safe = _safe;
         rolesModifier = _rolesModifier;
     }
@@ -45,6 +64,7 @@ contract SmartWallet {
      * @param subAccount Address of the sub-account to add
      */
     function addSubAccount(address subAccount) external onlySafe {
+        if (subAccount == address(0)) revert InvalidAddress();
         subAccounts[subAccount] = true;
 
         // Automatically grant the sub-account role in Zodiac Roles
@@ -54,6 +74,8 @@ contract SmartWallet {
         bool[] memory memberOf = new bool[](1);
         memberOf[0] = true;
         roles.assignRoles(subAccount, roleIds, memberOf);
+
+        emit SubAccountAdded(subAccount);
     }
 
     /**
@@ -68,6 +90,8 @@ contract SmartWallet {
         uint16[] memory roleIds = new uint16[](1);
         roleIds[0] = SUB_ACCOUNT_ROLE;
         roles.revokeRoles(subAccount, roleIds);
+
+        emit SubAccountRemoved(subAccount);
     }
 
     /**
@@ -75,7 +99,9 @@ contract SmartWallet {
      * @param protocol Address of the protocol to whitelist
      */
     function whitelistProtocol(address protocol) external onlySafe {
+        if (protocol == address(0)) revert InvalidAddress();
         whitelistedProtocols[protocol] = true;
+        emit ProtocolWhitelisted(protocol);
     }
 
     /**
@@ -84,10 +110,12 @@ contract SmartWallet {
      */
     function removeProtocol(address protocol) external onlySafe {
         whitelistedProtocols[protocol] = false;
+        emit ProtocolRemoved(protocol);
     }
 
     /**
      * @notice Execute a delegated transaction through the Safe via Zodiac Roles
+     * @dev This function is called by sub-accounts to interact with whitelisted protocols
      * @param target The protocol contract to interact with
      * @param data The calldata for the interaction
      * @return success Whether the transaction succeeded
@@ -96,7 +124,9 @@ contract SmartWallet {
     function executeDelegatedTx(
         address target,
         bytes calldata data
-    ) external onlySubAccount returns (bool success, bytes memory returnData) {
+    ) external onlySubAccount nonReentrant returns (bool success, bytes memory returnData) {
+        if (!whitelistedProtocols[target]) revert ProtocolNotWhitelisted();
+
         // Execute transaction through Zodiac Roles module
         // The Zodiac Roles module will verify the sub-account has the correct role
         // and then execute the transaction through the Safe
@@ -104,20 +134,29 @@ contract SmartWallet {
 
         try roles.execTransactionWithRole(
             target,
-            0,
+            0, // no ETH value
             data,
-            0,
+            0, // Call operation (not delegatecall)
             SUB_ACCOUNT_ROLE,
-            false
+            false // don't revert on failure, return false instead
         ) returns (bool _success) {
             success = _success;
             returnData = "";
 
+            if (!success) {
+                revert TransactionFailed(returnData);
+            }
+
+            emit DelegatedTxExecuted(msg.sender, target, data, success, returnData);
             return (success, returnData);
         } catch Error(string memory reason) {
             returnData = bytes(reason);
+            emit DelegatedTxExecuted(msg.sender, target, data, false, returnData);
+            revert TransactionFailed(returnData);
         } catch (bytes memory lowLevelData) {
             returnData = lowLevelData;
+            emit DelegatedTxExecuted(msg.sender, target, data, false, returnData);
+            revert TransactionFailed(returnData);
         }
     }
 
