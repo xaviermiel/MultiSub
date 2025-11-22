@@ -25,20 +25,14 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     /// @notice Role ID for token transfers
     uint16 public constant DEFI_TRANSFER_ROLE = 2;
 
-    /// @notice Price oracle for portfolio valuation
-    IPriceOracle public priceOracle;
+    // /// @notice Price oracle for portfolio valuation
+    // IPriceOracle public priceOracle;
 
-    /// @notice List of tracked tokens for portfolio valuation
-    address[] public trackedTokens;
+    // /// @notice List of tracked tokens for portfolio valuation
+    // address[] public trackedTokens;
 
-    /// @notice Mapping to check if token is tracked
-    mapping(address => bool) public isTrackedToken;
-
-    /// @notice List of tracked protocols for portfolio valuation
-    address[] public trackedProtocols;
-
-    /// @notice Mapping to check if protocol is tracked
-    mapping(address => bool) public isTrackedProtocol;
+    // /// @notice Mapping to check if protocol is tracked
+    // mapping(address => bool) public isTrackedProtocol;
 
     /// @notice Default maximum percentage of portfolio value loss allowed per window (basis points)
     uint256 public constant DEFAULT_MAX_LOSS_BPS = 500; // 5%
@@ -64,14 +58,14 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     /// @notice Per-sub-account limit configuration
     mapping(address => SubAccountLimits) public subAccountLimits;
 
-    /// @notice Portfolio value at start of execution window: subAccount => value
-    mapping(address => uint256) public executionWindowPortfolioValue;
+    // /// @notice Portfolio value at start of execution window: subAccount => value
+    // mapping(address => uint256) public executionWindowPortfolioValue;
 
-    /// @notice Window start time for executions: subAccount => timestamp
-    mapping(address => uint256) public executionWindowStart;
+    // /// @notice Window start time for executions: subAccount => timestamp
+    // mapping(address => uint256) public executionWindowStart;
 
-    /// @notice Cumulative value lost in current window: subAccount => amount
-    mapping(address => uint256) public valueLostInWindow;
+    // /// @notice Cumulative value lost in current window: subAccount => amount
+    // mapping(address => uint256) public valueLostInWindow;
 
     /// @notice Per-sub-account allowed addresses: subAccount => target address => allowed
     mapping(address => mapping(address => bool)) public allowedAddresses;
@@ -459,8 +453,8 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         // This ensures only owner-approved protocols can be executed
         if (!allowedAddresses[msg.sender][target]) revert AddressNotAllowed();
 
-        // Get sub-account limits
-        (, , uint256 maxLossBps, uint256 windowDuration) = getSubAccountLimits(msg.sender);
+        // // Get sub-account limits
+        // (, , uint256 maxLossBps, uint256 windowDuration) = getSubAccountLimits(msg.sender);
 
         // Block raw approve/increaseAllowance calls in calldata - use approveProtocol() instead
         if (data.length >= 4) {
@@ -470,52 +464,52 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             }
         }
 
-        // Get portfolio value before execution
-        uint256 portfolioValueBefore = getPortfolioValue();
+        // // Get portfolio value before execution
+        // uint256 portfolioValueBefore = getPortfolioValue();
 
-        // Reset window if expired or first time
-        if (block.timestamp >= executionWindowStart[msg.sender] + windowDuration ||
-            executionWindowStart[msg.sender] == 0) {
-            valueLostInWindow[msg.sender] = 0;
-            executionWindowStart[msg.sender] = block.timestamp;
-            executionWindowPortfolioValue[msg.sender] = portfolioValueBefore;
-            emit ExecutionWindowReset(msg.sender, block.timestamp, portfolioValueBefore);
-        }
+        // // Reset window if expired or first time
+        // if (block.timestamp >= executionWindowStart[msg.sender] + windowDuration ||
+        //     executionWindowStart[msg.sender] == 0) {
+        //     valueLostInWindow[msg.sender] = 0;
+        //     executionWindowStart[msg.sender] = block.timestamp;
+        //     executionWindowPortfolioValue[msg.sender] = portfolioValueBefore;
+        //     emit ExecutionWindowReset(msg.sender, block.timestamp, portfolioValueBefore);
+        // }
 
         // Execute the call through the module
         bool success = exec(target, 0, data, ISafe.Operation.Call);
 
         if (!success) revert TransactionFailed();
 
-        // Get portfolio value after execution
-        uint256 portfolioValueAfter = getPortfolioValue();
+        // // Get portfolio value after execution
+        // uint256 portfolioValueAfter = getPortfolioValue();
 
-        // Calculate value lost (if any)
-        uint256 valueLost = 0;
-        if (portfolioValueAfter < portfolioValueBefore) {
-            valueLost = portfolioValueBefore - portfolioValueAfter;
-        }
+        // // Calculate value lost (if any)
+        // uint256 valueLost = 0;
+        // if (portfolioValueAfter < portfolioValueBefore) {
+        //     valueLost = portfolioValueBefore - portfolioValueAfter;
+        // }
 
-        // Update cumulative loss tracking
-        uint256 cumulativeLoss = valueLostInWindow[msg.sender] + valueLost;
+        // // Update cumulative loss tracking
+        // uint256 cumulativeLoss = valueLostInWindow[msg.sender] + valueLost;
 
-        // Check against max loss limit
-        uint256 windowPortfolioValue = executionWindowPortfolioValue[msg.sender];
-        uint256 maxLoss = Math.mulDiv(windowPortfolioValue, maxLossBps, 10000, Math.Rounding.Floor);
+        // // Check against max loss limit
+        // uint256 windowPortfolioValue = executionWindowPortfolioValue[msg.sender];
+        // uint256 maxLoss = Math.mulDiv(windowPortfolioValue, maxLossBps, 10000, Math.Rounding.Floor);
 
-        if (cumulativeLoss > maxLoss) revert ExceedsMaxLoss();
+        // if (cumulativeLoss > maxLoss) revert ExceedsMaxLoss();
 
-        // Update cumulative tracking
-        valueLostInWindow[msg.sender] = cumulativeLoss;
+        // // Update cumulative tracking
+        // valueLostInWindow[msg.sender] = cumulativeLoss;
 
         // Emit event
         emit ProtocolExecuted(
             msg.sender,
             target,
-            portfolioValueBefore,
-            portfolioValueAfter,
-            valueLost,
-            cumulativeLoss,
+            0,
+            0,
+            0,
+            0,
             block.timestamp
         );
 
