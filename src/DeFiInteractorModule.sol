@@ -219,6 +219,13 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         address indexed token
     );
 
+    event SubaccountAllowancesUpdated(
+        address indexed subAccount,
+        uint256 balanceChange,
+        uint256 newApprovedAllowance,
+        uint256 timestamp
+    );
+
     error TransactionFailed();
     error ApprovalFailed();
     error InvalidLimitConfiguration();
@@ -892,5 +899,62 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             balances[i] = IERC20(tokens[i]).balanceOf(avatar);
         }
         return balances;
+    }
+
+    /**
+     * @notice Update subaccount allowances after a Safe Inflow
+     * @dev Only callable by the authorized updater (oracle)
+     * @param subAccount The subaccount address to update
+     * @param balanceChange The inflow in dollars
+     */
+    function updateSubaccountAllowances(
+        address subAccount,
+        uint256 balanceChange
+    ) external {
+        if (msg.sender != authorizedUpdater) revert OnlyAuthorizedUpdater();
+        if (subAccount == address(0)) revert InvalidAddress();
+
+        // Only update if the subaccount has an active execution window
+        if (executionWindowStart[subAccount] == 0) return;
+
+        // Get the subaccount's limits
+        (uint256 maxLossBps, , ) = getSubAccountLimits(subAccount);
+
+        // Get current window portfolio value
+        uint256 windowPortfolioValue = executionWindowPortfolioValue[subAccount];
+
+        // Calculate total allowances based on window portfolio value
+        uint256 totalApprovalAllowance = Math.mulDiv(windowPortfolioValue, maxLossBps, 10000, Math.Rounding.Floor);
+
+        // Calculate current remaining allowances
+        uint256 remainingApprovalAllowance = totalApprovalAllowance > valueApprovedInWindow[subAccount]
+            ? totalApprovalAllowance - valueApprovedInWindow[subAccount]
+            : 0;
+
+        // Calculate new remaining allowances after balance change
+        // If balance increased (positive change), add to remaining allowance
+        // If balance decreased (negative change), subtract from remaining allowance
+        uint256 newRemainingApprovalAllowance;
+
+        if (balanceChange == 0) return;
+
+        // Balance increased - add the change to remaining allowances
+        newRemainingApprovalAllowance = remainingApprovalAllowance + uint256(balanceChange);
+
+        // Cap the new remaining allowance at the total allowance
+        newRemainingApprovalAllowance = Math.min(newRemainingApprovalAllowance, totalApprovalAllowance);
+
+        // Calculate the new used amounts by subtracting new remaining from total
+        uint256 newApprovedInWindow = totalApprovalAllowance - newRemainingApprovalAllowance;
+
+        // Update the state
+        valueApprovedInWindow[subAccount] = newApprovedInWindow;
+
+        emit SubaccountAllowancesUpdated(
+            subAccount,
+            balanceChange,
+            newApprovedInWindow,
+            block.timestamp
+        );
     }
 }
