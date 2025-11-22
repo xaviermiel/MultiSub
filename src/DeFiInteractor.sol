@@ -80,12 +80,14 @@ contract DeFiInteractor is ReentrancyGuard, Pausable {
      * @param target The target address
      * @param assets Amount of assets to deposit
      * @param receiver Address that will receive the shares
+     * @param minShares Minimum shares to receive
      * @return actualShares Amount of shares actually received
      */
     function depositTo(
         address target,
         uint256 assets,
         address receiver,
+        uint256 minShares
     ) external nonReentrant whenNotPaused returns (uint256 actualShares) {
         // Check role permission
         if (!rolesModifier.hasRole(msg.sender, DEFI_DEPOSIT_ROLE)) revert Unauthorized();
@@ -94,6 +96,68 @@ contract DeFiInteractor is ReentrancyGuard, Pausable {
         if (!allowedAddresses[msg.sender][target]) revert AddressNotAllowed();
 
         IMorphoVault morphoVault = IMorphoVault(target);
+        address asset = morphoVault.asset();
+        IERC20 token = IERC20(asset);
+
+        uint256 safeBalanceBefore = token.balanceOf(address(safe));
+
+        // Get sub-account specific limits
+        (uint256 maxDepositBps, , , uint256 windowDuration) = getSubAccountLimits(msg.sender);
+
+        // Reset window if expired or first time
+        if (block.timestamp >= depositWindowStart[msg.sender][target] + windowDuration ||
+            depositWindowStart[msg.sender][target] == 0) {
+            depositedInWindow[msg.sender][target] = 0;
+            depositWindowStart[msg.sender][target] = block.timestamp;
+            depositWindowBalance[msg.sender][target] = safeBalanceBefore;
+            emit DepositWindowReset(msg.sender, target, block.timestamp);
+        }
+
+        // Calculate cumulative limit based on balance at window start
+        uint256 windowBalance = depositWindowBalance[msg.sender][target];
+        uint256 cumulativeDeposit = depositedInWindow[msg.sender][target] + assets;
+        uint256 maxDeposit = Math.mulDiv(windowBalance, maxDepositBps, 10000, Math.Rounding.Floor);
+
+        if (cumulativeDeposit > maxDeposit) revert ExceedsDepositLimit();
+
+        // Calculate percentage for monitoring
+        uint256 percentageOfBalance = Math.mulDiv(assets, 10000, safeBalanceBefore, Math.Rounding.Floor);
+
+        // Alert on unusual activity (>8% in single transaction)
+        if (percentageOfBalance > 800) {
+            emit UnusualActivity(
+                msg.sender,
+                "Large deposit percentage",
+                percentageOfBalance,
+                800,
+                block.timestamp
+            );
+        }
+
+        uint256 sharesBefore = morphoVault.balanceOf(receiver);
+
+        bytes memory approveData = abi.encodeWithSelector(
+            IERC20.approve.selector,
+            target,
+            assets
+        );
+
+        uint256 allowanceBefore = token.allowance(address(safe), target);
+
+        // Execute approval through Zodiac Roles -> Safe
+        bool approveSuccess = rolesModifier.execTransactionWithRole(
+            asset,
+            0,
+            approveData,
+            0,
+            DEFI_DEPOSIT_ROLE,
+            true
+        );
+
+        if (!approveSuccess) revert TransactionFailed();
+
+        uint256 allowanceAfter = token.allowance(address(safe), target);
+        if (allowanceAfter < allowanceBefore + assets) revert ApprovalFailed();
 
         // Execute deposit
         bytes memory depositData = abi.encodeWithSelector(
@@ -114,7 +178,32 @@ contract DeFiInteractor is ReentrancyGuard, Pausable {
 
         if (!depositSuccess) revert TransactionFailed();
 
-        return 0;
+        // Verify actual shares received
+        uint256 sharesAfter = morphoVault.balanceOf(receiver);
+        actualShares = sharesAfter - sharesBefore;
+
+        if (actualShares < minShares) revert InsufficientSharesReceived();
+
+        // Update cumulative tracking
+        depositedInWindow[msg.sender][target] = cumulativeDeposit;
+
+        // Get balance after for monitoring
+        uint256 safeBalanceAfter = token.balanceOf(address(safe));
+
+        // Comprehensive monitoring event
+        emit DepositExecuted(
+            msg.sender,
+            target,
+            assets,
+            actualShares,
+            safeBalanceBefore,
+            safeBalanceAfter,
+            cumulativeDeposit,
+            percentageOfBalance,
+            block.timestamp
+        );
+
+        return actualShares;
     }
 
     /**
@@ -123,6 +212,7 @@ contract DeFiInteractor is ReentrancyGuard, Pausable {
      * @param assets Amount of assets to withdraw
      * @param receiver Address that will receive the assets
      * @param owner Address of the share owner
+     * @param maxShares Maximum shares to burn
      * @return actualShares Amount of shares actually burned
      */
     function withdrawFrom(
@@ -130,6 +220,7 @@ contract DeFiInteractor is ReentrancyGuard, Pausable {
         uint256 assets,
         address receiver,
         address owner,
+        uint256 maxShares
     ) external nonReentrant whenNotPaused returns (uint256 actualShares) {
         // Check role permission
         if (!rolesModifier.hasRole(msg.sender, DEFI_WITHDRAW_ROLE)) revert Unauthorized();
@@ -138,6 +229,46 @@ contract DeFiInteractor is ReentrancyGuard, Pausable {
         if (!allowedAddresses[msg.sender][target]) revert AddressNotAllowed();
 
         IMorphoVault morphoVault = IMorphoVault(target);
+        uint256 safeSharesBefore = morphoVault.balanceOf(address(safe));
+        uint256 safeAssetValue = morphoVault.convertToAssets(safeSharesBefore);
+
+        // Get sub-account specific limits
+        (, uint256 maxWithdrawBps, , uint256 windowDuration) = getSubAccountLimits(msg.sender);
+
+        // Reset window if expired or first time
+        if (block.timestamp >= withdrawWindowStart[msg.sender][target] + windowDuration ||
+            withdrawWindowStart[msg.sender][target] == 0) {
+            withdrawnInWindow[msg.sender][target] = 0;
+            withdrawWindowStart[msg.sender][target] = block.timestamp;
+            withdrawWindowShares[msg.sender][target] = safeAssetValue;
+            emit WithdrawWindowReset(msg.sender, target, block.timestamp);
+        }
+
+        // Calculate cumulative limit based on shares at window start
+        uint256 windowAssetValue = withdrawWindowShares[msg.sender][target];
+        uint256 cumulativeWithdraw = withdrawnInWindow[msg.sender][target] + assets;
+        uint256 maxWithdraw = Math.mulDiv(windowAssetValue, maxWithdrawBps, 10000, Math.Rounding.Floor);
+
+        if (cumulativeWithdraw > maxWithdraw) revert ExceedsWithdrawLimit();
+
+        // Calculate percentage for monitoring
+        uint256 percentageOfPosition = Math.mulDiv(assets, 10000, safeAssetValue, Math.Rounding.Floor);
+
+        // Alert on unusual activity (>4% in single transaction)
+        if (percentageOfPosition > 400) {
+            emit UnusualActivity(
+                msg.sender,
+                "Large withdrawal percentage",
+                percentageOfPosition,
+                400,
+                block.timestamp
+            );
+        }
+
+        address asset = morphoVault.asset();
+        IERC20 token = IERC20(asset);
+        uint256 assetsBefore = token.balanceOf(receiver);
+        uint256 sharesBefore = morphoVault.balanceOf(owner);
 
         // Execute withdrawal
         bytes memory data = abi.encodeWithSelector(
