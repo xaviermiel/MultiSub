@@ -42,12 +42,6 @@
       "type": "erc20"
     },
     {
-      "address": "0x88541670E55cC00bEEFD87eB59EDd1b7C511AC9a",
-      "priceFeedAddress": "0xc59E3633BAAC79493d908e63626716e204A45EdF",
-      "symbol": "UNI",
-      "type": "erc20"
-    },
-    {
       "address": "0x7169D38820dfd117C3FA1f22a697dBA58d90BA06",
       "priceFeedAddress": "0x14866185B1962B63C3Ea9E03Bc1da838bab34C19",
       "symbol": "USDC.e",

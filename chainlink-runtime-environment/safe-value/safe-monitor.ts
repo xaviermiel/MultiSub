@@ -524,12 +524,10 @@ const calculateUniswapV2LPValue = (
 		data: bytesToHex(reservesCall.data),
 	})
 
-	// Calculate ownership percentage
-	const ownershipPercentage = (lpBalance * BigInt(10 ** 18)) / totalSupply
-
-	// Calculate owned amounts of each token
-	const ownedToken0 = (BigInt(reserve0) * ownershipPercentage) / BigInt(10 ** 18)
-	const ownedToken1 = (BigInt(reserve1) * ownershipPercentage) / BigInt(10 ** 18)
+	// Calculate owned amounts of each token directly to avoid precision loss
+	// ownedToken = (reserve * lpBalance) / totalSupply
+	const ownedToken0 = (BigInt(reserve0) * lpBalance) / totalSupply
+	const ownedToken1 = (BigInt(reserve1) * lpBalance) / totalSupply
 
 	runtime.log(`  Uniswap V2 LP: owns ${ownedToken0.toString()} token0, ${ownedToken1.toString()} token1`)
 
@@ -559,7 +557,7 @@ const calculateUniswapV2LPValue = (
 /**
  * Batch fetch all token balances from the Safe using getTokenBalances
  */
-const getBatchTokenBalances = (runtime: Runtime<Config>, safeAddress: string): Map<string, bigint> => {
+const getBatchTokenBalances = (runtime: Runtime<Config>): Map<string, bigint> => {
 	const config = runtime.config
 	const network = getNetwork({
 		chainFamily: 'evm',
@@ -623,7 +621,7 @@ const calculateSafeValue = (runtime: Runtime<Config>): SafeValueData => {
 
 	// Batch fetch all token balances in a single call
 	runtime.log('Fetching all token balances in batch...')
-	const balanceMap = getBatchTokenBalances(runtime, safeAddress)
+	const balanceMap = getBatchTokenBalances(runtime)
 
 	for (const tokenConfig of config.tokens) {
 		const tokenType = tokenConfig.type || 'erc20'
