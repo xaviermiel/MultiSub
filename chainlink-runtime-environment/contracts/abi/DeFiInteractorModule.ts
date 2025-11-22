@@ -53,6 +53,26 @@ export const DeFiInteractorModule = [
 		stateMutability: 'view',
 	},
 	{
+		type: 'function',
+		name: 'updateSubaccountAllowances',
+		inputs: [
+			{ name: 'subAccount', type: 'address', internalType: 'address' },
+			{ name: 'balanceChange', type: 'uint256', internalType: 'uint256' },
+		],
+		outputs: [],
+		stateMutability: 'nonpayable',
+	},
+	{
+		type: 'event',
+		name: 'ProtocolExecuted',
+		inputs: [
+			{ name: 'subAccount', type: 'address', indexed: true, internalType: 'address' },
+			{ name: 'target', type: 'address', indexed: true, internalType: 'address' },
+			{ name: 'timestamp', type: 'uint256', indexed: false, internalType: 'uint256' },
+		],
+		anonymous: false,
+	},
+	{
 		type: 'event',
 		name: 'SafeValueUpdated',
 		inputs: [
