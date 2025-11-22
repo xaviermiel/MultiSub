@@ -12,7 +12,7 @@ import {
 } from '@chainlink/cre-sdk'
 import { type Address, decodeFunctionResult, encodeFunctionData, zeroAddress } from 'viem'
 import { z } from 'zod'
-import { SafeValueStorage } from '../contracts/abi'
+import { DeFiInteractorModule } from '../contracts/abi'
 
 // ERC20 with decimals
 const ERC20WithDecimals = [
@@ -58,10 +58,9 @@ const ChainlinkPriceFeedABI = [
 
 const configSchema = z.object({
 	schedule: z.string(), // Cron schedule (e.g., "*/30 * * * * *" for every 30 seconds)
-	safeAddress: z.string(), // The Safe multisig address to monitor
+	moduleAddress: z.string(), // DeFiInteractorModule contract address (which monitors its avatar Safe)
 	chainSelectorName: z.string(), // e.g., "ethereum-testnet-sepolia"
 	gasLimit: z.string(),
-	storageContractAddress: z.string(), // SafeValueStorage contract address
 	proxyAddress: z.string(), // Chainlink CRE proxy for signed reports
 	tokens: z.array(
 		z.object({
@@ -91,6 +90,47 @@ interface SafeValueData {
 // Utility function to safely stringify objects with bigints
 const safeJsonStringify = (obj: any): string =>
 	JSON.stringify(obj, (_, value) => (typeof value === 'bigint' ? value.toString() : value), 2)
+
+/**
+ * Get the Safe address from the DeFiInteractorModule's avatar() function
+ */
+const getSafeAddress = (runtime: Runtime<Config>): string => {
+	const network = getNetwork({
+		chainFamily: 'evm',
+		chainSelectorName: runtime.config.chainSelectorName,
+		isTestnet: true,
+	})
+
+	if (!network) {
+		throw new Error(`Network not found for chain selector name: ${runtime.config.chainSelectorName}`)
+	}
+
+	const evmClient = new cre.capabilities.EVMClient(network.chainSelector.selector)
+
+	const callData = encodeFunctionData({
+		abi: DeFiInteractorModule,
+		functionName: 'avatar',
+	})
+
+	const contractCall = evmClient
+		.callContract(runtime, {
+			call: encodeCallMsg({
+				from: zeroAddress,
+				to: runtime.config.moduleAddress as Address,
+				data: callData,
+			}),
+			blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
+		})
+		.result()
+
+	const safeAddress = decodeFunctionResult({
+		abi: DeFiInteractorModule,
+		functionName: 'avatar',
+		data: bytesToHex(contractCall.data),
+	})
+
+	return safeAddress
+}
 
 /**
  * Get the balance of a specific token for an address
@@ -261,6 +301,10 @@ const calculateSafeValue = (runtime: Runtime<Config>): SafeValueData => {
 	const tokens: TokenBalance[] = []
 	let totalValueUSD = 0n
 
+	// Get the Safe address from the module
+	const safeAddress = getSafeAddress(runtime)
+	runtime.log(`Monitoring Safe: ${safeAddress}`)
+
 	for (const tokenConfig of config.tokens) {
 		runtime.log(`Processing token: ${tokenConfig.symbol} (${tokenConfig.address})`)
 
@@ -268,7 +312,7 @@ const calculateSafeValue = (runtime: Runtime<Config>): SafeValueData => {
 		const balance = getTokenBalance(
 			runtime,
 			tokenConfig.address,
-			config.safeAddress,
+			safeAddress,
 			config.chainSelectorName,
 		)
 
@@ -330,11 +374,11 @@ const writeSafeValueToChain = (runtime: Runtime<Config>, safeValueData: SafeValu
 		`Writing Safe value to chain: ${safeValueData.totalValueUSD.toString()} (${(Number(safeValueData.totalValueUSD) / 1e18).toFixed(2)} USD)`,
 	)
 
-	// Encode the contract call data for updateSafeValue
+	// Encode the contract call data for updateSafeValue (no safeAddress needed, module knows its own Safe)
 	const callData = encodeFunctionData({
-		abi: SafeValueStorage,
+		abi: DeFiInteractorModule,
 		functionName: 'updateSafeValue',
-		args: [config.safeAddress as Address, safeValueData.totalValueUSD],
+		args: [safeValueData.totalValueUSD],
 	})
 
 	// Generate report using consensus capability
@@ -380,7 +424,7 @@ const onCronTrigger = (runtime: Runtime<Config>, payload: CronPayload): string =
 	}
 
 	runtime.log('=== Safe Value Monitor: Starting check ===')
-	runtime.log(`Safe Address: ${runtime.config.safeAddress}`)
+	runtime.log(`Module Address: ${runtime.config.moduleAddress}`)
 	runtime.log(`Timestamp: ${new Date().toISOString()}`)
 
 	// Calculate Safe value

@@ -1,1 +1,1 @@
-export * from './SafeValueStorage'
+export * from './DeFiInteractorModule'

@@ -1,9 +1,8 @@
 {
   "schedule": "*/30 * * * * *",
-  "safeAddress": "0x0000000000000000000000000000000000000000",
+  "moduleAddress": "0x0000000000000000000000000000000000000000",
   "chainSelectorName": "ethereum-testnet-sepolia",
   "gasLimit": "500000",
-  "storageContractAddress": "0x0000000000000000000000000000000000000000",
   "proxyAddress": "0x0000000000000000000000000000000000000000",
   "tokens": [
     {
