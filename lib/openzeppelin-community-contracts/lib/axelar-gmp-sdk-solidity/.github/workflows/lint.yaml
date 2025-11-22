@@ -1,0 +1,41 @@
+name: Linting
+
+on:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: blacksmith-2vcpu-ubuntu-2204
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup tools
+        uses: ./.github/actions/setup-tools
+        with:
+          install-nodejs: 'true'
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Prettier
+        run: npm run prettier
+
+      - name: Check for changes
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo Following files are changed...
+            git status
+
+            echo Changes:
+            git diff
+
+            exit 1;
+          else
+            exit 0;
+          fi

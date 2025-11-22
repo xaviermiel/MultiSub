@@ -1,0 +1,23 @@
+# List of approvers/reviewers for OpenZeppelin Community Contracts
+#
+# Get in touch with us via the OpenZeppelin Forum
+#  https://forum.openzeppelin.com/
+# 
+# Learn about CODEOWNERS file format: 
+#  https://help.github.com/en/articles/about-code-owners
+
+# These owners will be the default owners for everything in the repo.
+* @OpenZeppelin/contracts
+
+## Owners of the OpenZeppelin Community Contracts CODEOWNERS file
+/.github/CODEOWNERS @OpenZeppelin/contracts
+
+## Axelar
+/contracts/crosschain/axelar/ @cjcobb23
+
+## ZKEmail
+
+/contracts/utils/cryptography/ZKEmailUtils.sol @zkfriendly @benceharomi
+/contracts/utils/cryptography/signers/SignerZKEmail.sol @zkfriendly @benceharomi
+/contracts/utils/cryptography/verifiers/ERC7913ZKEmailVerifier.sol @zkfriendly @benceharomi
+/contracts/utils/cryptography/DKIMRegistry.sol @0xknon

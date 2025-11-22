@@ -1,0 +1,49 @@
+name: Code Coverage
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - releases/**
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  coverage:
+    runs-on: blacksmith-2vcpu-ubuntu-2204
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup tools
+        uses: ./.github/actions/setup-tools
+        with:
+          install-nodejs: 'true'
+
+      # Step to do builds and check for warnings
+      - name: Build
+        run: npm run build > build.log 2>&1
+
+      - name: Check for build warnings
+        run: |
+          if grep -q -i "error" build.log || grep -q -i "warning" build.log; then
+            echo "Build contains following errors or warnings..."
+            cat build.log
+            exit 1;
+          else
+            exit 0;
+          fi
+
+      - name: Generate code coverage
+        run: npm run coverage
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: lcov.info
+          fail_ci_if_error: true

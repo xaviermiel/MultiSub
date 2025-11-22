@@ -1,0 +1,40 @@
+name: Testing
+
+on:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: blacksmith-2vcpu-ubuntu-2204
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup tools
+        uses: ./.github/actions/setup-tools
+        with:
+          install-nodejs: 'true'
+
+      - name: Build project and capture output
+        run: npm run build > build.log 2>&1
+
+      - name: Check for build errors
+        run: |
+          if grep -q -i "error" build.log || grep -q -i "warning" build.log; then
+            echo "Build contains following errors or warnings..."
+
+            cat build.log
+
+            exit 1;
+          else
+            exit 0;
+          fi
+
+      - name: Test
+        env:
+          CHECK_CONTRACT_SIZE: true
+        run: npm run test -- --parallel
