@@ -5,8 +5,8 @@ import "forge-std/Script.sol";
 import "../src/DeFiInteractorModule.sol";
 import "../src/interfaces/ISafe.sol";
 /**
- * @title EnableModuleDirect
- * @notice Enable a module on a 1-1 Safe by directly calling execTransaction with proper signature
+ * @title EnableAllowAddress
+ * @notice Set allowed addresses for a sub-account on a 1-1 Safe by directly calling execTransaction with proper signature
  *
  * This works for a Safe with:
  * - Single owner (threshold = 1)
@@ -17,12 +17,14 @@ import "../src/interfaces/ISafe.sol";
  * Usage:
  * SAFE_ADDRESS=0x... \
  * MODULE_ADDRESS=0x... \
- * forge script script/EnableModuleDirect.s.sol:EnableModuleDirect \
+ * SUB_ACCOUNT_ADDRESS=0x... \
+ * ALLOWED_ADDRESS=0x... \
+ * forge script script/EnableAllowAddress.s.sol:EnableAllowAddress \
  *   --rpc-url <RPC_URL> \
  *   --broadcast \
  *   --private-key $DEPLOYER_PRIVATE_KEY
  */
-contract EnableModuleDirect is Script {
+contract EnableAllowAddress is Script {
     // Safe domain separator typehash
     bytes32 private constant DOMAIN_SEPARATOR_TYPEHASH =
         keccak256("EIP712Domain(uint256 chainId,address verifyingContract)");
@@ -34,13 +36,17 @@ contract EnableModuleDirect is Script {
     function run() external {
         address safe = vm.envAddress("SAFE_ADDRESS");
         address moduleToEnable = vm.envAddress("MODULE_ADDRESS");
+        address subAccount = vm.envAddress("SUB_ACCOUNT_ADDRESS");
+        address allowedAddress = vm.envAddress("ALLOWED_ADDRESS");
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
         DeFiInteractorModule module = DeFiInteractorModule(moduleToEnable);
-        address morphoVault = vm.envOr("MORPHO_VAULT_ADDRESS", address(0));
 
-        console.log("=== Enable Roles on 1-1 Safe ===");
+        console.log("=== Set Allowed Addresses on 1-1 Safe ===");
         console.log("Safe:", safe);
+        console.log("Module:", moduleToEnable);
+        console.log("Sub-account:", subAccount);
+        console.log("Allowed address:", allowedAddress);
         console.log("Signer:", deployer);
         console.log("");
 
@@ -53,20 +59,20 @@ contract EnableModuleDirect is Script {
         console.log("Safe nonce:", nonce);
 
         address[] memory targets = new address[](1);
-        targets[0] = morphoVault;
-        // Build enableModule calldata
-        bytes memory enableModuleData = abi.encodeWithSignature(
-            "setAllowedAddresses(address, address[], bool)",
-            deployer, targets, true
+        targets[0] = allowedAddress;
+        // Build setAllowedAddresses calldata
+        bytes memory setAllowedData = abi.encodeWithSignature(
+            "setAllowedAddresses(address,address[],bool)",
+            subAccount, targets, true
         );
 
         // Build Safe transaction hash
         bytes32 safeTxHash = getSafeTxHash(
             safe,
-            safe,           // to: Safe itself
+            moduleToEnable, // to: DeFiInteractorModule
             0,              // value
-            enableModuleData,
-            0,              // operation (CALL, will be delegatecall internally by Safe)
+            setAllowedData,
+            0,              // operation (CALL)
             0,              // safeTxGas
             0,              // baseGas
             0,              // gasPrice
@@ -94,12 +100,12 @@ contract EnableModuleDirect is Script {
         vm.startBroadcast(deployerPrivateKey);
 
         // Execute transaction on Safe
-        (bool execSuccess, bytes memory execResult) = safe.call(
+        (bool execSuccess, ) = safe.call(
             abi.encodeWithSignature(
                 "execTransaction(address,uint256,bytes,uint8,uint256,uint256,uint256,address,address,bytes)",
-                safe,               // to
+                moduleToEnable,     // to
                 0,                  // value
-                enableModuleData,   // data
+                setAllowedData,     // data
                 uint8(0),          // operation
                 0,                  // safeTxGas
                 0,                  // baseGas
@@ -115,7 +121,7 @@ contract EnableModuleDirect is Script {
         vm.stopBroadcast();
 
         console.log("");
-        console.log("SUCCESS!");
+        console.log("SUCCESS! Set allowed address", allowedAddress, "for sub-account:", subAccount);
         console.log("");
     }
 

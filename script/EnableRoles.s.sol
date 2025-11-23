@@ -5,8 +5,8 @@ import "forge-std/Script.sol";
 import "../src/DeFiInteractorModule.sol";
 import "../src/interfaces/ISafe.sol";
 /**
- * @title EnableModuleDirect
- * @notice Enable a module on a 1-1 Safe by directly calling execTransaction with proper signature
+ * @title EnableRoles
+ * @notice Grant DeFi roles on a 1-1 Safe by directly calling execTransaction with proper signature
  *
  * This works for a Safe with:
  * - Single owner (threshold = 1)
@@ -17,12 +17,13 @@ import "../src/interfaces/ISafe.sol";
  * Usage:
  * SAFE_ADDRESS=0x... \
  * MODULE_ADDRESS=0x... \
- * forge script script/EnableModuleDirect.s.sol:EnableModuleDirect \
+ * SUB_ACCOUNT_ADDRESS=0x... \
+ * forge script script/EnableRoles.s.sol:EnableRoles \
  *   --rpc-url <RPC_URL> \
  *   --broadcast \
  *   --private-key $DEPLOYER_PRIVATE_KEY
  */
-contract EnableModuleDirect is Script {
+contract EnableRoles is Script {
     // Safe domain separator typehash
     bytes32 private constant DOMAIN_SEPARATOR_TYPEHASH =
         keccak256("EIP712Domain(uint256 chainId,address verifyingContract)");
@@ -34,12 +35,15 @@ contract EnableModuleDirect is Script {
     function run() external {
         address safe = vm.envAddress("SAFE_ADDRESS");
         address moduleToEnable = vm.envAddress("MODULE_ADDRESS");
+        address subAccount = vm.envAddress("SUB_ACCOUNT_ADDRESS");
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
         DeFiInteractorModule module = DeFiInteractorModule(moduleToEnable);
 
-        console.log("=== Enable Roles on 1-1 Safe ===");
+        console.log("=== Grant DEFI_EXECUTE_ROLE on 1-1 Safe ===");
         console.log("Safe:", safe);
+        console.log("Module:", moduleToEnable);
+        console.log("Sub-account:", subAccount);
         console.log("Signer:", deployer);
         console.log("");
 
@@ -51,20 +55,20 @@ contract EnableModuleDirect is Script {
         uint256 nonce = abi.decode(result, (uint256));
         console.log("Safe nonce:", nonce);
 
-        // Build enableModule calldata
-        bytes memory enableModuleData = abi.encodeWithSignature(
-            "grantRole(address, uint16)",
-            deployer,
+        // Build grantRole calldata
+        bytes memory grantRoleData = abi.encodeWithSignature(
+            "grantRole(address,uint16)",
+            subAccount,
             module.DEFI_EXECUTE_ROLE()
         );
 
         // Build Safe transaction hash
         bytes32 safeTxHash = getSafeTxHash(
             safe,
-            safe,           // to: Safe itself
+            moduleToEnable, // to: DeFiInteractorModule
             0,              // value
-            enableModuleData,
-            0,              // operation (CALL, will be delegatecall internally by Safe)
+            grantRoleData,
+            0,              // operation (CALL)
             0,              // safeTxGas
             0,              // baseGas
             0,              // gasPrice
@@ -92,12 +96,12 @@ contract EnableModuleDirect is Script {
         vm.startBroadcast(deployerPrivateKey);
 
         // Execute transaction on Safe
-        (bool execSuccess, bytes memory execResult) = safe.call(
+        (bool execSuccess, ) = safe.call(
             abi.encodeWithSignature(
                 "execTransaction(address,uint256,bytes,uint8,uint256,uint256,uint256,address,address,bytes)",
-                safe,               // to
+                moduleToEnable,     // to
                 0,                  // value
-                enableModuleData,   // data
+                grantRoleData,      // data
                 uint8(0),          // operation
                 0,                  // safeTxGas
                 0,                  // baseGas
@@ -113,7 +117,7 @@ contract EnableModuleDirect is Script {
         vm.stopBroadcast();
 
         console.log("");
-        console.log("SUCCESS!");
+        console.log("SUCCESS! Granted DEFI_EXECUTE_ROLE to sub-account:", subAccount);
         console.log("");
     }
 
