@@ -45,8 +45,8 @@ contract SetupDeFiModule is Script {
         module.grantRole(subAccount, module.DEFI_EXECUTE_ROLE());
         console.log("   Granted DEFI_EXECUTE_ROLE (role 1)");
 
-        module.grantRole(subAccount, module.DEFI_TRANSFER_ROLE());
-        console.log("   Granted DEFI_TRANSFER_ROLE (role 2)");
+        // module.grantRole(subAccount, module.DEFI_TRANSFER_ROLE());
+        // console.log("   Granted DEFI_TRANSFER_ROLE (role 2)");
 
         // Step 3: Set sub-account limits
         console.log("\n3. Setting sub-account limits...");
