@@ -64,7 +64,7 @@ const SUB_ACCOUNT_KEY = process.env.SUB_ACCOUNT_PRIVATE_KEY as Hex
 const PAYMASTER_SIGNER_KEY = process.env.PAYMASTER_SIGNER_PRIVATE_KEY as Hex
 
 // Transaction parameters
-const SUPPLY_AMOUNT = parseEther('0.005') // 0.005 WETH
+const SUPPLY_AMOUNT = parseEther('0.001') // 0.005 WETH
 
 // ============ ABIs ============
 
@@ -216,8 +216,8 @@ async function generatePaymasterSignature(
 
   // Extract paymaster verification and post-op gas limits from paymasterAndData
   const paymasterAndData = userOp.paymasterAndData
-  const paymasterVerificationGasLimit = hexToBigInt(paymasterAndData.slice(42, 74) as Hex)
-  const paymasterPostOpGasLimit = hexToBigInt(paymasterAndData.slice(74, 106) as Hex)
+  const paymasterVerificationGasLimit = hexToBigInt(('0x' + paymasterAndData.slice(42, 74)) as Hex)
+  const paymasterPostOpGasLimit = hexToBigInt(('0x' + paymasterAndData.slice(74, 106)) as Hex)
 
   // EIP-712 domain
   const domain = {

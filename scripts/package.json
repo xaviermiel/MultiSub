@@ -4,7 +4,8 @@
   "description": "Scripts for interacting with MultiSub contracts",
   "type": "module",
   "scripts": {
-    "zerolend-tx": "tsx zerolend-paymaster-tx.ts"
+    "zerolend-tx": "tsx zerolend-paymaster-tx.ts",
+    "zerolend-withdraw": "tsx zerolend-withdraw-tx.ts"
   },
   "dependencies": {
     "viem": "^2.21.0",

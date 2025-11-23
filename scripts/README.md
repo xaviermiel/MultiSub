@@ -148,13 +148,48 @@ The paymaster must have sufficient ETH deposited in the EntryPoint to cover gas 
 - [Zircuit Documentation](https://docs.zircuit.com/)
 - [Account Abstraction Guide](https://www.blocknative.com/blog/account-abstraction-erc-4337-guide)
 
+## ZeroLend Withdrawal Script
+
+The `zerolend-withdraw-tx.ts` script withdraws the **full aToken balance** from ZeroLend back to WETH.
+
+### Usage
+
+```bash
+npm run zerolend-withdraw
+```
+
+Or directly:
+
+```bash
+npx tsx zerolend-withdraw-tx.ts
+```
+
+### What the Withdrawal Script Does
+
+1. **Fetches aToken address** - Gets the aWETH token address from ZeroLend
+2. **Checks aToken balance** - Verifies the Safe has aTokens to withdraw
+3. **Builds withdraw call** - Uses `type(uint256).max` to withdraw ALL available aTokens
+4. **Wraps in module call** - Encodes through DeFi Module's `executeOnProtocol()`
+5. **Creates UserOperation** - Constructs the complete UserOp structure
+6. **Signs with paymaster** - Generates EIP-712 paymaster signature for gas sponsorship
+7. **Submits to bundler** - Sends via `eth_sendUserOperation`
+8. **Monitors receipt** - Polls for confirmation
+9. **Shows updated balances** - Displays aToken and WETH balances after withdrawal
+
+### Important Notes
+
+- The script withdraws **ALL** available aTokens (uses `type(uint256).max`)
+- Same prerequisites as the supply script (roles, permissions, paymaster funding)
+- The withdrawn WETH goes back to the Safe
+- Gas is sponsored by the MultiSubPaymaster
+
 ### Next Steps
 
-After successfully running the script:
+After successfully running the scripts:
 
-1. **Monitor the Safe** - Check the Safe's aToken balance on ZeroLend
-2. **Verify on explorer** - View the transaction on Zircuit block explorer
+1. **Monitor the Safe** - Check the Safe's aToken and WETH balances on ZeroLend
+2. **Verify on explorer** - View the transactions on Zircuit block explorer
 3. **Track gas costs** - Monitor how much gas the paymaster has sponsored
-4. **Test withdrawals** - Create a similar script for withdrawing from ZeroLend
+4. **Test the full cycle** - Supply WETH, wait for interest, then withdraw
 5. **Implement error handling** - Add retry logic and better error messages
 6. **Build a UI** - Create a frontend for easier interaction
