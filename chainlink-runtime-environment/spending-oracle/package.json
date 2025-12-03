@@ -1,6 +1,7 @@
 {
-  "name": "typescript-simple-template",
+  "name": "spending-oracle",
   "version": "1.0.0",
+  "description": "Spending Oracle for DeFiInteractorModule - Implements Acquired Balance Model",
   "main": "dist/main.js",
   "private": true,
   "scripts": {
@@ -8,7 +9,9 @@
   },
   "license": "UNLICENSED",
   "dependencies": {
-    "@chainlink/cre-sdk": "^1.0.0"
+    "@chainlink/cre-sdk": "^1.0.0",
+    "viem": "^2.0.0",
+    "zod": "^3.22.0"
   },
   "devDependencies": {
     "@types/bun": "1.2.21"

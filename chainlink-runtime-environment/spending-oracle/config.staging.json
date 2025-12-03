@@ -1,0 +1,15 @@
+{
+  "moduleAddress": "0x0000000000000000000000000000000000000000",
+  "chainSelectorName": "ethereum-testnet-sepolia",
+  "gasLimit": "500000",
+  "proxyAddress": "0x0000000000000000000000000000000000000000",
+  "windowDurationSeconds": 86400,
+  "tokens": [
+    {
+      "address": "0x0000000000000000000000000000000000000000",
+      "priceFeedAddress": "0x0000000000000000000000000000000000000000",
+      "symbol": "USDC"
+    }
+  ],
+  "subAccounts": []
+}

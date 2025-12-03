@@ -1,0 +1,23 @@
+# ==========================================================================
+# CRE WORKFLOW SETTINGS FILE - Spending Oracle
+# ==========================================================================
+# Spending Oracle for DeFiInteractorModule
+# Implements the Acquired Balance Model by listening to ProtocolExecution events
+
+# ==========================================================================
+staging-settings:
+  user-workflow:
+    workflow-name: "spending-oracle-sepolia"
+  workflow-artifacts:
+    workflow-path: "./main.ts"
+    config-path: "./config.staging.json"
+    secrets-path: ""
+
+# ==========================================================================
+production-settings:
+  user-workflow:
+    workflow-name: "spending-oracle-mainnet"
+  workflow-artifacts:
+    workflow-path: "./main.ts"
+    config-path: "./config.production.json"
+    secrets-path: ""
