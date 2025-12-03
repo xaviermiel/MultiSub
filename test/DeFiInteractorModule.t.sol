@@ -387,6 +387,56 @@ contract DeFiInteractorModuleTest is Test {
         module.updateSpendingAllowance(subAccount1, 50000 * 10**18);
     }
 
+    function testAbsoluteMaxSpendingCap() public {
+        // Safe value is $1,000,000 and absoluteMaxSpendingBps is 2000 (20%)
+        // So max allowance is $200,000
+        uint256 maxAllowance = (1_000_000 * 10**18 * 2000) / 10000; // $200,000
+
+        // Setting exactly at max should work
+        module.updateSpendingAllowance(subAccount1, maxAllowance);
+        assertEq(module.getSpendingAllowance(subAccount1), maxAllowance);
+
+        // Setting above max should fail
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                DeFiInteractorModule.ExceedsAbsoluteMaxSpending.selector,
+                maxAllowance + 1,
+                maxAllowance
+            )
+        );
+        module.updateSpendingAllowance(subAccount1, maxAllowance + 1);
+    }
+
+    function testAbsoluteMaxSpendingCapOnBatchUpdate() public {
+        uint256 maxAllowance = (1_000_000 * 10**18 * 2000) / 10000; // $200,000
+
+        address[] memory tokens = new address[](0);
+        uint256[] memory balances = new uint256[](0);
+
+        // Above max should fail
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                DeFiInteractorModule.ExceedsAbsoluteMaxSpending.selector,
+                maxAllowance + 1,
+                maxAllowance
+            )
+        );
+        module.batchUpdate(subAccount1, maxAllowance + 1, tokens, balances);
+    }
+
+    function testSetAbsoluteMaxSpendingBps() public {
+        // Default is 2000 (20%)
+        assertEq(module.absoluteMaxSpendingBps(), 2000);
+
+        // Owner can change it
+        module.setAbsoluteMaxSpendingBps(500); // 5%
+        assertEq(module.absoluteMaxSpendingBps(), 500);
+
+        // Cannot exceed 100%
+        vm.expectRevert("Cannot exceed 100%");
+        module.setAbsoluteMaxSpendingBps(10001);
+    }
+
     // ============ Execute On Protocol Tests ============
 
     function testExecuteDeposit() public {

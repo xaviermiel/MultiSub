@@ -88,6 +88,10 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     /// @notice Maximum age for Safe value before considered stale
     uint256 public maxSafeValueAge = 15 minutes;
 
+    /// @notice Absolute maximum spending percentage (safety backstop, oracle cannot exceed)
+    /// @dev Default 20% (2000 basis points). Even if oracle is compromised, cannot exceed this.
+    uint256 public absoluteMaxSpendingBps = 2000;
+
     // ============ Sub-Account Configuration ============
 
     /// @notice Configuration for sub-account limits
@@ -200,6 +204,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     error ApprovalExceedsLimit();
     error SpenderNotAllowed();
     error NoParserRegistered(address target);
+    error ExceedsAbsoluteMaxSpending(uint256 requested, uint256 maximum);
 
     // ============ Constructor ============
 
@@ -611,6 +616,12 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     function updateSpendingAllowance(address subAccount, uint256 newAllowance) external {
         if (msg.sender != authorizedOracle) revert OnlyAuthorizedOracle();
 
+        // Enforce absolute maximum spending cap (safety backstop)
+        uint256 maxAllowance = (safeValue.totalValueUSD * absoluteMaxSpendingBps) / 10000;
+        if (newAllowance > maxAllowance) {
+            revert ExceedsAbsoluteMaxSpending(newAllowance, maxAllowance);
+        }
+
         spendingAllowance[subAccount] = newAllowance;
         lastOracleUpdate[subAccount] = block.timestamp;
 
@@ -641,6 +652,12 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         if (msg.sender != authorizedOracle) revert OnlyAuthorizedOracle();
         require(tokens.length == balances.length, "Length mismatch");
 
+        // Enforce absolute maximum spending cap (safety backstop)
+        uint256 maxAllowance = (safeValue.totalValueUSD * absoluteMaxSpendingBps) / 10000;
+        if (newAllowance > maxAllowance) {
+            revert ExceedsAbsoluteMaxSpending(newAllowance, maxAllowance);
+        }
+
         spendingAllowance[subAccount] = newAllowance;
         lastOracleUpdate[subAccount] = block.timestamp;
 
@@ -656,6 +673,15 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         address oldOracle = authorizedOracle;
         authorizedOracle = newOracle;
         emit OracleUpdated(oldOracle, newOracle);
+    }
+
+    /**
+     * @notice Set the absolute maximum spending percentage (safety backstop)
+     * @param newMaxBps New maximum in basis points (e.g., 2000 = 20%)
+     */
+    function setAbsoluteMaxSpendingBps(uint256 newMaxBps) external onlyOwner {
+        require(newMaxBps <= 10000, "Cannot exceed 100%");
+        absoluteMaxSpendingBps = newMaxBps;
     }
 
     // ============ Price Feed Functions ============
