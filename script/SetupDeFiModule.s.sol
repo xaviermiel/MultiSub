@@ -52,13 +52,11 @@ contract SetupDeFiModule is Script {
         console.log("\n3. Setting sub-account limits...");
         module.setSubAccountLimits(
             subAccount,
-            500,   // 5% max loss (basis points)
-            500,   // 5% max transfer (basis points)
+            500,   // 5% max spending (basis points)
             1 days // 24 hour window
         );
         console.log("   Limits configured:");
-        console.log("   - Max loss: 5%");
-        console.log("   - Max transfer: 5%");
+        console.log("   - Max spending: 5%");
         console.log("   - Window: 24 hours");
 
         // Step 4: Set allowed addresses
@@ -76,8 +74,8 @@ contract SetupDeFiModule is Script {
 
         console.log("\n=== Setup Complete ===");
         console.log("Sub-account %s is now configured with:", subAccount);
-        console.log("- DEFI_EXECUTE_ROLE and DEFI_TRANSFER_ROLE granted");
-        console.log("- Custom limits: 5% max loss, 5% max transfer, 24h window");
+        console.log("- DEFI_EXECUTE_ROLE granted");
+        console.log("- Custom limits: 5% max spending, 24h window");
         if (morphoVault != address(0)) {
             console.log("- Allowed to interact with Morpho vault");
         }
