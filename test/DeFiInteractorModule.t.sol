@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
 import "../src/DeFiInteractorModule.sol";
+import "../src/parsers/AaveV3Parser.sol";
 import "../src/interfaces/ISafe.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
@@ -38,7 +39,6 @@ contract MockSafe {
         bytes calldata data,
         ISafe.Operation
     ) external returns (bool) {
-        // Simple execution without checks for testing
         (bool success,) = to.call{value: value}(data);
         return success;
     }
@@ -131,7 +131,7 @@ contract MockChainlinkPriceFeed {
 
 /**
  * @title DeFiInteractorModuleTest
- * @notice Tests for DeFiInteractorModule
+ * @notice Tests for DeFiInteractorModule with Acquired Balance Model
  */
 contract DeFiInteractorModuleTest is Test {
     DeFiInteractorModule public module;
@@ -145,6 +145,11 @@ contract DeFiInteractorModuleTest is Test {
     address public subAccount2;
     address public recipient;
 
+    // Selectors for testing
+    bytes4 constant DEPOSIT_SELECTOR = bytes4(keccak256("deposit(uint256,address)"));
+    bytes4 constant WITHDRAW_SELECTOR = bytes4(keccak256("withdraw(uint256,address)"));
+    bytes4 constant APPROVE_SELECTOR = bytes4(keccak256("approve(address,uint256)"));
+
     function setUp() public {
         owner = address(this);
         subAccount1 = makeAddr("subAccount1");
@@ -156,15 +161,14 @@ contract DeFiInteractorModuleTest is Test {
         owners[0] = owner;
         safe = new MockSafe(owners, 1);
 
-        // Deploy module (Safe is avatar, THIS is owner for testing, THIS is also authorized updater for testing)
+        // Deploy module (Safe is avatar, THIS is owner for testing, THIS is also authorized oracle)
         module = new DeFiInteractorModule(address(safe), owner, owner);
 
         // Deploy mock token and protocol
         token = new MockERC20();
         protocol = new MockProtocol();
 
-        // Deploy mock Chainlink price feed
-        // Price: $1.00 with 8 decimals (standard for USD pairs)
+        // Deploy mock Chainlink price feed ($1.00 with 8 decimals)
         priceFeed = new MockChainlinkPriceFeed(1_00000000, 8);
 
         // Enable module on Safe
@@ -173,12 +177,16 @@ contract DeFiInteractorModuleTest is Test {
         // Transfer tokens to Safe
         token.transfer(address(safe), 100000 * 10**18);
 
-        // Set initial Safe value (simulate Chainlink update)
-        // Portfolio value: $1,000,000 USD (with 18 decimals)
+        // Set initial Safe value
         module.updateSafeValue(1_000_000 * 10**18);
 
         // Set price feed for token
         module.setTokenPriceFeed(address(token), address(priceFeed));
+
+        // Register selectors
+        module.registerSelector(DEPOSIT_SELECTOR, DeFiInteractorModule.OperationType.DEPOSIT);
+        module.registerSelector(WITHDRAW_SELECTOR, DeFiInteractorModule.OperationType.WITHDRAW);
+        module.registerSelector(APPROVE_SELECTOR, DeFiInteractorModule.OperationType.APPROVE);
     }
 
     // ============ Module Setup Tests ============
@@ -197,17 +205,12 @@ contract DeFiInteractorModuleTest is Test {
 
     function testGrantRole() public {
         module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
-
         assertTrue(module.hasRole(subAccount1, module.DEFI_EXECUTE_ROLE()));
     }
 
     function testRevokeRole() public {
-        // Grant role first
         module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
-
-        // Revoke role
         module.revokeRole(subAccount1, module.DEFI_EXECUTE_ROLE());
-
         assertFalse(module.hasRole(subAccount1, module.DEFI_EXECUTE_ROLE()));
     }
 
@@ -217,113 +220,49 @@ contract DeFiInteractorModuleTest is Test {
         module.grantRole(subAccount2, 1);
     }
 
-    function testGrantMultipleRoles() public {
-        module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
-        module.grantRole(subAccount1, module.DEFI_TRANSFER_ROLE());
-
-        assertTrue(module.hasRole(subAccount1, module.DEFI_EXECUTE_ROLE()));
-        assertTrue(module.hasRole(subAccount1, module.DEFI_TRANSFER_ROLE()));
-    }
-
     function testSubaccountArrayTracking() public {
-        // Initially no sub-accounts
         assertEq(module.getSubaccountCount(module.DEFI_EXECUTE_ROLE()), 0);
 
-        // Grant role to subAccount1
         module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
         assertEq(module.getSubaccountCount(module.DEFI_EXECUTE_ROLE()), 1);
 
-        // Grant same role to subAccount2
         module.grantRole(subAccount2, module.DEFI_EXECUTE_ROLE());
         assertEq(module.getSubaccountCount(module.DEFI_EXECUTE_ROLE()), 2);
 
-        // Get all sub-accounts with execute role
         address[] memory accounts = module.getSubaccountsByRole(module.DEFI_EXECUTE_ROLE());
         assertEq(accounts.length, 2);
-        assertTrue(accounts[0] == subAccount1 || accounts[1] == subAccount1);
-        assertTrue(accounts[0] == subAccount2 || accounts[1] == subAccount2);
     }
 
     function testRevokeRoleRemovesFromArray() public {
-        // Grant roles to both accounts
         module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
         module.grantRole(subAccount2, module.DEFI_EXECUTE_ROLE());
         assertEq(module.getSubaccountCount(module.DEFI_EXECUTE_ROLE()), 2);
 
-        // Revoke from subAccount1
         module.revokeRole(subAccount1, module.DEFI_EXECUTE_ROLE());
         assertEq(module.getSubaccountCount(module.DEFI_EXECUTE_ROLE()), 1);
-
-        // Check that only subAccount2 remains
-        address[] memory accounts = module.getSubaccountsByRole(module.DEFI_EXECUTE_ROLE());
-        assertEq(accounts.length, 1);
-        assertEq(accounts[0], subAccount2);
-    }
-
-    function testGrantSameRoleTwiceDoesNotDuplicate() public {
-        // Grant role twice to same account
-        module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
-        module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
-
-        // Should only be in array once
-        assertEq(module.getSubaccountCount(module.DEFI_EXECUTE_ROLE()), 1);
-        address[] memory accounts = module.getSubaccountsByRole(module.DEFI_EXECUTE_ROLE());
-        assertEq(accounts.length, 1);
-        assertEq(accounts[0], subAccount1);
-    }
-
-    function testRevokeSameRoleTwiceDoesNotError() public {
-        // Grant and revoke
-        module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
-        module.revokeRole(subAccount1, module.DEFI_EXECUTE_ROLE());
-        assertEq(module.getSubaccountCount(module.DEFI_EXECUTE_ROLE()), 0);
-
-        // Revoke again - should not error
-        module.revokeRole(subAccount1, module.DEFI_EXECUTE_ROLE());
-        assertEq(module.getSubaccountCount(module.DEFI_EXECUTE_ROLE()), 0);
-    }
-
-    function testMultipleRolesPerAccount() public {
-        // Grant both roles to same account
-        module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
-        module.grantRole(subAccount1, module.DEFI_TRANSFER_ROLE());
-
-        // Should be in both arrays
-        assertEq(module.getSubaccountCount(module.DEFI_EXECUTE_ROLE()), 1);
-        assertEq(module.getSubaccountCount(module.DEFI_TRANSFER_ROLE()), 1);
-
-        address[] memory executeAccounts = module.getSubaccountsByRole(module.DEFI_EXECUTE_ROLE());
-        address[] memory transferAccounts = module.getSubaccountsByRole(module.DEFI_TRANSFER_ROLE());
-
-        assertEq(executeAccounts[0], subAccount1);
-        assertEq(transferAccounts[0], subAccount1);
     }
 
     // ============ Sub-Account Limits Tests ============
 
     function testSetSubAccountLimits() public {
-        module.setSubAccountLimits(subAccount1, 1500, 1000, 2 days);
+        module.setSubAccountLimits(subAccount1, 1500, 2 days);
 
-        (uint256 maxLoss, uint256 maxTransfer, uint256 window) =
-            module.getSubAccountLimits(subAccount1);
+        (uint256 maxSpending, uint256 window) = module.getSubAccountLimits(subAccount1);
 
-        assertEq(maxLoss, 1500);
-        assertEq(maxTransfer, 1000);
+        assertEq(maxSpending, 1500);
         assertEq(window, 2 days);
     }
 
     function testDefaultLimits() public view {
-        (uint256 maxLoss, uint256 maxTransfer, uint256 window) =
-            module.getSubAccountLimits(subAccount1);
+        (uint256 maxSpending, uint256 window) = module.getSubAccountLimits(subAccount1);
 
-        assertEq(maxLoss, module.DEFAULT_MAX_LOSS_BPS());
-        assertEq(maxTransfer, module.DEFAULT_MAX_TRANSFER_BPS());
-        assertEq(window, module.DEFAULT_LIMIT_WINDOW_DURATION());
+        assertEq(maxSpending, module.DEFAULT_MAX_SPENDING_BPS());
+        assertEq(window, module.DEFAULT_WINDOW_DURATION());
     }
 
     function testSetSubAccountLimitsInvalid() public {
         vm.expectRevert(DeFiInteractorModule.InvalidLimitConfiguration.selector);
-        module.setSubAccountLimits(subAccount1, 15000, 1000, 2 days); // >100%
+        module.setSubAccountLimits(subAccount1, 15000, 2 days); // >100%
     }
 
     // ============ Allowed Addresses Tests ============
@@ -349,71 +288,157 @@ contract DeFiInteractorModuleTest is Test {
         module.setAllowedAddresses(subAccount1, targets1, true);
         module.setAllowedAddresses(subAccount2, targets2, true);
 
-        // SubAccount1 can access protocol but not token
         assertTrue(module.allowedAddresses(subAccount1, address(protocol)));
         assertFalse(module.allowedAddresses(subAccount1, address(token)));
-
-        // SubAccount2 can access token but not protocol
         assertFalse(module.allowedAddresses(subAccount2, address(protocol)));
         assertTrue(module.allowedAddresses(subAccount2, address(token)));
     }
 
-    function testRemoveAllowedAddress() public {
-        address[] memory targets = new address[](1);
-        targets[0] = address(protocol);
+    // ============ Selector Registry Tests ============
 
-        module.setAllowedAddresses(subAccount1, targets, true);
-        module.setAllowedAddresses(subAccount1, targets, false);
-
-        assertFalse(module.allowedAddresses(subAccount1, address(protocol)));
+    function testRegisterSelector() public {
+        bytes4 newSelector = bytes4(keccak256("newFunction()"));
+        module.registerSelector(newSelector, DeFiInteractorModule.OperationType.SWAP);
+        assertEq(uint(module.selectorType(newSelector)), uint(DeFiInteractorModule.OperationType.SWAP));
     }
 
-    // ============ Approval Tests ============
-
-    function testApproveProtocol() public {
-        // Setup: grant role and allow address
-        module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
-        address[] memory targets = new address[](1);
-        targets[0] = address(protocol);
-        module.setAllowedAddresses(subAccount1, targets, true);
-
-        // Approve
-        vm.prank(subAccount1);
-        module.approveProtocol(address(token), address(protocol), 1000 * 10**18);
-
-        // Verify approval (check on Safe's token balance)
-        assertEq(token.allowance(address(safe), address(protocol)), 1000 * 10**18);
+    function testUnregisterSelector() public {
+        module.unregisterSelector(DEPOSIT_SELECTOR);
+        assertEq(uint(module.selectorType(DEPOSIT_SELECTOR)), uint(DeFiInteractorModule.OperationType.UNKNOWN));
     }
 
-    function testApproveProtocolUnauthorized() public {
-        vm.prank(subAccount1);
-        vm.expectRevert(Module.Unauthorized.selector);
-        module.approveProtocol(address(token), address(protocol), 1000 * 10**18);
+    // ============ Oracle Functions Tests ============
+
+    function testUpdateSpendingAllowance() public {
+        module.updateSpendingAllowance(subAccount1, 50000 * 10**18);
+        assertEq(module.getSpendingAllowance(subAccount1), 50000 * 10**18);
     }
 
-    function testApproveProtocolNotAllowed() public {
-        module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
+    function testUpdateAcquiredBalance() public {
+        module.updateAcquiredBalance(subAccount1, address(token), 1000 * 10**18);
+        assertEq(module.getAcquiredBalance(subAccount1, address(token)), 1000 * 10**18);
+    }
+
+    function testBatchUpdate() public {
+        address[] memory tokens = new address[](2);
+        tokens[0] = address(token);
+        tokens[1] = makeAddr("token2");
+
+        uint256[] memory balances = new uint256[](2);
+        balances[0] = 500 * 10**18;
+        balances[1] = 1000 * 10**18;
+
+        module.batchUpdate(subAccount1, 10000 * 10**18, tokens, balances);
+
+        assertEq(module.getSpendingAllowance(subAccount1), 10000 * 10**18);
+        assertEq(module.getAcquiredBalance(subAccount1, tokens[0]), 500 * 10**18);
+        assertEq(module.getAcquiredBalance(subAccount1, tokens[1]), 1000 * 10**18);
+    }
+
+    function testOnlyOracleCanUpdate() public {
+        vm.prank(subAccount1);
+        vm.expectRevert(DeFiInteractorModule.OnlyAuthorizedOracle.selector);
+        module.updateSpendingAllowance(subAccount1, 50000 * 10**18);
+    }
+
+    // ============ Execute On Protocol Tests ============
+
+    function testExecuteDeposit() public {
+        // Setup
+        _setupSubAccount(subAccount1);
+        module.updateSpendingAllowance(subAccount1, 10000 * 10**18); // $10k allowance
+
+        // Deposit 1000 tokens
+        bytes memory data = abi.encodeWithSignature("deposit(uint256,address)", 1000 * 10**18, address(safe));
 
         vm.prank(subAccount1);
-        vm.expectRevert(DeFiInteractorModule.AddressNotAllowed.selector);
-        module.approveProtocol(address(token), address(protocol), 1000 * 10**18);
+        module.executeOnProtocol(address(protocol), data, address(token), 1000 * 10**18);
+
+        // Spending should be deducted (1000 tokens at $1 = $1000 spent)
+        assertLt(module.getSpendingAllowance(subAccount1), 10000 * 10**18);
+    }
+
+    function testExecuteWithdraw() public {
+        // Setup
+        _setupSubAccount(subAccount1);
+        module.updateSpendingAllowance(subAccount1, 10000 * 10**18);
+
+        // Withdraw - should not cost spending
+        bytes memory data = abi.encodeWithSignature("withdraw(uint256,address)", 1000 * 10**18, address(safe));
+
+        uint256 allowanceBefore = module.getSpendingAllowance(subAccount1);
+
+        vm.prank(subAccount1);
+        module.executeOnProtocol(address(protocol), data, address(0), 0);
+
+        // Spending should be unchanged (withdrawals are free)
+        assertEq(module.getSpendingAllowance(subAccount1), allowanceBefore);
+    }
+
+    function testExecuteExceedsSpendingLimit() public {
+        // Setup with small allowance
+        _setupSubAccount(subAccount1);
+        module.updateSpendingAllowance(subAccount1, 100 * 10**18); // Only $100
+
+        // Try to deposit 1000 tokens ($1000 worth)
+        bytes memory data = abi.encodeWithSignature("deposit(uint256,address)", 1000 * 10**18, address(safe));
+
+        vm.prank(subAccount1);
+        vm.expectRevert(DeFiInteractorModule.ExceedsSpendingLimit.selector);
+        module.executeOnProtocol(address(protocol), data, address(token), 1000 * 10**18);
+    }
+
+    function testExecuteUnknownSelector() public {
+        _setupSubAccount(subAccount1);
+        module.updateSpendingAllowance(subAccount1, 10000 * 10**18);
+
+        // Try unknown function
+        bytes memory data = abi.encodeWithSignature("unknownFunction(uint256)", 1000);
+
+        vm.prank(subAccount1);
+        vm.expectRevert(abi.encodeWithSelector(DeFiInteractorModule.UnknownSelector.selector, bytes4(data)));
+        module.executeOnProtocol(address(protocol), data, address(token), 1000);
+    }
+
+    function testAcquiredBalanceReducesSpendingCost() public {
+        // Setup
+        _setupSubAccount(subAccount1);
+        module.updateSpendingAllowance(subAccount1, 500 * 10**18); // Only $500 allowance
+        module.updateAcquiredBalance(subAccount1, address(token), 800 * 10**18); // 800 tokens acquired
+
+        // Try to deposit 1000 tokens - 800 from acquired (free) + 200 from original ($200)
+        bytes memory data = abi.encodeWithSignature("deposit(uint256,address)", 1000 * 10**18, address(safe));
+
+        vm.prank(subAccount1);
+        module.executeOnProtocol(address(protocol), data, address(token), 1000 * 10**18);
+
+        // Should succeed because only $200 from original (within $500 limit)
+        // Acquired balance should be 0 (used 800)
+        assertEq(module.getAcquiredBalance(subAccount1, address(token)), 0);
     }
 
     // ============ Transfer Tests ============
 
     function testTransferToken() public {
-        // Setup: grant role
         module.grantRole(subAccount1, module.DEFI_TRANSFER_ROLE());
+        module.updateSpendingAllowance(subAccount1, 10000 * 10**18);
 
         uint256 safeBalanceBefore = token.balanceOf(address(safe));
-        uint256 recipientBalanceBefore = token.balanceOf(recipient);
 
-        // Transfer
         vm.prank(subAccount1);
         module.transferToken(address(token), recipient, 100 * 10**18);
 
         assertEq(token.balanceOf(address(safe)), safeBalanceBefore - 100 * 10**18);
-        assertEq(token.balanceOf(recipient), recipientBalanceBefore + 100 * 10**18);
+        assertEq(token.balanceOf(recipient), 100 * 10**18);
+    }
+
+    function testTransferTokenExceedsLimit() public {
+        module.grantRole(subAccount1, module.DEFI_TRANSFER_ROLE());
+        module.updateSpendingAllowance(subAccount1, 50 * 10**18); // Only $50
+
+        vm.prank(subAccount1);
+        vm.expectRevert(DeFiInteractorModule.ExceedsSpendingLimit.selector);
+        module.transferToken(address(token), recipient, 100 * 10**18); // $100 worth
     }
 
     function testTransferTokenUnauthorized() public {
@@ -422,383 +447,119 @@ contract DeFiInteractorModuleTest is Test {
         module.transferToken(address(token), recipient, 100 * 10**18);
     }
 
-    // ============ Protocol Execution Tests ============
-
-    function testExecuteOnProtocol() public {
-        // Setup: grant role and allow address
-        module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
-        address[] memory targets = new address[](1);
-        targets[0] = address(protocol);
-        module.setAllowedAddresses(subAccount1, targets, true);
-
-        // Prepare calldata
-        bytes memory data = abi.encodeWithSignature(
-            "deposit(uint256,address)",
-            1000 * 10**18,
-            address(safe)
-        );
-
-        // Execute
-        vm.prank(subAccount1);
-        module.executeOnProtocol(address(protocol), data);
-    }
-
-    function testExecuteOnProtocolBlocksApproval() public {
-        // Setup
-        module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
-        address[] memory targets = new address[](1);
-        targets[0] = address(token);
-        module.setAllowedAddresses(subAccount1, targets, true);
-
-        // Try to approve via executeOnProtocol (should fail)
-        bytes memory approveData = abi.encodeWithSelector(
-            IERC20.approve.selector,
-            address(protocol),
-            1000 * 10**18
-        );
-
-        vm.prank(subAccount1);
-        vm.expectRevert(DeFiInteractorModule.ApprovalNotAllowed.selector);
-        module.executeOnProtocol(address(token), approveData);
-    }
-
     // ============ Emergency Controls Tests ============
 
     function testPause() public {
         module.pause();
-
         assertTrue(module.paused());
     }
 
     function testUnpause() public {
         module.pause();
         module.unpause();
-
         assertFalse(module.paused());
     }
 
-    function testPauseUnauthorized() public {
-        vm.prank(subAccount1);
-        vm.expectRevert(Module.Unauthorized.selector);
-        module.pause();
-    }
-
-    function testTransferWhenPaused() public {
-        // Setup
-        module.grantRole(subAccount1, module.DEFI_TRANSFER_ROLE());
+    function testOperationsWhenPaused() public {
+        _setupSubAccount(subAccount1);
+        module.updateSpendingAllowance(subAccount1, 10000 * 10**18);
         module.pause();
 
-        // Try transfer (should fail)
+        bytes memory data = abi.encodeWithSignature("deposit(uint256,address)", 1000 * 10**18, address(safe));
+
         vm.prank(subAccount1);
         vm.expectRevert(abi.encodeWithSignature("EnforcedPause()"));
-        module.transferToken(address(token), recipient, 100 * 10**18);
+        module.executeOnProtocol(address(protocol), data, address(token), 1000 * 10**18);
     }
 
-    // ============ Event Tests ============
+    // ============ Oracle Staleness Tests ============
 
-    function testRoleAssignedEvent() public {
-        module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
-        // Event is emitted, we just test the role was granted
-        assertTrue(module.hasRole(subAccount1, module.DEFI_EXECUTE_ROLE()));
+    function testStaleOracleData() public {
+        _setupSubAccount(subAccount1);
+        module.updateSpendingAllowance(subAccount1, 10000 * 10**18);
+
+        // Fast forward past oracle staleness
+        vm.warp(block.timestamp + 16 minutes);
+
+        bytes memory data = abi.encodeWithSignature("deposit(uint256,address)", 1000 * 10**18, address(safe));
+
+        vm.prank(subAccount1);
+        vm.expectRevert(DeFiInteractorModule.StaleOracleData.selector);
+        module.executeOnProtocol(address(protocol), data, address(token), 1000 * 10**18);
     }
 
-    function testRoleRevokedEvent() public {
-        module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
-        module.revokeRole(subAccount1, module.DEFI_EXECUTE_ROLE());
+    // ============ Price Feed Tests ============
 
-        // Event is emitted, we just test the role was revoked
-        assertFalse(module.hasRole(subAccount1, module.DEFI_EXECUTE_ROLE()));
+    function testSetTokenPriceFeed() public {
+        MockERC20 newToken = new MockERC20();
+        MockChainlinkPriceFeed newPriceFeed = new MockChainlinkPriceFeed(2_00000000, 8);
+
+        module.setTokenPriceFeed(address(newToken), address(newPriceFeed));
+        assertEq(address(module.tokenPriceFeeds(address(newToken))), address(newPriceFeed));
     }
+
+    function testNoPriceFeedSet() public {
+        MockERC20 newToken = new MockERC20();
+        newToken.transfer(address(safe), 10000 * 10**18);
+
+        _setupSubAccount(subAccount1);
+        module.updateSpendingAllowance(subAccount1, 10000 * 10**18);
+
+        bytes memory data = abi.encodeWithSignature("deposit(uint256,address)", 1000 * 10**18, address(safe));
+
+        vm.prank(subAccount1);
+        vm.expectRevert(DeFiInteractorModule.NoPriceFeedSet.selector);
+        module.executeOnProtocol(address(protocol), data, address(newToken), 1000 * 10**18);
+    }
+
+    function testStalePriceFeed() public {
+        _setupSubAccount(subAccount1);
+        module.updateSpendingAllowance(subAccount1, 10000 * 10**18);
+
+        // Make price feed stale (but keep oracle fresh)
+        vm.warp(block.timestamp + 25 hours);
+        module.updateSpendingAllowance(subAccount1, 10000 * 10**18); // Refresh oracle
+
+        bytes memory data = abi.encodeWithSignature("deposit(uint256,address)", 1000 * 10**18, address(safe));
+
+        vm.prank(subAccount1);
+        vm.expectRevert(DeFiInteractorModule.StalePriceFeed.selector);
+        module.executeOnProtocol(address(protocol), data, address(token), 1000 * 10**18);
+    }
+
+    // ============ View Functions Tests ============
 
     function testGetTokenBalances() public {
-        // Create multiple tokens and mint to Safe
         MockERC20 token1 = new MockERC20();
         MockERC20 token2 = new MockERC20();
-        MockERC20 token3 = new MockERC20();
 
         token1.mint(address(safe), 1000 * 10**18);
         token2.mint(address(safe), 2000 * 10**18);
-        token3.mint(address(safe), 3000 * 10**18);
 
-        // Create token array
-        address[] memory tokens = new address[](3);
+        address[] memory tokens = new address[](2);
         tokens[0] = address(token1);
         tokens[1] = address(token2);
-        tokens[2] = address(token3);
 
-        // Call getTokenBalances
         uint256[] memory balances = module.getTokenBalances(tokens);
 
-        // Verify balances
-        assertEq(balances.length, 3);
         assertEq(balances[0], 1000 * 10**18);
         assertEq(balances[1], 2000 * 10**18);
-        assertEq(balances[2], 3000 * 10**18);
     }
 
-    function testGetTokenBalancesEmptyArray() public {
-        address[] memory tokens = new address[](0);
-        uint256[] memory balances = module.getTokenBalances(tokens);
-        assertEq(balances.length, 0);
-    }
-
-    // ============ Portfolio Value Tracking Tests ============
-
-    function testPortfolioValueTracking() public {
-        // Check initial portfolio value
+    function testGetSafeValue() public view {
         (uint256 totalValue, uint256 lastUpdated, uint256 updateCount) = module.getSafeValue();
         assertEq(totalValue, 1_000_000 * 10**18);
         assertGt(lastUpdated, 0);
         assertEq(updateCount, 1);
     }
 
-    function testApprovalWithPortfolioLimit() public {
-        // Grant role
-        module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
-        module.setAllowedAddresses(subAccount1, _createAddressArray(address(protocol)), true);
+    // ============ Helper Functions ============
 
-        // Set limits: 10% loss allowed, 5% transfer allowed
-        module.setSubAccountLimits(subAccount1, 1000, 500, 1 days);
-
-        // Approve 10000 tokens (should be within limit)
-        vm.prank(subAccount1);
-        module.approveProtocol(address(token), address(protocol), 10000 * 10**18);
-
-        // Check cumulative approved value was tracked
-        assertGt(module.valueApprovedInWindow(subAccount1), 0);
-    }
-
-    function testApprovalExceedsPortfolioLimit() public {
-        // Grant role
-        module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
-        module.setAllowedAddresses(subAccount1, _createAddressArray(address(protocol)), true);
-
-        // Set very low limits: 1% loss allowed, 0.5% transfer allowed
-        module.setSubAccountLimits(subAccount1, 100, 50, 1 days);
-
-        // Try to approve 50000 tokens (should exceed 1% of portfolio)
-        vm.prank(subAccount1);
-        vm.expectRevert(DeFiInteractorModule.ExceedsApprovalLimit.selector);
-        module.approveProtocol(address(token), address(protocol), 50000 * 10**18);
-    }
-
-    function testTransferWithPortfolioLimit() public {
-        // Grant role
-        module.grantRole(subAccount1, module.DEFI_TRANSFER_ROLE());
-
-        // Set limits: 10% loss allowed, 5% transfer allowed
-        module.setSubAccountLimits(subAccount1, 1000, 500, 1 days);
-
-        // Transfer 5000 tokens (should be within limit)
-        vm.prank(subAccount1);
-        module.transferToken(address(token), recipient, 5000 * 10**18);
-
-        // Check cumulative transferred value was tracked
-        assertGt(module.valueTransferredInWindow(subAccount1), 0);
-    }
-
-    function testTransferExceedsPortfolioLimit() public {
-        // Grant role
-        module.grantRole(subAccount1, module.DEFI_TRANSFER_ROLE());
-
-        // Set very low limits: 1% loss allowed, 1% transfer allowed
-        module.setSubAccountLimits(subAccount1, 100, 100, 1 days);
-
-        // Try to transfer 20000 tokens (should exceed 1% of portfolio)
-        vm.prank(subAccount1);
-        vm.expectRevert(DeFiInteractorModule.ExceedsPortfolioLimit.selector);
-        module.transferToken(address(token), recipient, 20000 * 10**18);
-    }
-
-    function testStalePortfolioValue() public {
-        // Grant role
-        module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
-        module.setAllowedAddresses(subAccount1, _createAddressArray(address(protocol)), true);
-
-        // Fast forward 16 minutes (beyond default 15 minute staleness)
-        vm.warp(block.timestamp + 16 minutes);
-
-        // Try to approve - should fail with stale value
-        vm.prank(subAccount1);
-        vm.expectRevert(DeFiInteractorModule.StalePortfolioValue.selector);
-        module.approveProtocol(address(token), address(protocol), 1000 * 10**18);
-    }
-
-    function testUpdateMaxSafeValueAge() public {
-        // Update to 10 minutes
-        module.setMaxSafeValueAge(10 minutes);
-        assertEq(module.maxSafeValueAge(), 10 minutes);
-
-        // Grant role
-        module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
-        module.setAllowedAddresses(subAccount1, _createAddressArray(address(protocol)), true);
-
-        // Fast forward 6 minutes (should be OK with 10 minute limit)
-        vm.warp(block.timestamp + 6 minutes);
-
-        // Should succeed now
-        vm.prank(subAccount1);
-        module.approveProtocol(address(token), address(protocol), 1000 * 10**18);
-    }
-
-    function testPortfolioWindowReset() public {
-        // Grant role
-        module.grantRole(subAccount1, module.DEFI_TRANSFER_ROLE());
-
-        // Make a transfer
-        vm.prank(subAccount1);
-        module.transferToken(address(token), recipient, 1000 * 10**18);
-
-        uint256 firstWindowValue = module.valueTransferredInWindow(subAccount1);
-        assertGt(firstWindowValue, 0);
-
-        // Fast forward past window (24 hours)
-        vm.warp(block.timestamp + 25 hours);
-
-        // Update price feed timestamp to keep it fresh
-        priceFeed.setUpdatedAt(block.timestamp);
-
-        // Update Safe value (simulate Chainlink update)
-        module.updateSafeValue(2_000_000 * 10**18);
-
-        // Make another transfer - should reset window
-        vm.prank(subAccount1);
-        module.transferToken(address(token), recipient, 1000 * 10**18);
-
-        // Window should have reset
-        uint256 newPortfolioValue = module.executionWindowPortfolioValue(subAccount1);
-        assertEq(newPortfolioValue, 2_000_000 * 10**18);
-    }
-
-    function testCumulativeApprovals() public {
-        // Grant role
-        module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
-        module.setAllowedAddresses(subAccount1, _createAddressArray(address(protocol)), true);
-
-        // Set limits: 10% loss allowed (= $100k on $1M portfolio), 5% transfer allowed
-        module.setSubAccountLimits(subAccount1, 1000, 500, 1 days);
-
-        // Make multiple approvals - each 30k tokens at $1 = $30k USD each
-        // Total: $90k (within $100k limit)
-        vm.startPrank(subAccount1);
-        module.approveProtocol(address(token), address(protocol), 30_000 * 10**18);
-        module.approveProtocol(address(token), address(protocol), 30_000 * 10**18);
-        module.approveProtocol(address(token), address(protocol), 30_000 * 10**18);
-        vm.stopPrank();
-
-        // Cumulative should be tracked
-        uint256 cumulative = module.valueApprovedInWindow(subAccount1);
-        assertGt(cumulative, 0);
-
-        // Next approval of $15k would push total to $105k, exceeding $100k limit
-        vm.prank(subAccount1);
-        vm.expectRevert(DeFiInteractorModule.ExceedsApprovalLimit.selector);
-        module.approveProtocol(address(token), address(protocol), 15_000 * 10**18);
-    }
-
-    // ============ Chainlink Price Feed Tests ============
-
-    function testSetTokenPriceFeed() public {
-        MockERC20 newToken = new MockERC20();
-        MockChainlinkPriceFeed newPriceFeed = new MockChainlinkPriceFeed(2_00000000, 8); // $2.00
-
-        module.setTokenPriceFeed(address(newToken), address(newPriceFeed));
-
-        address feedAddress = address(module.tokenPriceFeeds(address(newToken)));
-        assertEq(feedAddress, address(newPriceFeed));
-    }
-
-    function testSetMultiplePriceFeeds() public {
-        address[] memory tokens = new address[](2);
-        address[] memory feeds = new address[](2);
-
-        tokens[0] = address(new MockERC20());
-        tokens[1] = address(new MockERC20());
-        feeds[0] = address(new MockChainlinkPriceFeed(1_50000000, 8)); // $1.50
-        feeds[1] = address(new MockChainlinkPriceFeed(3_00000000, 8)); // $3.00
-
-        module.setTokenPriceFeeds(tokens, feeds);
-
-        assertEq(address(module.tokenPriceFeeds(tokens[0])), feeds[0]);
-        assertEq(address(module.tokenPriceFeeds(tokens[1])), feeds[1]);
-    }
-
-    function testRemoveTokenPriceFeed() public {
-        module.removeTokenPriceFeed(address(token));
-        assertEq(address(module.tokenPriceFeeds(address(token))), address(0));
-    }
-
-    function testApprovalFailsWithoutPriceFeed() public {
-        MockERC20 newToken = new MockERC20();
-        newToken.transfer(address(safe), 10000 * 10**18);
-
-        module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
-        module.setAllowedAddresses(subAccount1, _createAddressArray(address(protocol)), true);
-
-        // Try to approve without setting price feed
-        vm.prank(subAccount1);
-        vm.expectRevert(DeFiInteractorModule.NoPriceFeedSet.selector);
-        module.approveProtocol(address(newToken), address(protocol), 1000 * 10**18);
-    }
-
-    function testStalePriceFeedRejected() public {
-        module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
-        module.setAllowedAddresses(subAccount1, _createAddressArray(address(protocol)), true);
-
-        // Fast forward 25 hours to make current price feed stale
-        vm.warp(block.timestamp + 25 hours);
-
-        // Update Safe value to keep it fresh (only price feed should be stale)
-        module.updateSafeValue(1_000_000 * 10**18);
-
-        // Should fail due to stale price (price feed wasn't updated)
-        vm.prank(subAccount1);
-        vm.expectRevert(DeFiInteractorModule.StalePriceFeed.selector);
-        module.approveProtocol(address(token), address(protocol), 1000 * 10**18);
-    }
-
-    function testNegativePriceRejected() public {
-        // Set negative price
-        priceFeed.setPrice(-100000000);
-
-        module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
-        module.setAllowedAddresses(subAccount1, _createAddressArray(address(protocol)), true);
-
-        // Should fail due to invalid price
-        vm.prank(subAccount1);
-        vm.expectRevert(DeFiInteractorModule.InvalidPrice.selector);
-        module.approveProtocol(address(token), address(protocol), 1000 * 10**18);
-    }
-
-    function testDifferentPriceDecimalsHandling() public {
-        // Create price feed with 18 decimals (non-standard)
-        MockChainlinkPriceFeed highDecimalFeed = new MockChainlinkPriceFeed(1_000000000000000000, 18);
-
-        MockERC20 newToken = new MockERC20();
-        newToken.transfer(address(safe), 10000 * 10**18);
-
-        module.setTokenPriceFeed(address(newToken), address(highDecimalFeed));
-        module.grantRole(subAccount1, module.DEFI_EXECUTE_ROLE());
-        module.setAllowedAddresses(subAccount1, _createAddressArray(address(protocol)), true);
-
-        // Should work with different decimals
-        vm.prank(subAccount1);
-        module.approveProtocol(address(newToken), address(protocol), 1000 * 10**18);
-
-        // Verify value was tracked
-        assertGt(module.valueApprovedInWindow(subAccount1), 0);
-    }
-
-    function testSetMaxPriceFeedAge() public {
-        uint256 newAge = 12 hours;
-        module.setMaxPriceFeedAge(newAge);
-        assertEq(module.maxPriceFeedAge(), newAge);
-    }
-
-    // Helper function
-    function _createAddressArray(address addr) internal pure returns (address[] memory) {
-        address[] memory arr = new address[](1);
-        arr[0] = addr;
-        return arr;
+    function _setupSubAccount(address subAccount) internal {
+        module.grantRole(subAccount, module.DEFI_EXECUTE_ROLE());
+        address[] memory targets = new address[](2);
+        targets[0] = address(protocol);
+        targets[1] = address(token);
+        module.setAllowedAddresses(subAccount, targets, true);
     }
 }

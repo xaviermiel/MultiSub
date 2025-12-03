@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import {Module} from "./base/Module.sol";
 import {IMorphoVault} from "./interfaces/IMorphoVault.sol";
 import {ISafe} from "./interfaces/ISafe.sol";
+import {ICalldataParser} from "./interfaces/ICalldataParser.sol";
 import {AggregatorV3Interface} from "./interfaces/AggregatorV3Interface.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
@@ -14,11 +15,16 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 
 /**
  * @title DeFiInteractorModule
- * @notice Custom Zodiac module for executing DeFi operations with role-based permissions
- * @dev This module handles roles, allowed addresses, and sub-account limits internally
+ * @notice Custom Zodiac module for executing DeFi operations with spending limits
+ * @dev Implements the Acquired Balance Model for flexible spending control
+ *      - Original tokens (in Safe at window start) cost spending to use
+ *      - Acquired tokens (from operations) are free to use
+ *      - Spending is one-way: consumed by deposits/swaps, never recovered
  */
 contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     using SafeERC20 for IERC20;
+
+    // ============ Constants ============
 
     /// @notice Role ID for generic protocol execution
     uint16 public constant DEFI_EXECUTE_ROLE = 1;
@@ -26,34 +32,67 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     /// @notice Role ID for token transfers
     uint16 public constant DEFI_TRANSFER_ROLE = 2;
 
+    /// @notice Default maximum spending percentage per window (basis points)
+    uint256 public constant DEFAULT_MAX_SPENDING_BPS = 500; // 5%
+
+    /// @notice Default time window for spending limits (24 hours)
+    uint256 public constant DEFAULT_WINDOW_DURATION = 1 days;
+
+    // ============ Operation Type Classification ============
+
+    /// @notice Operation types for selector-based classification
+    enum OperationType {
+        UNKNOWN,    // Must revert - unregistered selector
+        SWAP,       // Costs spending (from original), output is acquired
+        DEPOSIT,    // Costs spending (from original), tracked for withdrawal matching
+        WITHDRAW,   // FREE, output becomes acquired if matched to deposit
+        CLAIM,      // FREE, output becomes acquired if from subaccount's tx in 24h
+        APPROVE     // FREE but capped, enables future operations
+    }
+
+    /// @notice Registered operation type for each function selector
+    mapping(bytes4 => OperationType) public selectorType;
+
+    /// @notice Parser contract for each protocol
+    mapping(address => ICalldataParser) public protocolParsers;
+
+    // ============ Oracle-Managed State ============
+
+    /// @notice Spending allowance per sub-account (set by oracle, USD with 18 decimals)
+    mapping(address => uint256) public spendingAllowance;
+
+    /// @notice Acquired (free-to-use) balance per sub-account per token
+    mapping(address => mapping(address => uint256)) public acquiredBalance;
+
+    /// @notice Authorized oracle address (Chainlink CRE)
+    address public authorizedOracle;
+
+    /// @notice Last oracle update timestamp per sub-account
+    mapping(address => uint256) public lastOracleUpdate;
+
+    /// @notice Maximum age for oracle data before operations are blocked
+    uint256 public maxOracleAge = 15 minutes;
+
     // ============ Safe Value Storage ============
 
     /// @notice Struct to store Safe's USD value data
     struct SafeValue {
-        uint256 totalValueUSD;  // Total USD value with 18 decimals (e.g., 1000.50 USD = 1000500000000000000000)
+        uint256 totalValueUSD;  // Total USD value with 18 decimals
         uint256 lastUpdated;    // Timestamp of last update
         uint256 updateCount;    // Number of updates received
     }
 
-    /// @notice Safe's current USD value (avatar address is the Safe)
+    /// @notice Safe's current USD value
     SafeValue public safeValue;
 
-    /// @notice Authorized updater (Chainlink CRE proxy contract)
-    address public authorizedUpdater;
+    /// @notice Maximum age for Safe value before considered stale
+    uint256 public maxSafeValueAge = 15 minutes;
 
-    /// @notice Default maximum percentage of portfolio value loss allowed per window (basis points)
-    uint256 public constant DEFAULT_MAX_LOSS_BPS = 500; // 5%
-
-    /// @notice Default maximum percentage of assets a sub-account can transfer (basis points)
-    uint256 public constant DEFAULT_MAX_TRANSFER_BPS = 1000; // 1%
-
-    /// @notice Default time window for cumulative limit tracking (24 hours)
-    uint256 public constant DEFAULT_LIMIT_WINDOW_DURATION = 1 days;
+    // ============ Sub-Account Configuration ============
 
     /// @notice Configuration for sub-account limits
     struct SubAccountLimits {
-        uint256 maxLossBps;         // Maximum portfolio value loss in basis points
-        uint256 maxTransferBps;     // Maximum portfolio value transfer in basis points        
+        uint256 maxSpendingBps;     // Maximum spending in basis points
         uint256 windowDuration;     // Time window duration in seconds
         bool isConfigured;          // Whether limits have been explicitly set
     }
@@ -61,67 +100,33 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     /// @notice Per-sub-account limit configuration
     mapping(address => SubAccountLimits) public subAccountLimits;
 
-    /// @notice Portfolio value at start of execution window: subAccount => value
-    mapping(address => uint256) public executionWindowPortfolioValue;
-
-    /// @notice Window start time for executions: subAccount => timestamp
-    mapping(address => uint256) public executionWindowStart;
-
-    /// @notice Cumulative USD value approved in current window: subAccount => amount (18 decimals)
-    mapping(address => uint256) public valueApprovedInWindow;
-
-    /// @notice Cumulative USD value transferred in current window: subAccount => amount (18 decimals)
-    mapping(address => uint256) public valueTransferredInWindow;
-
-    /// @notice Maximum age for SafeValue before it's considered stale (default: 15 minutes)
-    uint256 public maxSafeValueAge = 15 minutes;
-
-    /// @notice Maximum age for Chainlink price feed data (default: 24 hours)
-    uint256 public maxPriceFeedAge = 24 hours;
-
-    /// @notice Mapping of token address to Chainlink price feed
-    mapping(address => AggregatorV3Interface) public tokenPriceFeeds;
-
-    /// @notice Per-sub-account allowed addresses: subAccount => target address => allowed
+    /// @notice Per-sub-account allowed addresses: subAccount => target => allowed
     mapping(address => mapping(address => bool)) public allowedAddresses;
-
-    /// @notice roles => subAccount[]
-    mapping(uint16 => address[]) public subaccount;
 
     /// @notice Sub-account roles: subAccount => role => has role
     mapping(address => mapping(uint16 => bool)) public subAccountRoles;
 
-    /// @notice Cumulative transfers in current window: subAccount => token address => amount
-    mapping(address => mapping(address => uint256)) public transferredInWindow;
+    /// @notice Role members: role => subAccount[]
+    mapping(uint16 => address[]) public subaccounts;
 
-    /// @notice Window start time for transfers: subAccount => token address => timestamp
-    mapping(address => mapping(address => uint256)) public transferWindowStart;
+    // ============ Price Feeds ============
 
-    /// @notice Safe's balance at start of transfer window: subAccount => token address => balance
-    mapping(address => mapping(address => uint256)) public transferWindowBalance;
+    /// @notice Chainlink price feed per token
+    mapping(address => AggregatorV3Interface) public tokenPriceFeeds;
+
+    /// @notice Maximum age for Chainlink price feed data
+    uint256 public maxPriceFeedAge = 24 hours;
 
     // ============ Events ============
 
     event RoleAssigned(address indexed member, uint16 indexed roleId, uint256 timestamp);
     event RoleRevoked(address indexed member, uint16 indexed roleId, uint256 timestamp);
+
     event SubAccountLimitsSet(
         address indexed subAccount,
-        uint256 maxLossBps,
-        uint256 maxTransferBps,
+        uint256 maxSpendingBps,
         uint256 windowDuration,
         uint256 timestamp
-    );
-
-    event ProtocolExecuted(
-        address indexed subAccount,
-        address indexed target,
-        uint256 timestamp
-    );
-
-    event ExecutionWindowReset(
-        address indexed subAccount,
-        uint256 newWindowStart,
-        uint256 portfolioValue
     );
 
     event AllowedAddressesSet(
@@ -131,149 +136,92 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         uint256 timestamp
     );
 
+    /// @notice Emitted on every protocol interaction (for oracle consumption)
+    event ProtocolExecution(
+        address indexed subAccount,
+        address indexed target,
+        OperationType opType,
+        address tokenIn,
+        uint256 amountIn,
+        address tokenOut,
+        uint256 amountOut,
+        uint256 spendingCost,
+        uint256 timestamp
+    );
+
     event TransferExecuted(
         address indexed subAccount,
         address indexed token,
         address indexed recipient,
         uint256 amount,
-        uint256 safeBalanceBefore,
-        uint256 safeBalanceAfter,
-        uint256 cumulativeInWindow,
-        uint256 percentageOfBalance,
+        uint256 spendingCost,
         uint256 timestamp
     );
 
-    event TransferWindowReset(address indexed subAccount, address indexed token, uint256 newWindowStart);
+    event SafeValueUpdated(uint256 totalValueUSD, uint256 timestamp, uint256 updateCount);
+    event OracleUpdated(address indexed oldOracle, address indexed newOracle);
+
+    event SpendingAllowanceUpdated(
+        address indexed subAccount,
+        uint256 newAllowance,
+        uint256 timestamp
+    );
+
+    event AcquiredBalanceUpdated(
+        address indexed subAccount,
+        address indexed token,
+        uint256 newBalance,
+        uint256 timestamp
+    );
+
+    event SelectorRegistered(bytes4 indexed selector, OperationType opType);
+    event SelectorUnregistered(bytes4 indexed selector);
+    event ParserRegistered(address indexed protocol, address parser);
 
     event EmergencyPaused(address indexed by, uint256 timestamp);
     event EmergencyUnpaused(address indexed by, uint256 timestamp);
 
-    event UnusualActivity(
-        address indexed subAccount,
-        string activityType,
-        uint256 value,
-        uint256 threshold,
-        uint256 timestamp
-    );
+    // ============ Errors ============
 
-    event ApprovalExecuted(
-        address indexed subAccount,
-        address indexed token,
-        address indexed protocol,
-        uint256 amount,
-        uint256 timestamp
-    );
-
-    event SafeValueUpdated(
-        uint256 totalValueUSD,
-        uint256 timestamp,
-        uint256 updateCount
-    );
-
-    event AuthorizedUpdaterChanged(
-        address indexed oldUpdater,
-        address indexed newUpdater
-    );
-
-    event PortfolioWindowReset(
-        address indexed subAccount,
-        uint256 newWindowStart,
-        uint256 portfolioValueUSD,
-        uint256 timestamp
-    );
-
-    event ApprovalValueChecked(
-        address indexed subAccount,
-        address indexed token,
-        uint256 approvalAmountUSD,
-        uint256 cumulativeApprovedUSD,
-        uint256 portfolioValueUSD,
-        uint256 limitBps
-    );
-
-    event TransferValueChecked(
-        address indexed subAccount,
-        address indexed token,
-        uint256 transferAmountUSD,
-        uint256 cumulativeTransferredUSD,
-        uint256 portfolioValueUSD,
-        uint256 limitBps
-    );
-
-    event MaxSafeValueAgeUpdated(
-        uint256 oldAge,
-        uint256 newAge
-    );
-
-    event MaxPriceFeedAgeUpdated(
-        uint256 oldAge,
-        uint256 newAge
-    );
-
-    event TokenPriceFeedSet(
-        address indexed token,
-        address indexed priceFeed
-    );
-
-    event TokenPriceFeedRemoved(
-        address indexed token
-    );
-
-    event SubaccountAllowancesUpdated(
-        address indexed subAccount,
-        uint256 balanceChange,
-        uint256 newApprovedAllowance,
-        uint256 timestamp
-    );
-
+    error UnknownSelector(bytes4 selector);
     error TransactionFailed();
     error ApprovalFailed();
     error InvalidLimitConfiguration();
     error AddressNotAllowed();
-    error ExceedsMaxLoss();
-    error OracleNotSet();
-    error NoTrackedTokens();
-    error ApprovalNotAllowed();
-    error ApprovalExceedsLimit();
-    error ExceedsTransferLimit();
-    error OnlyAuthorizedUpdater();
-    error InvalidUpdaterAddress();
+    error ExceedsSpendingLimit();
+    error OnlyAuthorizedOracle();
+    error InvalidOracleAddress();
+    error StaleOracleData();
     error StalePortfolioValue();
-    error ExceedsApprovalLimit();
-    error ExceedsPortfolioLimit();
     error InvalidPriceFeed();
     error StalePriceFeed();
     error InvalidPrice();
     error NoPriceFeedSet();
+    error ApprovalExceedsLimit();
+    error SpenderNotAllowed();
+
+    // ============ Constructor ============
 
     /**
      * @notice Initialize the DeFi Interactor Module
      * @param _avatar The Safe address (avatar)
      * @param _owner The owner address (typically the Safe itself)
-     * @param _authorizedUpdater The Chainlink CRE proxy address authorized to update Safe value
+     * @param _authorizedOracle The Chainlink CRE address authorized to update state
      */
-    constructor(address _avatar, address _owner, address _authorizedUpdater)
+    constructor(address _avatar, address _owner, address _authorizedOracle)
         Module(_avatar, _avatar, _owner)
     {
-        // Avatar and target are the same (the Safe)
-        // Owner is typically the Safe for configuration functions
-        if (_authorizedUpdater == address(0)) revert InvalidUpdaterAddress();
-        authorizedUpdater = _authorizedUpdater;
+        if (_authorizedOracle == address(0)) revert InvalidOracleAddress();
+        authorizedOracle = _authorizedOracle;
     }
 
     // ============ Emergency Controls ============
 
-    /**
-     * @notice Pause all operations (only owner can call)
-     */
     function pause() external onlyOwner {
         _pause();
         emit EmergencyPaused(msg.sender, block.timestamp);
     }
 
-    /**
-     * @notice Unpause all operations (only owner can call)
-     */
     function unpause() external onlyOwner {
         _unpause();
         emit EmergencyUnpaused(msg.sender, block.timestamp);
@@ -281,31 +229,17 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
     // ============ Role Management ============
 
-    /**
-     * @notice Grant a role to a sub-account (only owner can do this)
-     * @param member The address to grant the role to
-     * @param roleId The role ID to grant
-     */
     function grantRole(address member, uint16 roleId) external onlyOwner {
         if (member == address(0)) revert InvalidAddress();
-
-        // Only add to array if member doesn't already have this role
         if (!subAccountRoles[member][roleId]) {
             subAccountRoles[member][roleId] = true;
-            subaccount[roleId].push(member);
+            subaccounts[roleId].push(member);
             emit RoleAssigned(member, roleId, block.timestamp);
         }
     }
 
-    /**
-     * @notice Revoke a role from a sub-account (only owner can do this)
-     * @param member The address to revoke the role from
-     * @param roleId The role ID to revoke
-     */
     function revokeRole(address member, uint16 roleId) external onlyOwner {
         if (member == address(0)) revert InvalidAddress();
-
-        // Only remove if member currently has this role
         if (subAccountRoles[member][roleId]) {
             subAccountRoles[member][roleId] = false;
             _removeFromSubaccountArray(roleId, member);
@@ -313,18 +247,11 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         }
     }
 
-    /**
-     * @notice Internal function to remove an address from the subaccount array
-     * @param roleId The role ID
-     * @param member The address to remove
-     */
     function _removeFromSubaccountArray(uint16 roleId, address member) internal {
-        address[] storage accounts = subaccount[roleId];
+        address[] storage accounts = subaccounts[roleId];
         uint256 length = accounts.length;
-
         for (uint256 i = 0; i < length; i++) {
             if (accounts[i] == member) {
-                // Move last element to this position and pop
                 accounts[i] = accounts[length - 1];
                 accounts.pop();
                 break;
@@ -332,526 +259,439 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         }
     }
 
-    /**
-     * @notice Check if an address has a specific role
-     * @param member The address to check
-     * @param roleId The role ID to check
-     * @return bool Whether the address has the role
-     */
     function hasRole(address member, uint16 roleId) public view returns (bool) {
         return subAccountRoles[member][roleId];
     }
 
-    /**
-     * @notice Get all sub-accounts for a specific role
-     * @param roleId The role ID to query
-     * @return address[] Array of addresses that have this role
-     */
     function getSubaccountsByRole(uint16 roleId) external view returns (address[] memory) {
-        return subaccount[roleId];
+        return subaccounts[roleId];
+    }
+
+    function getSubaccountCount(uint16 roleId) external view returns (uint256) {
+        return subaccounts[roleId].length;
+    }
+
+    // ============ Selector Registry ============
+
+    /**
+     * @notice Register a function selector with its operation type
+     * @param selector The function selector (first 4 bytes of calldata)
+     * @param opType The operation type classification
+     */
+    function registerSelector(bytes4 selector, OperationType opType) external onlyOwner {
+        require(opType != OperationType.UNKNOWN, "Cannot register as UNKNOWN");
+        selectorType[selector] = opType;
+        emit SelectorRegistered(selector, opType);
     }
 
     /**
-     * @notice Get the count of sub-accounts for a specific role
-     * @param roleId The role ID to query
-     * @return uint256 Number of addresses that have this role
+     * @notice Unregister a function selector
+     * @param selector The function selector to unregister
      */
-    function getSubaccountCount(uint16 roleId) external view returns (uint256) {
-        return subaccount[roleId].length;
+    function unregisterSelector(bytes4 selector) external onlyOwner {
+        delete selectorType[selector];
+        emit SelectorUnregistered(selector);
+    }
+
+    /**
+     * @notice Register a parser for a protocol
+     * @param protocol The protocol address
+     * @param parser The parser contract address
+     */
+    function registerParser(address protocol, address parser) external onlyOwner {
+        protocolParsers[protocol] = ICalldataParser(parser);
+        emit ParserRegistered(protocol, parser);
     }
 
     // ============ Sub-Account Configuration ============
 
-    /**
-     * @notice Set custom limits for a sub-account (only owner can call)
-     * @param subAccount The sub-account address to configure
-     * @param maxLossBps Maximum portfolio loss percentage in basis points (max 10000)
-     * @param maxTransferBps Maximum transfer percentage in basis points (max 10000)
-     * @param windowDuration Time window duration in seconds (min 1 hour)
-     */
     function setSubAccountLimits(
         address subAccount,
-        uint256 maxLossBps,
-        uint256 maxTransferBps,
+        uint256 maxSpendingBps,
         uint256 windowDuration
     ) external onlyOwner {
         if (subAccount == address(0)) revert InvalidAddress();
-        // Validate limits: BPS cannot exceed 100%, window must be at least 1 hour
-        if (maxLossBps > 10000 || maxTransferBps > 10000 || windowDuration < 1 hours) {
+        if (maxSpendingBps > 10000 || windowDuration < 1 hours) {
             revert InvalidLimitConfiguration();
         }
 
         subAccountLimits[subAccount] = SubAccountLimits({
-            maxLossBps: maxLossBps,
-            maxTransferBps: maxTransferBps,
+            maxSpendingBps: maxSpendingBps,
             windowDuration: windowDuration,
             isConfigured: true
         });
 
-        emit SubAccountLimitsSet(
-            subAccount,
-            maxLossBps,
-            maxTransferBps,
-            windowDuration,
-            block.timestamp
-        );
+        emit SubAccountLimitsSet(subAccount, maxSpendingBps, windowDuration, block.timestamp);
     }
 
-    /**
-     * @notice Get the effective limits for a sub-account
-     * @param subAccount The sub-account address
-     * @return maxLossBps The maximum portfolio loss percentage in basis points
-     * @return maxTransferBps The maximum transfer percentage in basis points
-     * @return windowDuration The time window duration in seconds
-     */
     function getSubAccountLimits(address subAccount) public view returns (
-        uint256 maxLossBps,
-        uint256 maxTransferBps,
+        uint256 maxSpendingBps,
         uint256 windowDuration
     ) {
         SubAccountLimits memory limits = subAccountLimits[subAccount];
         if (limits.isConfigured) {
-            return (limits.maxLossBps, limits.maxTransferBps, limits.windowDuration);
+            return (limits.maxSpendingBps, limits.windowDuration);
         }
-        // Return defaults if not configured
-        return (DEFAULT_MAX_LOSS_BPS, DEFAULT_MAX_TRANSFER_BPS, DEFAULT_LIMIT_WINDOW_DURATION);
+        return (DEFAULT_MAX_SPENDING_BPS, DEFAULT_WINDOW_DURATION);
     }
 
-    /**
-     * @notice Set allowed addresses for a sub-account (only owner can call)
-     * @param subAccount The sub-account address to configure
-     * @param targets Array of target addresses to allow/disallow
-     * @param allowed Whether to allow or disallow these addresses
-     */
     function setAllowedAddresses(
         address subAccount,
         address[] calldata targets,
         bool allowed
     ) external onlyOwner {
         if (subAccount == address(0)) revert InvalidAddress();
-
         for (uint256 i = 0; i < targets.length; i++) {
             if (targets[i] == address(0)) revert InvalidAddress();
             allowedAddresses[subAccount][targets[i]] = allowed;
         }
-
         emit AllowedAddressesSet(subAccount, targets, allowed, block.timestamp);
     }
 
-    // ============ Protocol Approval Management ============
+    // ============ Main Entry Point ============
 
     /**
-     * @notice Approve a token for a whitelisted protocol
-     * @param token The token to approve
-     * @param target The protocol to approve for (must be whitelisted)
-     * @param amount The amount to approve (must be within sub-account's maxLossBps limit)
+     * @notice Execute a protocol interaction with automatic operation classification
+     * @param target The protocol address to call
+     * @param data The calldata to execute
+     * @param tokenIn The input token (for spending check)
+     * @param amountIn The input amount (for spending check)
      */
-    function approveProtocol(
-        address token,
+    function executeOnProtocol(
         address target,
-        uint256 amount
-    ) external nonReentrant whenNotPaused {
-        // Check role permission
+        bytes calldata data,
+        address tokenIn,
+        uint256 amountIn
+    ) external nonReentrant whenNotPaused returns (bytes memory) {
+        // 1. Validate permissions
         if (!hasRole(msg.sender, DEFI_EXECUTE_ROLE)) revert Unauthorized();
-
-        // This ensures only owner-approved protocols can receive token approvals
         if (!allowedAddresses[msg.sender][target]) revert AddressNotAllowed();
+        _requireFreshOracle(msg.sender);
 
-        // Reset portfolio window if needed
-        _resetPortfolioWindowIfNeeded(msg.sender);
+        // 2. Classify operation from selector
+        bytes4 selector = bytes4(data[:4]);
+        OperationType opType = selectorType[selector];
 
-        // Estimate USD value of the approval amount
-        uint256 approvalValueUSD = _estimateTokenValueUSD(token, amount);
+        // 3. Route based on type
+        if (opType == OperationType.UNKNOWN) {
+            revert UnknownSelector(selector);
+        } else if (opType == OperationType.WITHDRAW || opType == OperationType.CLAIM) {
+            return _executeNoSpendingCheck(msg.sender, target, data, opType);
+        } else if (opType == OperationType.DEPOSIT || opType == OperationType.SWAP) {
+            return _executeWithSpendingCheck(msg.sender, target, data, tokenIn, amountIn, opType);
+        } else if (opType == OperationType.APPROVE) {
+            return _executeApproveWithCap(msg.sender, target, data, tokenIn, amountIn);
+        }
 
-        // Get sub-account limits
-        (uint256 maxLossBps, , ) = getSubAccountLimits(msg.sender);
-
-        // Get current portfolio value and calculate limit
-        uint256 portfolioValue = executionWindowPortfolioValue[msg.sender];
-        uint256 maxApprovalValue = Math.mulDiv(portfolioValue, maxLossBps, 10000, Math.Rounding.Floor);
-
-        // Update cumulative approved value
-        uint256 newCumulativeApproved = valueApprovedInWindow[msg.sender] + approvalValueUSD;
-
-        // Check if approval exceeds limit
-        if (newCumulativeApproved > maxApprovalValue) revert ExceedsApprovalLimit();
-
-        // Update tracking
-        valueApprovedInWindow[msg.sender] = newCumulativeApproved;
-
-        // Emit tracking event
-        emit ApprovalValueChecked(
-            msg.sender,
-            token,
-            approvalValueUSD,
-            newCumulativeApproved,
-            portfolioValue,
-            maxLossBps
-        );
-
-        // Execute approval through the module to Safe
-        bytes memory approveData = abi.encodeWithSelector(
-            IERC20.approve.selector,
-            target,
-            amount
-        );
-
-        bool success = exec(token, 0, approveData, ISafe.Operation.Call);
-
-        if (!success) revert ApprovalFailed();
-
-        emit ApprovalExecuted(msg.sender, token, target, amount, block.timestamp);
+        revert UnknownSelector(selector);
     }
 
-    // ============ Token Transfer ============
+    // ============ Spending Check Logic ============
+
+    function _executeWithSpendingCheck(
+        address subAccount,
+        address target,
+        bytes calldata data,
+        address tokenIn,
+        uint256 amountIn,
+        OperationType opType
+    ) internal returns (bytes memory) {
+        // 1. Verify tokenIn/amountIn match calldata (if parser available)
+        ICalldataParser parser = protocolParsers[target];
+        if (address(parser) != address(0)) {
+            address parsedToken = parser.extractInputToken(data);
+            uint256 parsedAmount = parser.extractInputAmount(data);
+            // Allow address(0) from parser to mean "use provided token" (e.g., ERC4626)
+            if (parsedToken != address(0)) {
+                require(parsedToken == tokenIn, "Token mismatch");
+            }
+            require(parsedAmount == amountIn, "Amount mismatch");
+        }
+
+        // 2. Calculate spending cost (acquired balance is free)
+        uint256 acquired = acquiredBalance[subAccount][tokenIn];
+        uint256 fromOriginal = amountIn > acquired ? amountIn - acquired : 0;
+        uint256 spendingCost = _estimateTokenValueUSD(tokenIn, fromOriginal);
+
+        // 3. Check spending allowance
+        if (spendingCost > spendingAllowance[subAccount]) {
+            revert ExceedsSpendingLimit();
+        }
+
+        // 4. Deduct spending and acquired balance
+        spendingAllowance[subAccount] -= spendingCost;
+        uint256 usedFromAcquired = amountIn > acquired ? acquired : amountIn;
+        acquiredBalance[subAccount][tokenIn] -= usedFromAcquired;
+
+        // 5. Capture balance before for output tracking
+        address tokenOut = _getOutputToken(target, data, parser);
+        uint256 balanceBefore = tokenOut != address(0) ? IERC20(tokenOut).balanceOf(avatar) : 0;
+
+        // 6. Execute
+        bool success = exec(target, 0, data, ISafe.Operation.Call);
+        if (!success) revert TransactionFailed();
+
+        // 7. Calculate output amount
+        uint256 amountOut = 0;
+        if (tokenOut != address(0)) {
+            amountOut = IERC20(tokenOut).balanceOf(avatar) - balanceBefore;
+        }
+
+        // 8. Emit event for oracle
+        emit ProtocolExecution(
+            subAccount,
+            target,
+            opType,
+            tokenIn,
+            amountIn,
+            tokenOut,
+            amountOut,
+            spendingCost,
+            block.timestamp
+        );
+
+        return "";
+    }
+
+    // ============ No Spending Check Logic ============
+
+    function _executeNoSpendingCheck(
+        address subAccount,
+        address target,
+        bytes calldata data,
+        OperationType opType
+    ) internal returns (bytes memory) {
+        // 1. Get output token from parser if available
+        ICalldataParser parser = protocolParsers[target];
+        address tokenOut = _getOutputToken(target, data, parser);
+        uint256 balanceBefore = tokenOut != address(0) ? IERC20(tokenOut).balanceOf(avatar) : 0;
+
+        // 2. Execute (NO spending check - withdrawals and claims are free)
+        bool success = exec(target, 0, data, ISafe.Operation.Call);
+        if (!success) revert TransactionFailed();
+
+        // 3. Calculate received amount
+        uint256 amountOut = 0;
+        if (tokenOut != address(0)) {
+            amountOut = IERC20(tokenOut).balanceOf(avatar) - balanceBefore;
+        }
+
+        // 4. Emit event for oracle to:
+        //    - Mark received as acquired if matched to deposit (WITHDRAW)
+        //    - Mark received as acquired if from subaccount's tx in 24h (CLAIM)
+        emit ProtocolExecution(
+            subAccount,
+            target,
+            opType,
+            address(0), // no tokenIn for withdraw/claim
+            0,          // no amountIn
+            tokenOut,
+            amountOut,
+            0,          // no spending cost
+            block.timestamp
+        );
+
+        return "";
+    }
+
+    // ============ Approve Logic ============
+
+    function _executeApproveWithCap(
+        address subAccount,
+        address target,  // The token contract
+        bytes calldata data,
+        address tokenIn, // Same as target for approve
+        uint256 amountIn // Approval amount
+    ) internal returns (bytes memory) {
+        // 1. Extract spender from calldata
+        // approve(address spender, uint256 amount) - spender is first arg
+        address spender;
+        assembly {
+            // Skip selector (4 bytes), load first 32 bytes of args
+            spender := calldataload(add(data.offset, 4))
+        }
+
+        // 2. Verify spender is whitelisted
+        if (!allowedAddresses[subAccount][spender]) {
+            revert SpenderNotAllowed();
+        }
+
+        // 3. Check cap: acquired tokens unlimited, original capped by spending allowance
+        uint256 acquired = acquiredBalance[subAccount][tokenIn];
+
+        if (amountIn > acquired) {
+            // Portion from original tokens - must fit in spending allowance
+            uint256 originalPortion = amountIn - acquired;
+            uint256 originalValueUSD = _estimateTokenValueUSD(tokenIn, originalPortion);
+            if (originalValueUSD > spendingAllowance[subAccount]) {
+                revert ApprovalExceedsLimit();
+            }
+        }
+
+        // 4. Execute approve - does NOT deduct spending (deducted at swap/deposit)
+        bool success = exec(target, 0, data, ISafe.Operation.Call);
+        if (!success) revert ApprovalFailed();
+
+        // 5. Emit event
+        emit ProtocolExecution(
+            subAccount,
+            target,
+            OperationType.APPROVE,
+            tokenIn,
+            amountIn,
+            address(0),
+            0,
+            0, // No spending cost for approve
+            block.timestamp
+        );
+
+        return "";
+    }
+
+    // ============ Transfer Function ============
 
     /**
-     * @notice Transfer tokens from Safe to a recipient with role-based restrictions
-     * @param token The token address to transfer
-     * @param recipient The recipient address
-     * @param amount The amount to transfer
-     * @return success Whether the transfer succeeded
+     * @notice Transfer tokens from Safe - always costs full spending amount
      */
     function transferToken(
         address token,
         address recipient,
         uint256 amount
-    ) external nonReentrant whenNotPaused returns (bool success) {
-        // Check role permission
+    ) external nonReentrant whenNotPaused returns (bool) {
         if (!hasRole(msg.sender, DEFI_TRANSFER_ROLE)) revert Unauthorized();
-
-        // Validate addresses
         if (token == address(0) || recipient == address(0)) revert InvalidAddress();
+        _requireFreshOracle(msg.sender);
 
-        IERC20 tokenContract = IERC20(token);
-        uint256 safeBalanceBefore = tokenContract.balanceOf(avatar);
-
-        // Get sub-account specific limits (use maxTransferBps for transfers)
-        (, uint256 maxTransferBps, uint256 windowDuration) = getSubAccountLimits(msg.sender);
-
-        // Reset portfolio window if needed
-        _resetPortfolioWindowIfNeeded(msg.sender);
-
-        // Estimate USD value of the transfer amount
-        uint256 transferValueUSD = _estimateTokenValueUSD(token, amount);
-
-        // Get current portfolio value and calculate USD limit
-        uint256 portfolioValue = executionWindowPortfolioValue[msg.sender];
-        uint256 maxTransferValueUSD = Math.mulDiv(portfolioValue, maxTransferBps, 10000, Math.Rounding.Floor);
-
-        // Update cumulative transferred value (USD)
-        uint256 newCumulativeTransferredUSD = valueTransferredInWindow[msg.sender] + transferValueUSD;
-
-        // Check if transfer exceeds USD limit
-        if (newCumulativeTransferredUSD > maxTransferValueUSD) revert ExceedsPortfolioLimit();
-
-        // Update tracking
-        valueTransferredInWindow[msg.sender] = newCumulativeTransferredUSD;
-
-        // Emit tracking event
-        emit TransferValueChecked(
-            msg.sender,
-            token,
-            transferValueUSD,
-            newCumulativeTransferredUSD,
-            portfolioValue,
-            maxTransferBps
-        );
-
-        // Reset token-specific window if expired or first time (for per-token tracking)
-        if (block.timestamp >= transferWindowStart[msg.sender][token] + windowDuration ||
-            transferWindowStart[msg.sender][token] == 0) {
-            transferredInWindow[msg.sender][token] = 0;
-            transferWindowStart[msg.sender][token] = block.timestamp;
-            transferWindowBalance[msg.sender][token] = safeBalanceBefore;
-            emit TransferWindowReset(msg.sender, token, block.timestamp);
+        // Transfers always cost full spending (value leaves Safe)
+        uint256 spendingCost = _estimateTokenValueUSD(token, amount);
+        if (spendingCost > spendingAllowance[msg.sender]) {
+            revert ExceedsSpendingLimit();
         }
 
-        // Calculate cumulative limit based on balance at window start (per-token check)
-        uint256 windowBalance = transferWindowBalance[msg.sender][token];
-        uint256 cumulativeTransfer = transferredInWindow[msg.sender][token] + amount;
-        uint256 maxTransfer = Math.mulDiv(windowBalance, maxTransferBps, 10000, Math.Rounding.Floor);
+        spendingAllowance[msg.sender] -= spendingCost;
 
-        if (cumulativeTransfer > maxTransfer) revert ExceedsTransferLimit();
-
-        // Calculate percentage for monitoring
-        uint256 percentageOfBalance = Math.mulDiv(amount, 10000, safeBalanceBefore, Math.Rounding.Floor);
-
-        // Alert on unusual activity (>4% in single transaction)
-        if (percentageOfBalance > 400) {
-            emit UnusualActivity(
-                msg.sender,
-                "Large transfer percentage",
-                percentageOfBalance,
-                400,
-                block.timestamp
-            );
+        // Also deduct from acquired if available
+        uint256 acquired = acquiredBalance[msg.sender][token];
+        if (acquired > 0) {
+            uint256 deductFromAcquired = amount > acquired ? acquired : amount;
+            acquiredBalance[msg.sender][token] -= deductFromAcquired;
         }
 
-        // Execute transfer through the module
+        // Execute transfer
         bytes memory transferData = abi.encodeWithSelector(
             IERC20.transfer.selector,
             recipient,
             amount
         );
 
-        success = exec(token, 0, transferData, ISafe.Operation.Call);
-
+        bool success = exec(token, 0, transferData, ISafe.Operation.Call);
         if (!success) revert TransactionFailed();
 
-        // Verify transfer executed correctly
-        uint256 safeBalanceAfter = tokenContract.balanceOf(avatar);
-        uint256 actualTransferred = safeBalanceBefore - safeBalanceAfter;
+        emit TransferExecuted(msg.sender, token, recipient, amount, spendingCost, block.timestamp);
 
-        if (actualTransferred < amount) revert TransactionFailed();
-
-        // Update cumulative tracking
-        transferredInWindow[msg.sender][token] = cumulativeTransfer;
-
-        // Emit comprehensive event
-        emit TransferExecuted(
-            msg.sender,
-            token,
-            recipient,
-            amount,
-            safeBalanceBefore,
-            safeBalanceAfter,
-            cumulativeTransfer,
-            percentageOfBalance,
-            block.timestamp
-        );
-
-        return success;
+        return true;
     }
 
-    // ============ Generic Protocol Execution ============
+    // ============ Oracle Functions ============
 
-    /**
-     * @notice Execute arbitrary calldata on a whitelisted protocol with portfolio value tracking
-     * @param target The protocol address to call
-     * @param data The calldata to execute
-     * @return result The return data from the call
-     */
-    function executeOnProtocol(
-        address target,
-        bytes calldata data
-    ) external nonReentrant whenNotPaused returns (bytes memory result) {
-        // Check role permission
-        if (!hasRole(msg.sender, DEFI_EXECUTE_ROLE)) revert Unauthorized();
-
-        // This ensures only owner-approved protocols can be executed
-        if (!allowedAddresses[msg.sender][target]) revert AddressNotAllowed();
-
-        // Block raw approve/increaseAllowance calls in calldata - use approveProtocol() instead
-        if (data.length >= 4) {
-            bytes4 selector = bytes4(data[:4]);
-            if (selector == IERC20.approve.selector || selector == bytes4(keccak256("increaseAllowance(address,uint256)"))) {
-                revert ApprovalNotAllowed();
-            }
-        }
-
-        // Execute the call through the module
-        bool success = exec(target, 0, data, ISafe.Operation.Call);
-
-        if (!success) revert TransactionFailed();
-
-        // Emit event
-        emit ProtocolExecuted(
-            msg.sender,
-            target,
-            block.timestamp
-        );
-
-        // Note: Return data is not captured with execTransactionFromModule
-        // This is a limitation of the Safe interface
-        return "";
-    }
-
-    // ============ Safe Value Storage Functions ============
-
-    /**
-     * @notice Update the USD value for the Safe
-     * @dev Only callable by the authorized updater (Chainlink CRE proxy)
-     * @param totalValueUSD The total USD value with 18 decimals
-     */
     function updateSafeValue(uint256 totalValueUSD) external {
-        if (msg.sender != authorizedUpdater) revert OnlyAuthorizedUpdater();
+        if (msg.sender != authorizedOracle) revert OnlyAuthorizedOracle();
 
         safeValue.totalValueUSD = totalValueUSD;
         safeValue.lastUpdated = block.timestamp;
         safeValue.updateCount += 1;
 
-        emit SafeValueUpdated(
-            totalValueUSD,
-            block.timestamp,
-            safeValue.updateCount
-        );
+        emit SafeValueUpdated(totalValueUSD, block.timestamp, safeValue.updateCount);
+    }
+
+    function updateSpendingAllowance(address subAccount, uint256 newAllowance) external {
+        if (msg.sender != authorizedOracle) revert OnlyAuthorizedOracle();
+
+        spendingAllowance[subAccount] = newAllowance;
+        lastOracleUpdate[subAccount] = block.timestamp;
+
+        emit SpendingAllowanceUpdated(subAccount, newAllowance, block.timestamp);
+    }
+
+    function updateAcquiredBalance(
+        address subAccount,
+        address token,
+        uint256 newBalance
+    ) external {
+        if (msg.sender != authorizedOracle) revert OnlyAuthorizedOracle();
+
+        acquiredBalance[subAccount][token] = newBalance;
+
+        emit AcquiredBalanceUpdated(subAccount, token, newBalance, block.timestamp);
     }
 
     /**
-     * @notice Get the current USD value of the Safe
-     * @return totalValueUSD The total USD value with 18 decimals
-     * @return lastUpdated Timestamp of last update
-     * @return updateCount Number of updates
+     * @notice Batch update for efficiency
      */
-    function getSafeValue()
-        external
-        view
-        returns (
-            uint256 totalValueUSD,
-            uint256 lastUpdated,
-            uint256 updateCount
-        )
-    {
-        return (
-            safeValue.totalValueUSD,
-            safeValue.lastUpdated,
-            safeValue.updateCount
-        );
+    function batchUpdate(
+        address subAccount,
+        uint256 newAllowance,
+        address[] calldata tokens,
+        uint256[] calldata balances
+    ) external {
+        if (msg.sender != authorizedOracle) revert OnlyAuthorizedOracle();
+        require(tokens.length == balances.length, "Length mismatch");
+
+        spendingAllowance[subAccount] = newAllowance;
+        lastOracleUpdate[subAccount] = block.timestamp;
+
+        for (uint256 i = 0; i < tokens.length; i++) {
+            acquiredBalance[subAccount][tokens[i]] = balances[i];
+        }
+
+        emit SpendingAllowanceUpdated(subAccount, newAllowance, block.timestamp);
     }
 
-    /**
-     * @notice Check if the Safe value is stale (not updated in specified time)
-     * @param maxAge Maximum age in seconds before considered stale
-     * @return isStale True if the data is stale
-     */
-    function isValueStale(uint256 maxAge)
-        external
-        view
-        returns (bool isStale)
-    {
-        if (safeValue.lastUpdated == 0) return true; // Never updated
-        return (block.timestamp - safeValue.lastUpdated) > maxAge;
+    function setAuthorizedOracle(address newOracle) external onlyOwner {
+        if (newOracle == address(0)) revert InvalidOracleAddress();
+        address oldOracle = authorizedOracle;
+        authorizedOracle = newOracle;
+        emit OracleUpdated(oldOracle, newOracle);
     }
 
-    /**
-     * @notice Set the authorized updater address
-     * @dev Only callable by the owner (Safe)
-     * @param newUpdater The new authorized updater address
-     */
-    function setAuthorizedUpdater(address newUpdater) external onlyOwner {
-        if (newUpdater == address(0)) revert InvalidUpdaterAddress();
-        address oldUpdater = authorizedUpdater;
-        authorizedUpdater = newUpdater;
-        emit AuthorizedUpdaterChanged(oldUpdater, newUpdater);
-    }
+    // ============ Price Feed Functions ============
 
-    /**
-     * @notice Set the maximum age for Safe value before considered stale
-     * @dev Only callable by the owner (Safe)
-     * @param newMaxAge The new maximum age in seconds
-     */
-    function setMaxSafeValueAge(uint256 newMaxAge) external onlyOwner {
-        uint256 oldAge = maxSafeValueAge;
-        maxSafeValueAge = newMaxAge;
-        emit MaxSafeValueAgeUpdated(oldAge, newMaxAge);
-    }
-
-    /**
-     * @notice Set the maximum age for Chainlink price feed data
-     * @dev Only callable by the owner (Safe)
-     * @param newMaxAge The new maximum age in seconds
-     */
-    function setMaxPriceFeedAge(uint256 newMaxAge) external onlyOwner {
-        uint256 oldAge = maxPriceFeedAge;
-        maxPriceFeedAge = newMaxAge;
-        emit MaxPriceFeedAgeUpdated(oldAge, newMaxAge);
-    }
-
-    /**
-     * @notice Set the Chainlink price feed for a token
-     * @dev Only callable by the owner (Safe)
-     * @param token The token address
-     * @param priceFeed The Chainlink price feed address
-     */
     function setTokenPriceFeed(address token, address priceFeed) external onlyOwner {
         if (token == address(0)) revert InvalidAddress();
         if (priceFeed == address(0)) revert InvalidPriceFeed();
         tokenPriceFeeds[token] = AggregatorV3Interface(priceFeed);
-        emit TokenPriceFeedSet(token, priceFeed);
     }
 
-    /**
-     * @notice Set multiple token price feeds at once
-     * @dev Only callable by the owner (Safe)
-     * @param tokens Array of token addresses
-     * @param priceFeeds Array of Chainlink price feed addresses
-     */
-    function setTokenPriceFeeds(address[] calldata tokens, address[] calldata priceFeeds) external onlyOwner {
-        if (tokens.length != priceFeeds.length) revert InvalidLimitConfiguration();
+    function setTokenPriceFeeds(
+        address[] calldata tokens,
+        address[] calldata priceFeeds
+    ) external onlyOwner {
+        require(tokens.length == priceFeeds.length, "Length mismatch");
         for (uint256 i = 0; i < tokens.length; i++) {
             if (tokens[i] == address(0)) revert InvalidAddress();
             if (priceFeeds[i] == address(0)) revert InvalidPriceFeed();
             tokenPriceFeeds[tokens[i]] = AggregatorV3Interface(priceFeeds[i]);
-            emit TokenPriceFeedSet(tokens[i], priceFeeds[i]);
         }
     }
 
-    /**
-     * @notice Remove the price feed for a token
-     * @dev Only callable by the owner (Safe)
-     * @param token The token address
-     */
-    function removeTokenPriceFeed(address token) external onlyOwner {
-        delete tokenPriceFeeds[token];
-        emit TokenPriceFeedRemoved(token);
-    }
+    // ============ Internal Helpers ============
 
-    // ============ Portfolio Value Tracking ============
-
-    /**
-     * @notice Get current portfolio value and ensure it's not stale
-     * @return portfolioValueUSD Current portfolio value in USD with 18 decimals
-     */
-    function _getPortfolioValue() internal view returns (uint256 portfolioValueUSD) {
-        if (safeValue.lastUpdated == 0) revert StalePortfolioValue();
-        if (block.timestamp - safeValue.lastUpdated > maxSafeValueAge) {
-            revert StalePortfolioValue();
-        }
-        return safeValue.totalValueUSD;
-    }
-
-    /**
-     * @notice Reset portfolio tracking window for a sub-account if expired
-     * @param subAccount The sub-account address
-     */
-    function _resetPortfolioWindowIfNeeded(address subAccount) internal {
-        (, , uint256 windowDuration) = getSubAccountLimits(subAccount);
-
-        if (block.timestamp >= executionWindowStart[subAccount] + windowDuration ||
-            executionWindowStart[subAccount] == 0) {
-
-            uint256 currentPortfolioValue = _getPortfolioValue();
-
-            executionWindowStart[subAccount] = block.timestamp;
-            executionWindowPortfolioValue[subAccount] = currentPortfolioValue;
-            valueApprovedInWindow[subAccount] = 0;
-            valueTransferredInWindow[subAccount] = 0;
-
-            emit PortfolioWindowReset(
-                subAccount,
-                block.timestamp,
-                currentPortfolioValue,
-                block.timestamp
-            );
+    function _requireFreshOracle(address subAccount) internal view {
+        if (lastOracleUpdate[subAccount] == 0) revert StaleOracleData();
+        if (block.timestamp - lastOracleUpdate[subAccount] > maxOracleAge) {
+            revert StaleOracleData();
         }
     }
 
-    /**
-     * @notice Calculate USD value of a token amount using Chainlink price feeds
-     * @dev Requires price feed to be set for the token
-     * @param token The token address
-     * @param amount The token amount (in token's native decimals)
-     * @return valueUSD The USD value with 18 decimals
-     */
-    function _estimateTokenValueUSD(address token, uint256 amount) internal view returns (uint256 valueUSD) {
+    function _estimateTokenValueUSD(
+        address token,
+        uint256 amount
+    ) internal view returns (uint256 valueUSD) {
         if (amount == 0) return 0;
 
-        // Get price feed for token
         AggregatorV3Interface priceFeed = tokenPriceFeeds[token];
         if (address(priceFeed) == address(0)) revert NoPriceFeedSet();
 
-        // Get latest price data
         (
             uint80 roundId,
             int256 answer,
@@ -860,101 +700,75 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             uint80 answeredInRound
         ) = priceFeed.latestRoundData();
 
-        // Validate price data
         if (answer <= 0) revert InvalidPrice();
         if (updatedAt == 0) revert StalePriceFeed();
         if (answeredInRound < roundId) revert StalePriceFeed();
         if (block.timestamp - updatedAt > maxPriceFeedAge) revert StalePriceFeed();
 
-        // Get price feed decimals (usually 8 for USD feeds)
         uint8 priceDecimals = priceFeed.decimals();
         uint256 price = uint256(answer);
 
-        // Get token decimals
         uint8 tokenDecimals = IERC20Metadata(token).decimals();
 
         // Calculate USD value with 18 decimals
-        // Formula: (amount * price * 10^18) / (10^tokenDecimals * 10^priceDecimals)
         valueUSD = Math.mulDiv(
             amount * price,
             10 ** 18,
             10 ** uint256(tokenDecimals + priceDecimals),
-            Math.Rounding.Ceil  // Round up for conservative estimates
+            Math.Rounding.Ceil
         );
     }
 
-    /**
-     * @notice Get the Safe's balance for multiple tokens
-     * @dev Returns the balance of the Safe (avatar) for each token in the array
-     * @param tokens Array of token addresses to query
-     * @return balances Array of balances corresponding to each token
-     */
-    function getTokenBalances(address[] calldata tokens)
-        external
-        view
-        returns (uint256[] memory balances)
-    {
+    function _getOutputToken(
+        address target,
+        bytes calldata data,
+        ICalldataParser parser
+    ) internal view returns (address) {
+        if (address(parser) != address(0)) {
+            try parser.extractOutputToken(data) returns (address token) {
+                // If parser returns address(0), try to get from vault (ERC4626)
+                if (token == address(0)) {
+                    try IMorphoVault(target).asset() returns (address asset) {
+                        return asset;
+                    } catch {
+                        return address(0);
+                    }
+                }
+                return token;
+            } catch {
+                return address(0);
+            }
+        }
+        return address(0);
+    }
+
+    // ============ View Functions ============
+
+    function getSafeValue() external view returns (
+        uint256 totalValueUSD,
+        uint256 lastUpdated,
+        uint256 updateCount
+    ) {
+        return (safeValue.totalValueUSD, safeValue.lastUpdated, safeValue.updateCount);
+    }
+
+    function getAcquiredBalance(
+        address subAccount,
+        address token
+    ) external view returns (uint256) {
+        return acquiredBalance[subAccount][token];
+    }
+
+    function getSpendingAllowance(address subAccount) external view returns (uint256) {
+        return spendingAllowance[subAccount];
+    }
+
+    function getTokenBalances(
+        address[] calldata tokens
+    ) external view returns (uint256[] memory balances) {
         balances = new uint256[](tokens.length);
         for (uint256 i = 0; i < tokens.length; i++) {
             balances[i] = IERC20(tokens[i]).balanceOf(avatar);
         }
-        return balances;
-    }
-
-    /**
-     * @notice Update subaccount allowances after a Safe Inflow
-     * @dev Only callable by the authorized updater (oracle)
-     * @param subAccount The subaccount address to update
-     * @param balanceChange The inflow in dollars
-     */
-    function updateSubaccountAllowances(
-        address subAccount,
-        uint256 balanceChange
-    ) external {
-        if (msg.sender != authorizedUpdater) revert OnlyAuthorizedUpdater();
-        if (subAccount == address(0)) revert InvalidAddress();
-
-        // Only update if the subaccount has an active execution window
-        if (executionWindowStart[subAccount] == 0) return;
-
-        // Get the subaccount's limits
-        (uint256 maxLossBps, , ) = getSubAccountLimits(subAccount);
-
-        // Get current window portfolio value
-        uint256 windowPortfolioValue = executionWindowPortfolioValue[subAccount];
-
-        // Calculate total allowances based on window portfolio value
-        uint256 totalApprovalAllowance = Math.mulDiv(windowPortfolioValue, maxLossBps, 10000, Math.Rounding.Floor);
-
-        // Calculate current remaining allowances
-        uint256 remainingApprovalAllowance = totalApprovalAllowance > valueApprovedInWindow[subAccount]
-            ? totalApprovalAllowance - valueApprovedInWindow[subAccount]
-            : 0;
-
-        // Calculate new remaining allowances after balance change
-        // If balance increased (positive change), add to remaining allowance
-        // If balance decreased (negative change), subtract from remaining allowance
-        uint256 newRemainingApprovalAllowance;
-
-        if (balanceChange == 0) return;
-
-        // Balance increased - add the change to remaining allowances
-        newRemainingApprovalAllowance = remainingApprovalAllowance + uint256(balanceChange);
-
-        // Cap the new remaining allowance at the total allowance
-        newRemainingApprovalAllowance = Math.min(newRemainingApprovalAllowance, totalApprovalAllowance);
-
-        // Calculate the new used amounts by subtracting new remaining from total
-        uint256 newApprovedInWindow = totalApprovalAllowance - newRemainingApprovalAllowance;
-
-        // Update the state
-        valueApprovedInWindow[subAccount] = newApprovedInWindow;
-
-        emit SubaccountAllowancesUpdated(
-            subAccount,
-            balanceChange,
-            newApprovedInWindow,
-            block.timestamp
-        );
     }
 }
