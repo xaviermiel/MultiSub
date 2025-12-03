@@ -199,6 +199,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     error NoPriceFeedSet();
     error ApprovalExceedsLimit();
     error SpenderNotAllowed();
+    error NoParserRegistered(address target);
 
     // ============ Constructor ============
 
@@ -396,48 +397,51 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         uint256 amountIn,
         OperationType opType
     ) internal returns (bytes memory) {
-        // 1. Verify tokenIn/amountIn match calldata (if parser available)
+        // 1. Parser is REQUIRED - cannot trust wallet's tokenIn/amountIn claims
         ICalldataParser parser = protocolParsers[target];
-        if (address(parser) != address(0)) {
-            address parsedToken = parser.extractInputToken(data);
-            uint256 parsedAmount = parser.extractInputAmount(data);
-            // Allow address(0) from parser to mean "use provided token" (e.g., ERC4626)
-            if (parsedToken != address(0)) {
-                require(parsedToken == tokenIn, "Token mismatch");
-            }
-            require(parsedAmount == amountIn, "Amount mismatch");
+        if (address(parser) == address(0)) {
+            revert NoParserRegistered(target);
         }
 
-        // 2. Calculate spending cost (acquired balance is free)
+        // 2. Verify tokenIn/amountIn match calldata (wallet cannot lie)
+        address parsedToken = parser.extractInputToken(data);
+        uint256 parsedAmount = parser.extractInputAmount(data);
+        // Allow address(0) from parser to mean "use provided token" (e.g., ERC4626)
+        if (parsedToken != address(0)) {
+            require(parsedToken == tokenIn, "Token mismatch");
+        }
+        require(parsedAmount == amountIn, "Amount mismatch");
+
+        // 3. Calculate spending cost (acquired balance is free)
         uint256 acquired = acquiredBalance[subAccount][tokenIn];
         uint256 fromOriginal = amountIn > acquired ? amountIn - acquired : 0;
         uint256 spendingCost = _estimateTokenValueUSD(tokenIn, fromOriginal);
 
-        // 3. Check spending allowance
+        // 4. Check spending allowance
         if (spendingCost > spendingAllowance[subAccount]) {
             revert ExceedsSpendingLimit();
         }
 
-        // 4. Deduct spending and acquired balance
+        // 5. Deduct spending and acquired balance
         spendingAllowance[subAccount] -= spendingCost;
         uint256 usedFromAcquired = amountIn > acquired ? acquired : amountIn;
         acquiredBalance[subAccount][tokenIn] -= usedFromAcquired;
 
-        // 5. Capture balance before for output tracking
+        // 6. Capture balance before for output tracking
         address tokenOut = _getOutputToken(target, data, parser);
         uint256 balanceBefore = tokenOut != address(0) ? IERC20(tokenOut).balanceOf(avatar) : 0;
 
-        // 6. Execute
+        // 7. Execute
         bool success = exec(target, 0, data, ISafe.Operation.Call);
         if (!success) revert TransactionFailed();
 
-        // 7. Calculate output amount
+        // 8. Calculate output amount
         uint256 amountOut = 0;
         if (tokenOut != address(0)) {
             amountOut = IERC20(tokenOut).balanceOf(avatar) - balanceBefore;
         }
 
-        // 8. Emit event for oracle
+        // 9. Emit event for oracle
         emit ProtocolExecution(
             subAccount,
             target,

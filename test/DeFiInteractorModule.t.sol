@@ -130,6 +130,45 @@ contract MockChainlinkPriceFeed {
 }
 
 /**
+ * @title MockParser
+ * @notice Mock calldata parser for testing
+ * @dev Parses deposit(uint256,address) and withdraw(uint256,address) calldata
+ */
+contract MockParser {
+    bytes4 constant DEPOSIT_SELECTOR = bytes4(keccak256("deposit(uint256,address)"));
+    bytes4 constant WITHDRAW_SELECTOR = bytes4(keccak256("withdraw(uint256,address)"));
+
+    address public tokenAddress;
+
+    constructor(address _token) {
+        tokenAddress = _token;
+    }
+
+    function extractInputToken(bytes calldata) external view returns (address) {
+        // Return the configured token for deposits
+        return tokenAddress;
+    }
+
+    function extractInputAmount(bytes calldata data) external pure returns (uint256 amount) {
+        // deposit(uint256,address) - amount is first arg
+        (amount,) = abi.decode(data[4:], (uint256, address));
+    }
+
+    function extractOutputToken(bytes calldata) external view returns (address) {
+        // Return the configured token for withdrawals
+        return tokenAddress;
+    }
+
+    function extractApproveSpender(bytes calldata) external pure returns (address) {
+        revert("MockParser: approve not supported");
+    }
+
+    function supportsSelector(bytes4 selector) external pure returns (bool) {
+        return selector == DEPOSIT_SELECTOR || selector == WITHDRAW_SELECTOR;
+    }
+}
+
+/**
  * @title DeFiInteractorModuleTest
  * @notice Tests for DeFiInteractorModule with Acquired Balance Model
  */
@@ -139,6 +178,7 @@ contract DeFiInteractorModuleTest is Test {
     MockERC20 public token;
     MockProtocol public protocol;
     MockChainlinkPriceFeed public priceFeed;
+    MockParser public parser;
 
     address public owner;
     address public subAccount1;
@@ -171,6 +211,9 @@ contract DeFiInteractorModuleTest is Test {
         // Deploy mock Chainlink price feed ($1.00 with 8 decimals)
         priceFeed = new MockChainlinkPriceFeed(1_00000000, 8);
 
+        // Deploy mock parser (configured for our token)
+        parser = new MockParser(address(token));
+
         // Enable module on Safe
         safe.enableModule(address(module));
 
@@ -187,6 +230,9 @@ contract DeFiInteractorModuleTest is Test {
         module.registerSelector(DEPOSIT_SELECTOR, DeFiInteractorModule.OperationType.DEPOSIT);
         module.registerSelector(WITHDRAW_SELECTOR, DeFiInteractorModule.OperationType.WITHDRAW);
         module.registerSelector(APPROVE_SELECTOR, DeFiInteractorModule.OperationType.APPROVE);
+
+        // Register parser for protocol (required for spending check operations)
+        module.registerParser(address(protocol), address(parser));
     }
 
     // ============ Module Setup Tests ============
@@ -499,17 +545,26 @@ contract DeFiInteractorModuleTest is Test {
     }
 
     function testNoPriceFeedSet() public {
+        // Create a new token and protocol for this test
         MockERC20 newToken = new MockERC20();
         newToken.transfer(address(safe), 10000 * 10**18);
+        MockProtocol newProtocol = new MockProtocol();
 
+        // Create and register a parser for the new token/protocol
+        MockParser newParser = new MockParser(address(newToken));
+        module.registerParser(address(newProtocol), address(newParser));
+
+        // Setup subaccount with new protocol allowed
         _setupSubAccount(subAccount1);
+        module.setAllowedAddresses(subAccount1, _toArray(address(newProtocol)), true);
         module.updateSpendingAllowance(subAccount1, 10000 * 10**18);
 
         bytes memory data = abi.encodeWithSignature("deposit(uint256,address)", 1000 * 10**18, address(safe));
 
+        // Should fail because no price feed is set for newToken
         vm.prank(subAccount1);
         vm.expectRevert(DeFiInteractorModule.NoPriceFeedSet.selector);
-        module.executeOnProtocol(address(protocol), data, address(newToken), 1000 * 10**18);
+        module.executeOnProtocol(address(newProtocol), data, address(newToken), 1000 * 10**18);
     }
 
     function testStalePriceFeed() public {
@@ -561,5 +616,11 @@ contract DeFiInteractorModuleTest is Test {
         targets[0] = address(protocol);
         targets[1] = address(token);
         module.setAllowedAddresses(subAccount, targets, true);
+    }
+
+    function _toArray(address addr) internal pure returns (address[] memory) {
+        address[] memory arr = new address[](1);
+        arr[0] = addr;
+        return arr;
     }
 }
