@@ -512,20 +512,26 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         address tokenIn, // Same as target for approve
         uint256 amountIn // Approval amount
     ) internal returns (bytes memory) {
-        // 1. Extract spender from calldata
-        // approve(address spender, uint256 amount) - spender is first arg
+        // 1. Extract spender and amount from calldata
+        // approve(address spender, uint256 amount) - spender is first arg, amount is second
         address spender;
+        uint256 actualAmount;
         assembly {
-            // Skip selector (4 bytes), load first 32 bytes of args
+            // Skip selector (4 bytes), load first 32 bytes of args (spender)
             spender := calldataload(add(data.offset, 4))
+            // Load second 32 bytes of args (amount)
+            actualAmount := calldataload(add(data.offset, 36))
         }
 
-        // 2. Verify spender is whitelisted
+        // 2. Verify amountIn matches actual approval amount in calldata (CRITICAL: prevents cap bypass)
+        require(actualAmount == amountIn, "Approval amount mismatch");
+
+        // 3. Verify spender is whitelisted
         if (!allowedAddresses[subAccount][spender]) {
             revert SpenderNotAllowed();
         }
 
-        // 3. Check cap: acquired tokens unlimited, original capped by spending allowance
+        // 4. Check cap: acquired tokens unlimited, original capped by spending allowance
         uint256 acquired = acquiredBalance[subAccount][tokenIn];
 
         if (amountIn > acquired) {
@@ -537,11 +543,11 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             }
         }
 
-        // 4. Execute approve - does NOT deduct spending (deducted at swap/deposit)
+        // 5. Execute approve - does NOT deduct spending (deducted at swap/deposit)
         bool success = exec(target, 0, data, ISafe.Operation.Call);
         if (!success) revert ApprovalFailed();
 
-        // 5. Emit event
+        // 6. Emit event
         emit ProtocolExecution(
             subAccount,
             target,
