@@ -662,8 +662,10 @@ const buildSubAccountState = (
 	transferEvents: TransferExecutedEvent[],
 	subAccount: Address,
 	currentTimestamp: bigint,
+	subAccountWindowDuration?: bigint,
 ): SubAccountState => {
-	const windowDuration = BigInt(runtime.config.windowDurationSeconds)
+	// Use per-subaccount window duration if provided, otherwise fall back to config
+	const windowDuration = subAccountWindowDuration ?? BigInt(runtime.config.windowDurationSeconds)
 	const windowStart = currentTimestamp - windowDuration
 
 	const state: SubAccountState = {
@@ -981,8 +983,11 @@ const onProtocolExecution = (runtime: Runtime<Config>, payload: any): string => 
 			allEvents.push(newEvent)
 		}
 
-		// Build state from all events
-		const state = buildSubAccountState(runtime, allEvents, transferEvents, newEvent.subAccount, currentTimestamp)
+		// Get per-subaccount window duration
+		const { windowDuration } = getSubAccountLimits(runtime, newEvent.subAccount)
+
+		// Build state from all events using per-subaccount window duration
+		const state = buildSubAccountState(runtime, allEvents, transferEvents, newEvent.subAccount, currentTimestamp, windowDuration)
 
 		// Calculate new spending allowance
 		const newAllowance = calculateSpendingAllowance(runtime, newEvent.subAccount, state)
@@ -1004,7 +1009,7 @@ const onProtocolExecution = (runtime: Runtime<Config>, payload: any): string => 
  * Periodic refresh of spending allowances
  * Runs every 5 minutes to update allowances as old spending expires
  */
-const onCronRefresh = (runtime: Runtime<Config>, payload: CronPayload): string => {
+const onCronRefresh = (runtime: Runtime<Config>, _payload: CronPayload): string => {
 	runtime.log('=== Spending Oracle: Periodic Refresh ===')
 
 	try {
@@ -1030,8 +1035,11 @@ const onCronRefresh = (runtime: Runtime<Config>, payload: CronPayload): string =
 			try {
 				runtime.log(`Processing subaccount: ${subAccount}`)
 
-				// Build state for this subaccount
-				const state = buildSubAccountState(runtime, allEvents, allTransfers, subAccount, currentTimestamp)
+				// Get per-subaccount window duration
+				const { windowDuration } = getSubAccountLimits(runtime, subAccount)
+
+				// Build state for this subaccount using per-subaccount window duration
+				const state = buildSubAccountState(runtime, allEvents, allTransfers, subAccount, currentTimestamp, windowDuration)
 
 				// Calculate new spending allowance
 				const newAllowance = calculateSpendingAllowance(runtime, subAccount, state)
@@ -1089,8 +1097,11 @@ const onTransferExecuted = (runtime: Runtime<Config>, payload: any): string => {
 			allTransfers.push(newTransfer)
 		}
 
-		// Build state from all events
-		const state = buildSubAccountState(runtime, historicalEvents, allTransfers, newTransfer.subAccount, currentTimestamp)
+		// Get per-subaccount window duration
+		const { windowDuration } = getSubAccountLimits(runtime, newTransfer.subAccount)
+
+		// Build state from all events using per-subaccount window duration
+		const state = buildSubAccountState(runtime, historicalEvents, allTransfers, newTransfer.subAccount, currentTimestamp, windowDuration)
 
 		// Calculate new spending allowance
 		const newAllowance = calculateSpendingAllowance(runtime, newTransfer.subAccount, state)
