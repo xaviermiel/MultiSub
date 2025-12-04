@@ -663,6 +663,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
         for (uint256 i = 0; i < tokens.length; i++) {
             acquiredBalance[subAccount][tokens[i]] = balances[i];
+            emit AcquiredBalanceUpdated(subAccount, tokens[i], balances[i], block.timestamp);
         }
 
         emit SpendingAllowanceUpdated(subAccount, newAllowance, block.timestamp);
