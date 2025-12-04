@@ -95,8 +95,8 @@ Day Start:
 | **Approve** | No (capped***) | N/A |
 | **Transfer Out** | Always | N/A |
 
-\* Only if deposit matched by the same subaccount in the time window.
-\*\* Yield and rewards become acquired only if they result from a transaction by this subaccount within the 24h window.
+\* Only if deposit matched by the same subaccount to the same protocol in the time window.
+\*\* Only if deposit matched by the same subaccount to the same protocol in the time window (same rule as withdrawals).
 \*\*\* Approve doesn't consume spending, but is capped: acquired tokens can be approved freely, original tokens approval is capped by spending allowance. Actual spending is deducted at execution (swap/deposit).
 
 ---
@@ -184,7 +184,7 @@ Oracle cannot set allowances above an absolute maximum (e.g., 20% of portfolio).
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Yield/rewards acquired? | **Conditional** | Only if from subaccount's tx in 24h window |
+| Yield/rewards acquired? | **Conditional** | Only if deposit matched by same subaccount to same protocol in window |
 | Withdrawals become acquired? | **Conditional** | Only if deposit matched by same subaccount in time window |
 | Transfers cost spending? | **Always** | Value leaves Safe, must be controlled |
 | Approve consume spending? | **No (capped)** | Capped by allowance for original tokens, by amount acquired for acquired tokens, deducted at execution |

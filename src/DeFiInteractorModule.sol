@@ -46,7 +46,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         SWAP,       // Costs spending (from original), output is acquired
         DEPOSIT,    // Costs spending (from original), tracked for withdrawal matching
         WITHDRAW,   // FREE, output becomes acquired if matched to deposit
-        CLAIM,      // FREE, output becomes acquired if from subaccount's tx in 24h
+        CLAIM,      // FREE, output becomes acquired if matched to deposit (same as WITHDRAW)
         APPROVE     // FREE but capped, enables future operations
     }
 

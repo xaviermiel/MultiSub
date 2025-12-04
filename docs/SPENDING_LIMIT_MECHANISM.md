@@ -106,8 +106,8 @@ Where:
 | **Claim Rewards** | None | Conditional** |
 | **Approve** | None (capped***) | N/A |
 
-\* Only if deposit matched by the same subaccount in the time window.
-\*\* Yield and rewards become acquired only if they result from a transaction by this subaccount within the 24h window.
+\* Only if deposit matched by the same subaccount to the same protocol in the time window.
+\*\* Only if deposit matched by the same subaccount to the same protocol in the time window (same rule as withdrawals).
 \*\*\* Approve doesn't consume spending, but is capped: acquired tokens can be approved freely, original tokens approval is capped by spending allowance.
 
 ### 2.4 Spending Calculation Logic
@@ -160,8 +160,8 @@ enum OperationType {
     UNKNOWN,    // Must use typed function - REVERTS
     SWAP,       // Costs spending, output = acquired
     DEPOSIT,    // Costs spending, tracked for withdrawal matching
-    WITHDRAW,   // FREE, output becomes acquired if matched
-    CLAIM,      // FREE, no recovery (rewards, airdrops)
+    WITHDRAW,   // FREE, output becomes acquired if matched to deposit
+    CLAIM,      // FREE, output becomes acquired if matched to deposit (same as WITHDRAW)
     APPROVE     // FREE but capped, enables future operations
 }
 
@@ -264,8 +264,8 @@ Operations are classified by their function selector and routed accordingly:
 | **APPROVE** | No (capped***) | N/A |
 | **TRANSFER** | Always (full amount) | N/A |
 
-\* Only if deposit matched by the same subaccount in the time window.
-\*\* Yield and rewards become acquired only if they result from a transaction by this subaccount within the 24h window.
+\* Only if deposit matched by the same subaccount to the same protocol in the time window.
+\*\* Only if deposit matched by the same subaccount to the same protocol in the time window (same rule as withdrawals).
 \*\*\* Approve doesn't consume spending, but is capped by (acquiredBalance + spendingAllowance) for the token.
 
 ### 4.2 Main Entry Point
@@ -690,11 +690,11 @@ Each cycle: Could accumulate more "acquired" balance from yield
 
 #### 6.3.3 Severity: LOW (Mitigated)
 
-**Mitigation**: Yield and rewards only become acquired if they result from a transaction by this subaccount within the 24h window.
+**Mitigation**: Yield and rewards only become acquired if there's a matching deposit by the same subaccount to the same protocol within the 24h window.
 
 - Passive yield accrual (just waiting) does NOT become acquired
-- Only explicit claim/harvest transactions within 24h qualify
-- Churning is mitigated because the yield must be actively claimed by the subaccount
+- Only CLAIM transactions matched to deposits within 24h qualify (same rule as WITHDRAW)
+- Churning is mitigated because the yield must be linked to a recent deposit
 - The 24h window ensures old positions don't accumulate unlimited free tokens
 
 ---
@@ -2015,9 +2015,9 @@ function useAllowance(address subAccount, address token, uint256 amount) interna
 | Question | Decision | Rationale |
 |----------|----------|-----------|
 | **Should transfers out always cost spending?** | **Yes** | Transfers move value out of Safe permanently |
-| **Should yield count as acquired?** | **Conditional** | Only if from subaccount's tx in 24h window |
-| **Should protocol rewards/airdrops be acquired?** | **Conditional** | Only if from subaccount's tx in 24h window |
-| **Should withdrawals become acquired?** | **Conditional** | Only if deposit matched by same subaccount in time window |
+| **Should yield count as acquired?** | **Conditional** | Only if deposit matched by same subaccount to same protocol in window |
+| **Should protocol rewards/airdrops be acquired?** | **Conditional** | Only if deposit matched by same subaccount to same protocol in window (same as withdrawals) |
+| **Should withdrawals become acquired?** | **Conditional** | Only if deposit matched by same subaccount to same protocol in window |
 | **Should approve consume spending?** | **No (capped)** | Capped by allowance for original tokens, but not deducted until execution |
 | **What if Safe balance decreases externally?** | **Reduce sub-account allowances** | Oracle adjusts based on actual balances |
 
@@ -2240,8 +2240,8 @@ enum OperationType {
     UNKNOWN,    // Must use typed function - REVERTS
     SWAP,       // Costs spending, output = acquired
     DEPOSIT,    // Costs spending, tracked for withdrawal matching
-    WITHDRAW,   // FREE, output becomes acquired if matched
-    CLAIM       // FREE, no recovery (rewards, airdrops)
+    WITHDRAW,   // FREE, output becomes acquired if matched to deposit
+    CLAIM       // FREE, output becomes acquired if matched to deposit (same as WITHDRAW)
 }
 
 // Owner-managed registry of known function selectors
@@ -2341,8 +2341,8 @@ function _executeNoSpendingCheck(
     }
 
     // Emit event for oracle to:
-    // - Add received tokens as "acquired" (if WITHDRAW, not if CLAIM per design decision)
-    // - Recover spending if matching deposit exists (WITHDRAW only)
+    // - Add received tokens as "acquired" if matched to deposit (both WITHDRAW and CLAIM)
+    // - Note: Spending is one-way (no recovery on withdrawals)
     emit ProtocolExecution(
         subAccount,
         target,
