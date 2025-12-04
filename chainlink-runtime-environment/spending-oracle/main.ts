@@ -765,10 +765,20 @@ const buildSubAccountState = (
 				}
 			}
 		} else if (event.opType === OperationType.CLAIM) {
-			// CLAIM: Acquired if from subaccount's transaction in window
+			// CLAIM: Only acquired if matched to deposit by same subaccount in window
 			if (event.tokenOut !== zeroAddress && event.amountOut > 0n) {
-				acquiredToken = tokenOutLower
-				acquiredAmount = event.amountOut
+				const hasMatchingDeposit = state.depositRecords.some(
+					d => d.target.toLowerCase() === event.target.toLowerCase() &&
+						d.subAccount.toLowerCase() === event.subAccount.toLowerCase()
+				)
+
+				if (hasMatchingDeposit) {
+					acquiredToken = tokenOutLower
+					acquiredAmount = event.amountOut
+					runtime.log(`  Claim matched to deposit: ${event.amountOut} of ${event.tokenOut}`)
+				} else {
+					runtime.log(`  Claim NOT matched: ${event.amountOut} of ${event.tokenOut}`)
+				}
 			}
 		}
 
