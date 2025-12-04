@@ -470,24 +470,28 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         bytes calldata data,
         OperationType opType
     ) internal returns (bytes memory) {
-        // 1. Get output token from parser if available
+        // 1. Parser is required for WITHDRAW/CLAIM to track output tokens for acquired balance
         ICalldataParser parser = protocolParsers[target];
+        if (address(parser) == address(0)) {
+            revert NoParserRegistered(target);
+        }
+
+        // 2. Get output token from parser
         address tokenOut = _getOutputToken(target, data, parser);
         uint256 balanceBefore = tokenOut != address(0) ? IERC20(tokenOut).balanceOf(avatar) : 0;
 
-        // 2. Execute (NO spending check - withdrawals and claims are free)
+        // 3. Execute (NO spending check - withdrawals and claims are free)
         bool success = exec(target, 0, data, ISafe.Operation.Call);
         if (!success) revert TransactionFailed();
 
-        // 3. Calculate received amount
+        // 4. Calculate received amount
         uint256 amountOut = 0;
         if (tokenOut != address(0)) {
             amountOut = IERC20(tokenOut).balanceOf(avatar) - balanceBefore;
         }
 
-        // 4. Emit event for oracle to:
-        //    - Mark received as acquired if matched to deposit (WITHDRAW)
-        //    - Mark received as acquired if from subaccount's tx in 24h (CLAIM)
+        // 5. Emit event for oracle to:
+        //    - Mark received as acquired if matched to deposit (both WITHDRAW and CLAIM)
         emit ProtocolExecution(
             subAccount,
             target,
