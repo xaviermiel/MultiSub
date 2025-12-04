@@ -81,6 +81,7 @@ interface ProtocolExecutionEvent {
 	spendingCost: bigint
 	timestamp: bigint
 	blockNumber: bigint
+	logIndex: number
 }
 
 interface DepositRecord {
@@ -481,6 +482,18 @@ const parseProtocolExecutionEvent = (log: any): ProtocolExecutionEvent => {
 		}
 	}
 
+	// Handle logIndex - SDK may return number, BigInt, or SDK BigInt type
+	let logIndex = 0
+	if (log.logIndex !== undefined) {
+		if (typeof log.logIndex === 'number') {
+			logIndex = log.logIndex
+		} else if (typeof log.logIndex === 'bigint') {
+			logIndex = Number(log.logIndex)
+		} else if (log.logIndex.absVal) {
+			logIndex = Number(sdkBigIntToBigInt(log.logIndex))
+		}
+	}
+
 	return {
 		subAccount,
 		target,
@@ -492,6 +505,7 @@ const parseProtocolExecutionEvent = (log: any): ProtocolExecutionEvent => {
 		spendingCost: decoded[5],
 		timestamp: decoded[6],
 		blockNumber,
+		logIndex,
 	}
 }
 
@@ -765,9 +779,13 @@ const onProtocolExecution = (runtime: Runtime<Config>, payload: any): string => 
 		// Query historical events
 		const historicalEvents = queryHistoricalEvents(runtime, newEvent.subAccount)
 
-		// Add the new event
+		// Add the new event (deduplicate by blockNumber + logIndex which uniquely identifies each log)
 		const allEvents = [...historicalEvents]
-		if (!allEvents.some(e => e.timestamp === newEvent.timestamp && e.target === newEvent.target)) {
+		const isDuplicate = allEvents.some(e =>
+			e.blockNumber === newEvent.blockNumber &&
+			e.logIndex === newEvent.logIndex
+		)
+		if (!isDuplicate) {
 			allEvents.push(newEvent)
 		}
 
