@@ -622,6 +622,9 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     function updateSpendingAllowance(address subAccount, uint256 newAllowance) external {
         if (msg.sender != authorizedOracle) revert OnlyAuthorizedOracle();
 
+        // Ensure Safe value is fresh before calculating max allowance
+        _requireFreshSafeValue();
+
         // Enforce absolute maximum spending cap (safety backstop)
         uint256 maxAllowance = (safeValue.totalValueUSD * absoluteMaxSpendingBps) / 10000;
         if (newAllowance > maxAllowance) {
@@ -642,6 +645,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         if (msg.sender != authorizedOracle) revert OnlyAuthorizedOracle();
 
         acquiredBalance[subAccount][token] = newBalance;
+        lastOracleUpdate[subAccount] = block.timestamp;
 
         emit AcquiredBalanceUpdated(subAccount, token, newBalance, block.timestamp);
     }
@@ -657,6 +661,9 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     ) external {
         if (msg.sender != authorizedOracle) revert OnlyAuthorizedOracle();
         require(tokens.length == balances.length, "Length mismatch");
+
+        // Ensure Safe value is fresh before calculating max allowance
+        _requireFreshSafeValue();
 
         // Enforce absolute maximum spending cap (safety backstop)
         uint256 maxAllowance = (safeValue.totalValueUSD * absoluteMaxSpendingBps) / 10000;
@@ -717,6 +724,13 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         if (lastOracleUpdate[subAccount] == 0) revert StaleOracleData();
         if (block.timestamp - lastOracleUpdate[subAccount] > maxOracleAge) {
             revert StaleOracleData();
+        }
+    }
+
+    function _requireFreshSafeValue() internal view {
+        if (safeValue.lastUpdated == 0) revert StalePortfolioValue();
+        if (block.timestamp - safeValue.lastUpdated > maxSafeValueAge) {
+            revert StalePortfolioValue();
         }
     }
 
