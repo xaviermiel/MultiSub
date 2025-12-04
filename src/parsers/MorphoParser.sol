@@ -8,8 +8,8 @@ import {IMorphoVault} from "../interfaces/IMorphoVault.sol";
  * @title MorphoParser
  * @notice Calldata parser for Morpho Vault (ERC4626) operations
  * @dev Extracts token/amount from Morpho Vault function calldata
- *      Note: ERC4626 functions don't include token address in calldata,
- *      so token extraction requires querying the vault's asset() function
+ *      ERC4626 functions don't include token address in calldata,
+ *      so this parser queries the vault's asset() function
  */
 contract MorphoParser is ICalldataParser {
     // ERC4626 function selectors
@@ -19,20 +19,18 @@ contract MorphoParser is ICalldataParser {
     bytes4 public constant REDEEM_SELECTOR = 0xba087652;    // redeem(uint256,address,address)
 
     /// @inheritdoc ICalldataParser
-    function extractInputToken(bytes calldata data) external pure override returns (address) {
+    function extractInputToken(address target, bytes calldata data) external view override returns (address) {
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == DEPOSIT_SELECTOR || selector == MINT_SELECTOR) {
-            // ERC4626 deposit/mint don't include token in calldata
-            // Token must be obtained from vault.asset()
-            // Return address(0) to signal "use vault.asset()"
-            return address(0);
+            // Query the vault for its underlying asset
+            return IMorphoVault(target).asset();
         }
         revert("MorphoParser: unsupported selector for input token");
     }
 
     /// @inheritdoc ICalldataParser
-    function extractInputAmount(bytes calldata data) external pure override returns (uint256 amount) {
+    function extractInputAmount(address, bytes calldata data) external pure override returns (uint256 amount) {
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == DEPOSIT_SELECTOR) {
@@ -48,21 +46,14 @@ contract MorphoParser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractOutputToken(bytes calldata data) external pure override returns (address) {
+    function extractOutputToken(address target, bytes calldata data) external view override returns (address) {
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == WITHDRAW_SELECTOR || selector == REDEEM_SELECTOR) {
-            // ERC4626 withdraw/redeem don't include token in calldata
-            // Token must be obtained from vault.asset()
-            // Return address(0) to signal "use vault.asset()"
-            return address(0);
+            // Query the vault for its underlying asset
+            return IMorphoVault(target).asset();
         }
         revert("MorphoParser: unsupported selector for output token");
-    }
-
-    /// @inheritdoc ICalldataParser
-    function extractApproveSpender(bytes calldata) external pure override returns (address) {
-        revert("MorphoParser: approve not handled by this parser");
     }
 
     /// @inheritdoc ICalldataParser
@@ -85,34 +76,5 @@ contract MorphoParser is ICalldataParser {
             return 3; // WITHDRAW
         }
         return 0; // UNKNOWN
-    }
-
-    /**
-     * @notice Extract the underlying asset from a Morpho vault
-     * @dev This is a view function that queries the vault
-     * @param vault The Morpho vault address
-     * @return asset The underlying asset address
-     */
-    function getVaultAsset(address vault) external view returns (address asset) {
-        return IMorphoVault(vault).asset();
-    }
-
-    /**
-     * @notice Extract amount from withdraw/redeem calldata
-     * @param data The calldata
-     * @return amount The assets/shares amount
-     */
-    function extractWithdrawAmount(bytes calldata data) external pure returns (uint256 amount) {
-        bytes4 selector = bytes4(data[:4]);
-
-        if (selector == WITHDRAW_SELECTOR) {
-            // withdraw(uint256 assets, address receiver, address owner)
-            (amount,,) = abi.decode(data[4:], (uint256, address, address));
-        } else if (selector == REDEEM_SELECTOR) {
-            // redeem(uint256 shares, address receiver, address owner)
-            (amount,,) = abi.decode(data[4:], (uint256, address, address));
-        } else {
-            revert("MorphoParser: unsupported selector for withdraw amount");
-        }
     }
 }

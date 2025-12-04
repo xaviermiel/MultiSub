@@ -16,7 +16,7 @@ contract UniswapV3Parser is ICalldataParser {
     bytes4 public constant EXACT_OUTPUT_SELECTOR = 0xf28c0498;         // exactOutput((bytes,address,uint256,uint256,uint256))
 
     /// @inheritdoc ICalldataParser
-    function extractInputToken(bytes calldata data) external pure override returns (address token) {
+    function extractInputToken(address, bytes calldata data) external pure override returns (address token) {
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == EXACT_INPUT_SINGLE_SELECTOR) {
@@ -45,7 +45,7 @@ contract UniswapV3Parser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractInputAmount(bytes calldata data) external pure override returns (uint256 amount) {
+    function extractInputAmount(address, bytes calldata data) external pure override returns (uint256 amount) {
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == EXACT_INPUT_SINGLE_SELECTOR) {
@@ -66,7 +66,7 @@ contract UniswapV3Parser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractOutputToken(bytes calldata data) external pure override returns (address token) {
+    function extractOutputToken(address, bytes calldata data) external pure override returns (address token) {
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == EXACT_INPUT_SINGLE_SELECTOR || selector == EXACT_OUTPUT_SINGLE_SELECTOR) {
@@ -89,11 +89,6 @@ contract UniswapV3Parser is ICalldataParser {
         } else {
             revert("UniswapV3Parser: unsupported selector for output token");
         }
-    }
-
-    /// @inheritdoc ICalldataParser
-    function extractApproveSpender(bytes calldata) external pure override returns (address) {
-        revert("UniswapV3Parser: approve not handled by this parser");
     }
 
     /// @inheritdoc ICalldataParser
