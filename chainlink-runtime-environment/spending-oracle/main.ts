@@ -6,11 +6,17 @@
  * - Deposit/withdrawal matching for acquired status
  * - 24h expiry for acquired balances
  * - Periodic allowance refresh via cron trigger
+ * - Proper tracking of acquired balance usage (deductions)
  *
  * State Management:
  * Since CRE workflows are stateless, we query historical events from the chain
  * to reconstruct state on each invocation. This ensures verifiable, decentralized
  * state derivation.
+ *
+ * Key Design:
+ * - Acquired balances are calculated as: outputs - inputs (from acquired)
+ * - The contract reads acquired balances, oracle manages them
+ * - Spending is one-way (no recovery on withdrawals)
  */
 
 import {
@@ -28,7 +34,6 @@ import {
 import {
 	type Address,
 	decodeAbiParameters,
-	decodeEventLog,
 	decodeFunctionResult,
 	encodeFunctionData,
 	keccak256,
@@ -86,21 +91,17 @@ interface DepositRecord {
 	timestamp: bigint
 }
 
-interface AcquiredRecord {
+interface TokenMovement {
 	token: Address
 	amount: bigint
 	timestamp: bigint
-}
-
-interface SpendingRecord {
-	amount: bigint // USD value
-	timestamp: bigint
+	isOutput: boolean // true = received (add), false = used (subtract)
 }
 
 interface SubAccountState {
-	spendingRecords: SpendingRecord[]
+	spendingRecords: { amount: bigint; timestamp: bigint }[]
 	depositRecords: DepositRecord[]
-	acquiredRecords: Map<Address, AcquiredRecord[]>
+	tokenMovements: Map<Address, TokenMovement[]>
 	totalSpendingInWindow: bigint
 	acquiredBalances: Map<Address, bigint>
 }
@@ -141,17 +142,54 @@ const createEvmClient = (runtime: Runtime<Config>) => {
 	return new cre.capabilities.EVMClient(network.chainSelector.selector)
 }
 
-/**
- * Get current block timestamp
- */
-const getCurrentBlockTimestamp = (runtime: Runtime<Config>): bigint => {
-	// Use current time as approximation
+const getCurrentBlockTimestamp = (): bigint => {
 	return BigInt(Math.floor(Date.now() / 1000))
 }
 
 /**
- * Get subaccount's spending limits from contract
+ * Get current acquired balance from contract
+ * This is the source of truth for what's currently available
  */
+const getContractAcquiredBalance = (
+	runtime: Runtime<Config>,
+	subAccount: Address,
+	token: Address,
+): bigint => {
+	const evmClient = createEvmClient(runtime)
+
+	const callData = encodeFunctionData({
+		abi: DeFiInteractorModule,
+		functionName: 'getAcquiredBalance',
+		args: [subAccount, token],
+	})
+
+	try {
+		const result = evmClient
+			.callContract(runtime, {
+				call: encodeCallMsg({
+					from: zeroAddress,
+					to: runtime.config.moduleAddress as Address,
+					data: callData,
+				}),
+				blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
+			})
+			.result()
+
+		if (!result.data || result.data.length === 0) {
+			return 0n
+		}
+
+		return decodeFunctionResult({
+			abi: DeFiInteractorModule,
+			functionName: 'getAcquiredBalance',
+			data: bytesToHex(result.data),
+		})
+	} catch (error) {
+		runtime.log(`Error getting acquired balance: ${error}`)
+		return 0n
+	}
+}
+
 const getSubAccountLimits = (
 	runtime: Runtime<Config>,
 	subAccount: Address,
@@ -356,6 +394,12 @@ const parseProtocolExecutionEvent = (log: any): ProtocolExecutionEvent => {
 
 /**
  * Build state for a subaccount from historical events
+ *
+ * Key insight: We track both INPUTS (used from acquired) and OUTPUTS (added to acquired)
+ * Net acquired = sum of outputs - sum of inputs used from acquired
+ *
+ * Since we don't know exactly how much of each input came from acquired vs original,
+ * we use a conservative approach: assume inputs reduce acquired up to available amount.
  */
 const buildSubAccountState = (
 	runtime: Runtime<Config>,
@@ -369,12 +413,12 @@ const buildSubAccountState = (
 	const state: SubAccountState = {
 		spendingRecords: [],
 		depositRecords: [],
-		acquiredRecords: new Map(),
+		tokenMovements: new Map(),
 		totalSpendingInWindow: 0n,
 		acquiredBalances: new Map(),
 	}
 
-	// Filter events for this subaccount within the window
+	// Filter events for this subaccount within the window, sorted by time
 	const relevantEvents = events
 		.filter(e => e.subAccount.toLowerCase() === subAccount.toLowerCase())
 		.filter(e => e.timestamp >= windowStart)
@@ -382,8 +426,14 @@ const buildSubAccountState = (
 
 	runtime.log(`Processing ${relevantEvents.length} events for ${subAccount} in window`)
 
+	// Track running acquired balance per token to determine how much input came from acquired
+	const runningAcquired: Map<Address, bigint> = new Map()
+
 	for (const event of relevantEvents) {
-		// Track spending (SWAP and DEPOSIT cost spending)
+		const tokenInLower = event.tokenIn.toLowerCase() as Address
+		const tokenOutLower = event.tokenOut.toLowerCase() as Address
+
+		// Track spending (SWAP and DEPOSIT cost spending if from original)
 		if (event.opType === OperationType.SWAP || event.opType === OperationType.DEPOSIT) {
 			if (event.spendingCost > 0n) {
 				state.spendingRecords.push({
@@ -391,6 +441,27 @@ const buildSubAccountState = (
 					timestamp: event.timestamp,
 				})
 				state.totalSpendingInWindow += event.spendingCost
+			}
+
+			// Track how much of the input came from acquired (reduces acquired balance)
+			if (event.tokenIn !== zeroAddress && event.amountIn > 0n) {
+				const currentAcquired = runningAcquired.get(tokenInLower) || 0n
+				const usedFromAcquired = event.amountIn > currentAcquired ? currentAcquired : event.amountIn
+
+				if (usedFromAcquired > 0n) {
+					runningAcquired.set(tokenInLower, currentAcquired - usedFromAcquired)
+
+					if (!state.tokenMovements.has(tokenInLower)) {
+						state.tokenMovements.set(tokenInLower, [])
+					}
+					state.tokenMovements.get(tokenInLower)!.push({
+						token: event.tokenIn,
+						amount: usedFromAcquired,
+						timestamp: event.timestamp,
+						isOutput: false, // Used (subtract)
+					})
+					runtime.log(`  Used ${usedFromAcquired} acquired ${event.tokenIn}`)
+				}
 			}
 		}
 
@@ -405,14 +476,14 @@ const buildSubAccountState = (
 			})
 		}
 
-		// Track acquired balances
+		// Track outputs (add to acquired)
 		let acquiredAmount = 0n
 		let acquiredToken: Address | null = null
 
 		if (event.opType === OperationType.SWAP) {
 			// SWAP: Output token becomes acquired
 			if (event.tokenOut !== zeroAddress && event.amountOut > 0n) {
-				acquiredToken = event.tokenOut
+				acquiredToken = tokenOutLower
 				acquiredAmount = event.amountOut
 			}
 		} else if (event.opType === OperationType.WITHDRAW) {
@@ -424,40 +495,60 @@ const buildSubAccountState = (
 				)
 
 				if (hasMatchingDeposit) {
-					acquiredToken = event.tokenOut
+					acquiredToken = tokenOutLower
 					acquiredAmount = event.amountOut
-					runtime.log(`Withdrawal matched to deposit: ${event.amountOut} of ${event.tokenOut}`)
+					runtime.log(`  Withdrawal matched to deposit: ${event.amountOut} of ${event.tokenOut}`)
 				} else {
-					runtime.log(`Withdrawal NOT matched (no deposit found): ${event.amountOut} of ${event.tokenOut}`)
+					runtime.log(`  Withdrawal NOT matched: ${event.amountOut} of ${event.tokenOut}`)
 				}
 			}
 		} else if (event.opType === OperationType.CLAIM) {
 			// CLAIM: Acquired if from subaccount's transaction in window
-			// Since we're only processing this subaccount's events, claims are acquired
 			if (event.tokenOut !== zeroAddress && event.amountOut > 0n) {
-				acquiredToken = event.tokenOut
+				acquiredToken = tokenOutLower
 				acquiredAmount = event.amountOut
 			}
 		}
 
-		// Add to acquired records
+		// Add output to running acquired and movements
 		if (acquiredToken && acquiredAmount > 0n) {
-			if (!state.acquiredRecords.has(acquiredToken)) {
-				state.acquiredRecords.set(acquiredToken, [])
+			const current = runningAcquired.get(acquiredToken) || 0n
+			runningAcquired.set(acquiredToken, current + acquiredAmount)
+
+			if (!state.tokenMovements.has(acquiredToken)) {
+				state.tokenMovements.set(acquiredToken, [])
 			}
-			state.acquiredRecords.get(acquiredToken)!.push({
+			state.tokenMovements.get(acquiredToken)!.push({
 				token: acquiredToken,
 				amount: acquiredAmount,
 				timestamp: event.timestamp,
+				isOutput: true, // Received (add)
 			})
+			runtime.log(`  Added ${acquiredAmount} acquired ${acquiredToken}`)
 		}
 	}
 
-	// Calculate total acquired balances (sum of all records still in window)
-	for (const [token, records] of state.acquiredRecords) {
-		const validRecords = records.filter(r => r.timestamp >= windowStart)
-		const total = validRecords.reduce((sum, r) => sum + r.amount, 0n)
-		state.acquiredBalances.set(token, total)
+	// Calculate final acquired balances (net of outputs - inputs, considering expiry)
+	for (const [token, movements] of state.tokenMovements) {
+		// Filter movements still in window
+		const validMovements = movements.filter(m => m.timestamp >= windowStart)
+
+		// Calculate net: outputs - inputs
+		let netAcquired = 0n
+		for (const m of validMovements) {
+			if (m.isOutput) {
+				netAcquired += m.amount
+			} else {
+				netAcquired -= m.amount
+			}
+		}
+
+		// Net should never be negative (can't use more than you have)
+		if (netAcquired < 0n) {
+			netAcquired = 0n
+		}
+
+		state.acquiredBalances.set(token, netAcquired)
 	}
 
 	runtime.log(`State built: spending=${state.totalSpendingInWindow}, acquired tokens=${state.acquiredBalances.size}`)
@@ -484,7 +575,7 @@ const calculateSpendingAllowance = (
 		? maxSpending - state.totalSpendingInWindow
 		: 0n
 
-	runtime.log(`Allowance calculation: safeValue=${safeValue}, maxBps=${maxSpendingBps}, maxSpending=${maxSpending}, spent=${state.totalSpendingInWindow}, newAllowance=${newAllowance}`)
+	runtime.log(`Allowance: safeValue=${safeValue}, maxBps=${maxSpendingBps}, max=${maxSpending}, spent=${state.totalSpendingInWindow}, new=${newAllowance}`)
 
 	return newAllowance
 }
@@ -560,9 +651,8 @@ const onProtocolExecution = (runtime: Runtime<Config>, payload: any): string => 
 			return 'Invalid event'
 		}
 
-		// Parse the new event
 		const newEvent = parseProtocolExecutionEvent(log)
-		const currentTimestamp = getCurrentBlockTimestamp(runtime)
+		const currentTimestamp = getCurrentBlockTimestamp()
 
 		runtime.log(`New event: ${OperationType[newEvent.opType]} by ${newEvent.subAccount}`)
 		runtime.log(`  TokenIn: ${newEvent.tokenIn}, AmountIn: ${newEvent.amountIn}`)
@@ -572,7 +662,7 @@ const onProtocolExecution = (runtime: Runtime<Config>, payload: any): string => 
 		// Query historical events
 		const historicalEvents = queryHistoricalEvents(runtime, newEvent.subAccount)
 
-		// Add the new event (it may not be in historical query yet)
+		// Add the new event
 		const allEvents = [...historicalEvents]
 		if (!allEvents.some(e => e.timestamp === newEvent.timestamp && e.target === newEvent.target)) {
 			allEvents.push(newEvent)
@@ -605,7 +695,7 @@ const onCronRefresh = (runtime: Runtime<Config>, payload: CronPayload): string =
 	runtime.log('=== Spending Oracle: Periodic Refresh ===')
 
 	try {
-		const currentTimestamp = getCurrentBlockTimestamp(runtime)
+		const currentTimestamp = getCurrentBlockTimestamp()
 
 		// Get all active subaccounts
 		const subaccounts = getActiveSubaccounts(runtime)
