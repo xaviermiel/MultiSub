@@ -84,6 +84,17 @@ interface ProtocolExecutionEvent {
 	logIndex: number
 }
 
+interface TransferExecutedEvent {
+	subAccount: Address
+	token: Address
+	recipient: Address
+	amount: bigint
+	spendingCost: bigint
+	timestamp: bigint
+	blockNumber: bigint
+	logIndex: number
+}
+
 interface DepositRecord {
 	subAccount: Address
 	target: Address
@@ -107,10 +118,14 @@ interface SubAccountState {
 	acquiredBalances: Map<Address, bigint>
 }
 
-// ============ Event Signature ============
+// ============ Event Signatures ============
 
 const PROTOCOL_EXECUTION_EVENT_SIG = keccak256(
 	toHex('ProtocolExecution(address,address,uint8,address,uint256,address,uint256,uint256,uint256)')
+)
+
+const TRANSFER_EXECUTED_EVENT_SIG = keccak256(
+	toHex('TransferExecuted(address,address,address,uint256,uint256,uint256)')
 )
 
 // ============ Helper Functions ============
@@ -510,6 +525,129 @@ const parseProtocolExecutionEvent = (log: any): ProtocolExecutionEvent => {
 }
 
 /**
+ * Parse TransferExecuted event from log data
+ * Event: TransferExecuted(address indexed subAccount, address indexed token, address indexed recipient, uint256 amount, uint256 spendingCost, uint256 timestamp)
+ */
+const parseTransferExecutedEvent = (log: any): TransferExecutedEvent => {
+	// All 3 parameters are indexed (topics[1], topics[2], topics[3])
+	const topic1 = log.topics[1]
+	const topic2 = log.topics[2]
+	const topic3 = log.topics[3]
+	const subAccount = topicToAddress(topic1)
+	const token = topicToAddress(topic2)
+	const recipient = topicToAddress(topic3)
+
+	// Handle data - contains amount, spendingCost, timestamp
+	const data = typeof log.data === 'string'
+		? log.data as `0x${string}`
+		: uint8ArrayToHex(log.data)
+
+	const decoded = decodeAbiParameters(
+		[
+			{ name: 'amount', type: 'uint256' },
+			{ name: 'spendingCost', type: 'uint256' },
+			{ name: 'timestamp', type: 'uint256' },
+		],
+		data,
+	)
+
+	// Handle blockNumber
+	let blockNumber = 0n
+	if (log.blockNumber) {
+		if (typeof log.blockNumber === 'bigint' || typeof log.blockNumber === 'number') {
+			blockNumber = BigInt(log.blockNumber)
+		} else if (log.blockNumber.absVal) {
+			blockNumber = sdkBigIntToBigInt(log.blockNumber)
+		}
+	}
+
+	// Handle logIndex
+	let logIndex = 0
+	if (log.logIndex !== undefined) {
+		if (typeof log.logIndex === 'number') {
+			logIndex = log.logIndex
+		} else if (typeof log.logIndex === 'bigint') {
+			logIndex = Number(log.logIndex)
+		} else if (log.logIndex.absVal) {
+			logIndex = Number(sdkBigIntToBigInt(log.logIndex))
+		}
+	}
+
+	return {
+		subAccount,
+		token,
+		recipient,
+		amount: decoded[0],
+		spendingCost: decoded[1],
+		timestamp: decoded[2],
+		blockNumber,
+		logIndex,
+	}
+}
+
+/**
+ * Query historical TransferExecuted events from the past 24h
+ */
+const queryTransferEvents = (
+	runtime: Runtime<Config>,
+	subAccount?: Address,
+): TransferExecutedEvent[] => {
+	const evmClient = createEvmClient(runtime)
+	const events: TransferExecutedEvent[] = []
+
+	runtime.log(`Querying transfer events (last ${runtime.config.blocksToLookBack} blocks)...`)
+
+	try {
+		const currentBlock = getCurrentBlockNumber(runtime)
+		if (currentBlock === 0n) {
+			runtime.log('Could not determine current block number')
+			return events
+		}
+
+		const fromBlock = currentBlock - BigInt(runtime.config.blocksToLookBack)
+
+		const topics: Array<{ topic: string[] }> = [
+			{ topic: [TRANSFER_EXECUTED_EVENT_SIG] },
+		]
+
+		if (subAccount) {
+			topics.push({ topic: [addressToTopicBytes(subAccount)] })
+		}
+
+		const logsResult = evmClient
+			.filterLogs(runtime, {
+				filterQuery: {
+					addresses: [runtime.config.moduleAddress],
+					topics: topics,
+					fromBlock: { absVal: fromBlock.toString(), sign: '' },
+					toBlock: { absVal: currentBlock.toString(), sign: '' },
+				},
+			})
+			.result()
+
+		if (!logsResult.logs || logsResult.logs.length === 0) {
+			runtime.log('No transfer events found')
+			return events
+		}
+
+		runtime.log(`Found ${logsResult.logs.length} transfer events`)
+
+		for (const log of logsResult.logs) {
+			try {
+				const event = parseTransferExecutedEvent(log)
+				events.push(event)
+			} catch (error) {
+				runtime.log(`Error parsing transfer event: ${error}`)
+			}
+		}
+	} catch (error) {
+		runtime.log(`Error querying transfer events: ${error}`)
+	}
+
+	return events
+}
+
+/**
  * Build state for a subaccount from historical events
  *
  * Key insight: We track both INPUTS (used from acquired) and OUTPUTS (added to acquired)
@@ -521,6 +659,7 @@ const parseProtocolExecutionEvent = (log: any): ProtocolExecutionEvent => {
 const buildSubAccountState = (
 	runtime: Runtime<Config>,
 	events: ProtocolExecutionEvent[],
+	transferEvents: TransferExecutedEvent[],
 	subAccount: Address,
 	currentTimestamp: bigint,
 ): SubAccountState => {
@@ -537,6 +676,12 @@ const buildSubAccountState = (
 
 	// Filter events for this subaccount within the window, sorted by time
 	const relevantEvents = events
+		.filter(e => e.subAccount.toLowerCase() === subAccount.toLowerCase())
+		.filter(e => e.timestamp >= windowStart)
+		.sort((a, b) => Number(a.timestamp - b.timestamp))
+
+	// Filter transfer events for this subaccount within the window
+	const relevantTransfers = transferEvents
 		.filter(e => e.subAccount.toLowerCase() === subAccount.toLowerCase())
 		.filter(e => e.timestamp >= windowStart)
 		.sort((a, b) => Number(a.timestamp - b.timestamp))
@@ -642,6 +787,42 @@ const buildSubAccountState = (
 				isOutput: true, // Received (add)
 			})
 			runtime.log(`  Added ${acquiredAmount} acquired ${acquiredToken}`)
+		}
+	}
+
+	// Process transfer events (transfers always consume spending and reduce acquired balance)
+	runtime.log(`Processing ${relevantTransfers.length} transfers for ${subAccount} in window`)
+	for (const transfer of relevantTransfers) {
+		// Transfers always cost spending
+		if (transfer.spendingCost > 0n) {
+			state.spendingRecords.push({
+				amount: transfer.spendingCost,
+				timestamp: transfer.timestamp,
+			})
+			state.totalSpendingInWindow += transfer.spendingCost
+			runtime.log(`  Transfer spending: ${transfer.spendingCost}`)
+		}
+
+		// Transfers reduce acquired balance if available
+		const tokenLower = transfer.token.toLowerCase() as Address
+		if (transfer.amount > 0n) {
+			const currentAcquired = runningAcquired.get(tokenLower) || 0n
+			const usedFromAcquired = transfer.amount > currentAcquired ? currentAcquired : transfer.amount
+
+			if (usedFromAcquired > 0n) {
+				runningAcquired.set(tokenLower, currentAcquired - usedFromAcquired)
+
+				if (!state.tokenMovements.has(tokenLower)) {
+					state.tokenMovements.set(tokenLower, [])
+				}
+				state.tokenMovements.get(tokenLower)!.push({
+					token: transfer.token,
+					amount: usedFromAcquired,
+					timestamp: transfer.timestamp,
+					isOutput: false, // Used (subtract)
+				})
+				runtime.log(`  Transfer used ${usedFromAcquired} acquired ${transfer.token}`)
+			}
 		}
 	}
 
@@ -776,8 +957,9 @@ const onProtocolExecution = (runtime: Runtime<Config>, payload: any): string => 
 		runtime.log(`  TokenOut: ${newEvent.tokenOut}, AmountOut: ${newEvent.amountOut}`)
 		runtime.log(`  SpendingCost: ${newEvent.spendingCost}`)
 
-		// Query historical events
+		// Query historical events (both protocol executions and transfers)
 		const historicalEvents = queryHistoricalEvents(runtime, newEvent.subAccount)
+		const transferEvents = queryTransferEvents(runtime, newEvent.subAccount)
 
 		// Add the new event (deduplicate by blockNumber + logIndex which uniquely identifies each log)
 		const allEvents = [...historicalEvents]
@@ -790,7 +972,7 @@ const onProtocolExecution = (runtime: Runtime<Config>, payload: any): string => 
 		}
 
 		// Build state from all events
-		const state = buildSubAccountState(runtime, allEvents, newEvent.subAccount, currentTimestamp)
+		const state = buildSubAccountState(runtime, allEvents, transferEvents, newEvent.subAccount, currentTimestamp)
 
 		// Calculate new spending allowance
 		const newAllowance = calculateSpendingAllowance(runtime, newEvent.subAccount, state)
@@ -827,8 +1009,9 @@ const onCronRefresh = (runtime: Runtime<Config>, payload: CronPayload): string =
 			return 'No subaccounts'
 		}
 
-		// Query all historical events once
+		// Query all historical events once (both protocol executions and transfers)
 		const allEvents = queryHistoricalEvents(runtime)
+		const allTransfers = queryTransferEvents(runtime)
 
 		const results: string[] = []
 
@@ -838,7 +1021,7 @@ const onCronRefresh = (runtime: Runtime<Config>, payload: CronPayload): string =
 				runtime.log(`Processing subaccount: ${subAccount}`)
 
 				// Build state for this subaccount
-				const state = buildSubAccountState(runtime, allEvents, subAccount, currentTimestamp)
+				const state = buildSubAccountState(runtime, allEvents, allTransfers, subAccount, currentTimestamp)
 
 				// Calculate new spending allowance
 				const newAllowance = calculateSpendingAllowance(runtime, subAccount, state)
@@ -856,6 +1039,59 @@ const onCronRefresh = (runtime: Runtime<Config>, payload: CronPayload): string =
 		return results.join('; ')
 	} catch (error) {
 		runtime.log(`Error in periodic refresh: ${error}`)
+		return `Error: ${error}`
+	}
+}
+
+// ============ Transfer Event Handler ============
+
+/**
+ * Handle TransferExecuted event
+ * Triggered on each token transfer from the Safe
+ */
+const onTransferExecuted = (runtime: Runtime<Config>, payload: any): string => {
+	runtime.log('=== Spending Oracle: TransferExecuted Event ===')
+
+	try {
+		const log = payload.log
+		if (!log || !log.topics || log.topics.length < 4) {
+			runtime.log('Invalid transfer event log format')
+			return 'Invalid event'
+		}
+
+		const newTransfer = parseTransferExecutedEvent(log)
+		const currentTimestamp = getCurrentBlockTimestamp()
+
+		runtime.log(`New transfer: ${newTransfer.amount} of ${newTransfer.token} to ${newTransfer.recipient}`)
+		runtime.log(`  SpendingCost: ${newTransfer.spendingCost}`)
+
+		// Query historical events (both protocol executions and transfers)
+		const historicalEvents = queryHistoricalEvents(runtime, newTransfer.subAccount)
+		const transferEvents = queryTransferEvents(runtime, newTransfer.subAccount)
+
+		// Add the new transfer event (deduplicate by blockNumber + logIndex)
+		const allTransfers = [...transferEvents]
+		const isDuplicate = allTransfers.some(e =>
+			e.blockNumber === newTransfer.blockNumber &&
+			e.logIndex === newTransfer.logIndex
+		)
+		if (!isDuplicate) {
+			allTransfers.push(newTransfer)
+		}
+
+		// Build state from all events
+		const state = buildSubAccountState(runtime, historicalEvents, allTransfers, newTransfer.subAccount, currentTimestamp)
+
+		// Calculate new spending allowance
+		const newAllowance = calculateSpendingAllowance(runtime, newTransfer.subAccount, state)
+
+		// Push update to contract
+		const txHash = pushBatchUpdate(runtime, newTransfer.subAccount, newAllowance, state.acquiredBalances)
+
+		runtime.log(`=== Transfer Event Processing Complete ===`)
+		return txHash
+	} catch (error) {
+		runtime.log(`Error processing transfer event: ${error}`)
 		return `Error: ${error}`
 	}
 }
@@ -885,6 +1121,14 @@ const initWorkflow = (config: Config) => {
 				topics: [{ values: [PROTOCOL_EXECUTION_EVENT_SIG] }],
 			}),
 			onProtocolExecution,
+		),
+		// Event trigger: Process each TransferExecuted event
+		cre.handler(
+			evmClient.logTrigger({
+				addresses: [config.moduleAddress],
+				topics: [{ values: [TRANSFER_EXECUTED_EVENT_SIG] }],
+			}),
+			onTransferExecuted,
 		),
 		// Cron trigger: Periodic refresh of spending allowances
 		cre.handler(
