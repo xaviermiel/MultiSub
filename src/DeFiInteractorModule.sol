@@ -360,14 +360,11 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
      * @notice Execute a protocol interaction with automatic operation classification
      * @param target The protocol address to call
      * @param data The calldata to execute
-     * @param tokenIn The input token (for spending check)
-     * @param amountIn The input amount (for spending check)
+     * @dev Token and amount are extracted from calldata via registered parsers
      */
     function executeOnProtocol(
         address target,
-        bytes calldata data,
-        address tokenIn,
-        uint256 amountIn
+        bytes calldata data
     ) external nonReentrant whenNotPaused returns (bytes memory) {
         // 1. Validate permissions
         if (!hasRole(msg.sender, DEFI_EXECUTE_ROLE)) revert Unauthorized();
@@ -384,9 +381,9 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         } else if (opType == OperationType.WITHDRAW || opType == OperationType.CLAIM) {
             return _executeNoSpendingCheck(msg.sender, target, data, opType);
         } else if (opType == OperationType.DEPOSIT || opType == OperationType.SWAP) {
-            return _executeWithSpendingCheck(msg.sender, target, data, tokenIn, amountIn, opType);
+            return _executeWithSpendingCheck(msg.sender, target, data, opType);
         } else if (opType == OperationType.APPROVE) {
-            return _executeApproveWithCap(msg.sender, target, data, tokenIn, amountIn);
+            return _executeApproveWithCap(msg.sender, target, data);
         }
 
         revert UnknownSelector(selector);
@@ -398,24 +395,17 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         address subAccount,
         address target,
         bytes calldata data,
-        address tokenIn,
-        uint256 amountIn,
         OperationType opType
     ) internal returns (bytes memory) {
-        // 1. Parser is REQUIRED - cannot trust wallet's tokenIn/amountIn claims
+        // 1. Parser is REQUIRED to extract token/amount from calldata
         ICalldataParser parser = protocolParsers[target];
         if (address(parser) == address(0)) {
             revert NoParserRegistered(target);
         }
 
-        // 2. Verify tokenIn/amountIn match calldata (wallet cannot lie)
-        address parsedToken = parser.extractInputToken(data);
-        uint256 parsedAmount = parser.extractInputAmount(data);
-        // Allow address(0) from parser to mean "use provided token" (e.g., ERC4626)
-        if (parsedToken != address(0)) {
-            require(parsedToken == tokenIn, "Token mismatch");
-        }
-        require(parsedAmount == amountIn, "Amount mismatch");
+        // 2. Extract token and amount from calldata via parser
+        address tokenIn = parser.extractInputToken(target, data);
+        uint256 amountIn = parser.extractInputAmount(target, data);
 
         // 3. Calculate spending cost (acquired balance is free)
         uint256 acquired = acquiredBalance[subAccount][tokenIn];
@@ -476,8 +466,8 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             revert NoParserRegistered(target);
         }
 
-        // 2. Get output token from parser
-        address tokenOut = _getOutputToken(target, data, parser);
+        // 2. Get output token from parser (parser may query vault for ERC4626)
+        address tokenOut = parser.extractOutputToken(target, data);
         uint256 balanceBefore = tokenOut != address(0) ? IERC20(tokenOut).balanceOf(avatar) : 0;
 
         // 3. Execute (NO spending check - withdrawals and claims are free)
@@ -511,53 +501,50 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
     function _executeApproveWithCap(
         address subAccount,
-        address target,  // The token contract
-        bytes calldata data,
-        address tokenIn, // Same as target for approve
-        uint256 amountIn // Approval amount
+        address target,  // The token contract being approved
+        bytes calldata data
     ) internal returns (bytes memory) {
         // 1. Extract spender and amount from calldata
         // approve(address spender, uint256 amount) - spender is first arg, amount is second
         address spender;
-        uint256 actualAmount;
+        uint256 amount;
         assembly {
             // Skip selector (4 bytes), load first 32 bytes of args (spender)
             spender := calldataload(add(data.offset, 4))
             // Load second 32 bytes of args (amount)
-            actualAmount := calldataload(add(data.offset, 36))
+            amount := calldataload(add(data.offset, 36))
         }
 
-        // 2. Verify amountIn matches actual approval amount in calldata (CRITICAL: prevents cap bypass)
-        require(actualAmount == amountIn, "Approval amount mismatch");
-
-        // 3. Verify spender is whitelisted
+        // 2. Verify spender is whitelisted
         if (!allowedAddresses[subAccount][spender]) {
             revert SpenderNotAllowed();
         }
 
-        // 4. Check cap: acquired tokens unlimited, original capped by spending allowance
+        // 3. Check cap: acquired tokens unlimited, original capped by spending allowance
+        // For approve, target IS the token being approved
+        address tokenIn = target;
         uint256 acquired = acquiredBalance[subAccount][tokenIn];
 
-        if (amountIn > acquired) {
+        if (amount > acquired) {
             // Portion from original tokens - must fit in spending allowance
-            uint256 originalPortion = amountIn - acquired;
+            uint256 originalPortion = amount - acquired;
             uint256 originalValueUSD = _estimateTokenValueUSD(tokenIn, originalPortion);
             if (originalValueUSD > spendingAllowance[subAccount]) {
                 revert ApprovalExceedsLimit();
             }
         }
 
-        // 5. Execute approve - does NOT deduct spending (deducted at swap/deposit)
+        // 4. Execute approve - does NOT deduct spending (deducted at swap/deposit)
         bool success = exec(target, 0, data, ISafe.Operation.Call);
         if (!success) revert ApprovalFailed();
 
-        // 6. Emit event
+        // 5. Emit event
         emit ProtocolExecution(
             subAccount,
             target,
             OperationType.APPROVE,
             tokenIn,
-            amountIn,
+            amount,
             address(0),
             0,
             0, // No spending cost for approve
@@ -780,15 +767,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         ICalldataParser parser
     ) internal view returns (address) {
         if (address(parser) != address(0)) {
-            try parser.extractOutputToken(data) returns (address token) {
-                // If parser returns address(0), try to get from vault (ERC4626)
-                if (token == address(0)) {
-                    try IMorphoVault(target).asset() returns (address asset) {
-                        return asset;
-                    } catch {
-                        return address(0);
-                    }
-                }
+            try parser.extractOutputToken(target, data) returns (address token) {
                 return token;
             } catch {
                 return address(0);

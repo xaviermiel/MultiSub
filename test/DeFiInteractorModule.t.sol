@@ -144,23 +144,19 @@ contract MockParser {
         tokenAddress = _token;
     }
 
-    function extractInputToken(bytes calldata) external view returns (address) {
+    function extractInputToken(address, bytes calldata) external view returns (address) {
         // Return the configured token for deposits
         return tokenAddress;
     }
 
-    function extractInputAmount(bytes calldata data) external pure returns (uint256 amount) {
+    function extractInputAmount(address, bytes calldata data) external pure returns (uint256 amount) {
         // deposit(uint256,address) - amount is first arg
         (amount,) = abi.decode(data[4:], (uint256, address));
     }
 
-    function extractOutputToken(bytes calldata) external view returns (address) {
+    function extractOutputToken(address, bytes calldata) external view returns (address) {
         // Return the configured token for withdrawals
         return tokenAddress;
-    }
-
-    function extractApproveSpender(bytes calldata) external pure returns (address) {
-        revert("MockParser: approve not supported");
     }
 
     function supportsSelector(bytes4 selector) external pure returns (bool) {
@@ -448,7 +444,7 @@ contract DeFiInteractorModuleTest is Test {
         bytes memory data = abi.encodeWithSignature("deposit(uint256,address)", 1000 * 10**18, address(safe));
 
         vm.prank(subAccount1);
-        module.executeOnProtocol(address(protocol), data, address(token), 1000 * 10**18);
+        module.executeOnProtocol(address(protocol), data);
 
         // Spending should be deducted (1000 tokens at $1 = $1000 spent)
         assertLt(module.getSpendingAllowance(subAccount1), 10000 * 10**18);
@@ -465,7 +461,7 @@ contract DeFiInteractorModuleTest is Test {
         uint256 allowanceBefore = module.getSpendingAllowance(subAccount1);
 
         vm.prank(subAccount1);
-        module.executeOnProtocol(address(protocol), data, address(0), 0);
+        module.executeOnProtocol(address(protocol), data);
 
         // Spending should be unchanged (withdrawals are free)
         assertEq(module.getSpendingAllowance(subAccount1), allowanceBefore);
@@ -481,7 +477,7 @@ contract DeFiInteractorModuleTest is Test {
 
         vm.prank(subAccount1);
         vm.expectRevert(DeFiInteractorModule.ExceedsSpendingLimit.selector);
-        module.executeOnProtocol(address(protocol), data, address(token), 1000 * 10**18);
+        module.executeOnProtocol(address(protocol), data);
     }
 
     function testExecuteUnknownSelector() public {
@@ -493,7 +489,7 @@ contract DeFiInteractorModuleTest is Test {
 
         vm.prank(subAccount1);
         vm.expectRevert(abi.encodeWithSelector(DeFiInteractorModule.UnknownSelector.selector, bytes4(data)));
-        module.executeOnProtocol(address(protocol), data, address(token), 1000);
+        module.executeOnProtocol(address(protocol), data);
     }
 
     function testAcquiredBalanceReducesSpendingCost() public {
@@ -506,7 +502,7 @@ contract DeFiInteractorModuleTest is Test {
         bytes memory data = abi.encodeWithSignature("deposit(uint256,address)", 1000 * 10**18, address(safe));
 
         vm.prank(subAccount1);
-        module.executeOnProtocol(address(protocol), data, address(token), 1000 * 10**18);
+        module.executeOnProtocol(address(protocol), data);
 
         // Should succeed because only $200 from original (within $500 limit)
         // Acquired balance should be 0 (used 800)
@@ -565,7 +561,7 @@ contract DeFiInteractorModuleTest is Test {
 
         vm.prank(subAccount1);
         vm.expectRevert(abi.encodeWithSignature("EnforcedPause()"));
-        module.executeOnProtocol(address(protocol), data, address(token), 1000 * 10**18);
+        module.executeOnProtocol(address(protocol), data);
     }
 
     // ============ Oracle Staleness Tests ============
@@ -581,7 +577,7 @@ contract DeFiInteractorModuleTest is Test {
 
         vm.prank(subAccount1);
         vm.expectRevert(DeFiInteractorModule.StaleOracleData.selector);
-        module.executeOnProtocol(address(protocol), data, address(token), 1000 * 10**18);
+        module.executeOnProtocol(address(protocol), data);
     }
 
     // ============ Price Feed Tests ============
@@ -614,7 +610,7 @@ contract DeFiInteractorModuleTest is Test {
         // Should fail because no price feed is set for newToken
         vm.prank(subAccount1);
         vm.expectRevert(DeFiInteractorModule.NoPriceFeedSet.selector);
-        module.executeOnProtocol(address(newProtocol), data, address(newToken), 1000 * 10**18);
+        module.executeOnProtocol(address(newProtocol), data);
     }
 
     function testStalePriceFeed() public {
@@ -630,7 +626,7 @@ contract DeFiInteractorModuleTest is Test {
 
         vm.prank(subAccount1);
         vm.expectRevert(DeFiInteractorModule.StalePriceFeed.selector);
-        module.executeOnProtocol(address(protocol), data, address(token), 1000 * 10**18);
+        module.executeOnProtocol(address(protocol), data);
     }
 
     // ============ View Functions Tests ============
@@ -661,39 +657,10 @@ contract DeFiInteractorModuleTest is Test {
 
     // ============ Security Fix Tests ============
 
-    function testApproveAmountMismatch() public {
-        // Setup: subaccount with protocol and token allowed
-        _setupSubAccount(subAccount1);
-        module.updateSpendingAllowance(subAccount1, 100 * 10**18); // Only $100 allowance
-
-        // Register token for approve (target is the token itself)
-        module.registerParser(address(token), address(parser));
-
-        // Create approve calldata with large amount (1M tokens)
-        bytes memory data = abi.encodeWithSelector(
-            APPROVE_SELECTOR,
-            address(protocol), // spender (must be allowed)
-            1_000_000 * 10**18 // actual amount in calldata
-        );
-
-        // Try to bypass by claiming small amountIn
-        vm.prank(subAccount1);
-        vm.expectRevert("Approval amount mismatch");
-        module.executeOnProtocol(
-            address(token),  // target (token contract)
-            data,
-            address(token),  // tokenIn
-            100 * 10**18     // amountIn - doesn't match calldata!
-        );
-    }
-
-    function testApproveAmountMatchSucceeds() public {
+    function testApproveSucceeds() public {
         // Setup: subaccount with protocol and token allowed
         _setupSubAccount(subAccount1);
         module.updateSpendingAllowance(subAccount1, 10000 * 10**18); // $10k allowance
-
-        // Register token for approve (target is the token itself)
-        module.registerParser(address(token), address(parser));
 
         // Create approve calldata
         uint256 approveAmount = 500 * 10**18;
@@ -703,14 +670,9 @@ contract DeFiInteractorModuleTest is Test {
             approveAmount
         );
 
-        // Execute with matching amount
+        // Execute approve - token and amount are extracted from calldata
         vm.prank(subAccount1);
-        module.executeOnProtocol(
-            address(token),
-            data,
-            address(token),
-            approveAmount // matches calldata
-        );
+        module.executeOnProtocol(address(token), data);
 
         // Should succeed - check allowance was set
         assertEq(token.allowance(address(safe), address(protocol)), approveAmount);
@@ -770,7 +732,7 @@ contract DeFiInteractorModuleTest is Test {
 
         vm.prank(subAccount1);
         vm.expectRevert(abi.encodeWithSelector(DeFiInteractorModule.NoParserRegistered.selector, address(newProtocol)));
-        module.executeOnProtocol(address(newProtocol), data, address(0), 0);
+        module.executeOnProtocol(address(newProtocol), data);
     }
 
     function testClaimRequiresParser() public {
@@ -791,7 +753,7 @@ contract DeFiInteractorModuleTest is Test {
 
         vm.prank(subAccount1);
         vm.expectRevert(abi.encodeWithSelector(DeFiInteractorModule.NoParserRegistered.selector, address(newProtocol)));
-        module.executeOnProtocol(address(newProtocol), data, address(0), 0);
+        module.executeOnProtocol(address(newProtocol), data);
     }
 
     function testUpdateAcquiredBalanceUpdatesTimestamp() public {
@@ -811,9 +773,6 @@ contract DeFiInteractorModuleTest is Test {
         module.updateSpendingAllowance(subAccount1, 100 * 10**18); // $100 allowance
         module.updateAcquiredBalance(subAccount1, address(token), 500 * 10**18); // 500 acquired
 
-        // Register token for approve
-        module.registerParser(address(token), address(parser));
-
         // Try to approve 700 tokens:
         // - 500 from acquired (free)
         // - 200 from original ($200 USD value)
@@ -827,7 +786,7 @@ contract DeFiInteractorModuleTest is Test {
 
         vm.prank(subAccount1);
         vm.expectRevert(DeFiInteractorModule.ApprovalExceedsLimit.selector);
-        module.executeOnProtocol(address(token), data, address(token), approveAmount);
+        module.executeOnProtocol(address(token), data);
     }
 
     function testApproveWithAcquiredSucceeds() public {
@@ -835,9 +794,6 @@ contract DeFiInteractorModuleTest is Test {
         _setupSubAccount(subAccount1);
         module.updateSpendingAllowance(subAccount1, 100 * 10**18); // $100 allowance
         module.updateAcquiredBalance(subAccount1, address(token), 500 * 10**18); // 500 acquired
-
-        // Register token for approve
-        module.registerParser(address(token), address(parser));
 
         // Approve 550 tokens:
         // - 500 from acquired (free)
@@ -851,7 +807,7 @@ contract DeFiInteractorModuleTest is Test {
         );
 
         vm.prank(subAccount1);
-        module.executeOnProtocol(address(token), data, address(token), approveAmount);
+        module.executeOnProtocol(address(token), data);
 
         assertEq(token.allowance(address(safe), address(protocol)), approveAmount);
     }
@@ -860,9 +816,6 @@ contract DeFiInteractorModuleTest is Test {
         // Setup
         _setupSubAccount(subAccount1);
         module.updateSpendingAllowance(subAccount1, 10000 * 10**18);
-
-        // Register token for approve
-        module.registerParser(address(token), address(parser));
 
         // Try to approve for a non-allowed spender
         address notAllowedSpender = makeAddr("notAllowed");
@@ -875,7 +828,7 @@ contract DeFiInteractorModuleTest is Test {
 
         vm.prank(subAccount1);
         vm.expectRevert(DeFiInteractorModule.SpenderNotAllowed.selector);
-        module.executeOnProtocol(address(token), data, address(token), approveAmount);
+        module.executeOnProtocol(address(token), data);
     }
 
     // ============ Helper Functions ============
