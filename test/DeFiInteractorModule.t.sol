@@ -621,9 +621,10 @@ contract DeFiInteractorModuleTest is Test {
         _setupSubAccount(subAccount1);
         module.updateSpendingAllowance(subAccount1, 10000 * 10**18);
 
-        // Make price feed stale (but keep oracle fresh)
+        // Make price feed stale (but keep oracle and Safe value fresh)
         vm.warp(block.timestamp + 25 hours);
-        module.updateSpendingAllowance(subAccount1, 10000 * 10**18); // Refresh oracle
+        module.updateSafeValue(1_000_000 * 10**18); // Refresh Safe value first
+        module.updateSpendingAllowance(subAccount1, 10000 * 10**18); // Then refresh oracle
 
         bytes memory data = abi.encodeWithSignature("deposit(uint256,address)", 1000 * 10**18, address(safe));
 
@@ -656,6 +657,225 @@ contract DeFiInteractorModuleTest is Test {
         assertEq(totalValue, 1_000_000 * 10**18);
         assertGt(lastUpdated, 0);
         assertEq(updateCount, 1);
+    }
+
+    // ============ Security Fix Tests ============
+
+    function testApproveAmountMismatch() public {
+        // Setup: subaccount with protocol and token allowed
+        _setupSubAccount(subAccount1);
+        module.updateSpendingAllowance(subAccount1, 100 * 10**18); // Only $100 allowance
+
+        // Register token for approve (target is the token itself)
+        module.registerParser(address(token), address(parser));
+
+        // Create approve calldata with large amount (1M tokens)
+        bytes memory data = abi.encodeWithSelector(
+            APPROVE_SELECTOR,
+            address(protocol), // spender (must be allowed)
+            1_000_000 * 10**18 // actual amount in calldata
+        );
+
+        // Try to bypass by claiming small amountIn
+        vm.prank(subAccount1);
+        vm.expectRevert("Approval amount mismatch");
+        module.executeOnProtocol(
+            address(token),  // target (token contract)
+            data,
+            address(token),  // tokenIn
+            100 * 10**18     // amountIn - doesn't match calldata!
+        );
+    }
+
+    function testApproveAmountMatchSucceeds() public {
+        // Setup: subaccount with protocol and token allowed
+        _setupSubAccount(subAccount1);
+        module.updateSpendingAllowance(subAccount1, 10000 * 10**18); // $10k allowance
+
+        // Register token for approve (target is the token itself)
+        module.registerParser(address(token), address(parser));
+
+        // Create approve calldata
+        uint256 approveAmount = 500 * 10**18;
+        bytes memory data = abi.encodeWithSelector(
+            APPROVE_SELECTOR,
+            address(protocol), // spender (must be allowed)
+            approveAmount
+        );
+
+        // Execute with matching amount
+        vm.prank(subAccount1);
+        module.executeOnProtocol(
+            address(token),
+            data,
+            address(token),
+            approveAmount // matches calldata
+        );
+
+        // Should succeed - check allowance was set
+        assertEq(token.allowance(address(safe), address(protocol)), approveAmount);
+    }
+
+    function testSafeValueStalenessCheck() public {
+        // Setup initial state
+        module.updateSafeValue(1_000_000 * 10**18);
+
+        // Fast forward past Safe value staleness threshold (15 min default)
+        vm.warp(block.timestamp + 16 minutes);
+
+        // Try to update spending allowance - should fail due to stale Safe value
+        vm.expectRevert(DeFiInteractorModule.StalePortfolioValue.selector);
+        module.updateSpendingAllowance(subAccount1, 10000 * 10**18);
+    }
+
+    function testSafeValueStalenessOnBatchUpdate() public {
+        // Setup initial state
+        module.updateSafeValue(1_000_000 * 10**18);
+
+        // Fast forward past Safe value staleness threshold
+        vm.warp(block.timestamp + 16 minutes);
+
+        address[] memory tokens = new address[](0);
+        uint256[] memory balances = new uint256[](0);
+
+        // Try batch update - should fail due to stale Safe value
+        vm.expectRevert(DeFiInteractorModule.StalePortfolioValue.selector);
+        module.batchUpdate(subAccount1, 10000 * 10**18, tokens, balances);
+    }
+
+    function testSafeValueFreshAllowsUpdate() public {
+        // Setup initial state
+        module.updateSafeValue(1_000_000 * 10**18);
+
+        // Fast forward but less than staleness threshold
+        vm.warp(block.timestamp + 10 minutes);
+
+        // Should succeed
+        module.updateSpendingAllowance(subAccount1, 10000 * 10**18);
+        assertEq(module.getSpendingAllowance(subAccount1), 10000 * 10**18);
+    }
+
+    function testWithdrawRequiresParser() public {
+        // Setup
+        _setupSubAccount(subAccount1);
+        module.updateSpendingAllowance(subAccount1, 10000 * 10**18);
+
+        // Create a new protocol without parser
+        MockProtocol newProtocol = new MockProtocol();
+        module.setAllowedAddresses(subAccount1, _toArray(address(newProtocol)), true);
+        // Note: NOT registering a parser for newProtocol
+
+        // Withdraw should fail because no parser
+        bytes memory data = abi.encodeWithSignature("withdraw(uint256,address)", 1000 * 10**18, address(safe));
+
+        vm.prank(subAccount1);
+        vm.expectRevert(abi.encodeWithSelector(DeFiInteractorModule.NoParserRegistered.selector, address(newProtocol)));
+        module.executeOnProtocol(address(newProtocol), data, address(0), 0);
+    }
+
+    function testClaimRequiresParser() public {
+        // Setup
+        _setupSubAccount(subAccount1);
+        module.updateSpendingAllowance(subAccount1, 10000 * 10**18);
+
+        // Register a CLAIM selector
+        bytes4 claimSelector = bytes4(keccak256("claim(uint256)"));
+        module.registerSelector(claimSelector, DeFiInteractorModule.OperationType.CLAIM);
+
+        // Create a new protocol without parser
+        MockProtocol newProtocol = new MockProtocol();
+        module.setAllowedAddresses(subAccount1, _toArray(address(newProtocol)), true);
+
+        // Claim should fail because no parser
+        bytes memory data = abi.encodeWithSignature("claim(uint256)", 1000 * 10**18);
+
+        vm.prank(subAccount1);
+        vm.expectRevert(abi.encodeWithSelector(DeFiInteractorModule.NoParserRegistered.selector, address(newProtocol)));
+        module.executeOnProtocol(address(newProtocol), data, address(0), 0);
+    }
+
+    function testUpdateAcquiredBalanceUpdatesTimestamp() public {
+        // Initially no oracle update
+        assertEq(module.lastOracleUpdate(subAccount1), 0);
+
+        // Update acquired balance
+        module.updateAcquiredBalance(subAccount1, address(token), 1000 * 10**18);
+
+        // Check timestamp was updated
+        assertEq(module.lastOracleUpdate(subAccount1), block.timestamp);
+    }
+
+    function testApproveCapChecksOriginalPortion() public {
+        // Setup
+        _setupSubAccount(subAccount1);
+        module.updateSpendingAllowance(subAccount1, 100 * 10**18); // $100 allowance
+        module.updateAcquiredBalance(subAccount1, address(token), 500 * 10**18); // 500 acquired
+
+        // Register token for approve
+        module.registerParser(address(token), address(parser));
+
+        // Try to approve 700 tokens:
+        // - 500 from acquired (free)
+        // - 200 from original ($200 USD value)
+        // Should fail because $200 > $100 allowance
+        uint256 approveAmount = 700 * 10**18;
+        bytes memory data = abi.encodeWithSelector(
+            APPROVE_SELECTOR,
+            address(protocol),
+            approveAmount
+        );
+
+        vm.prank(subAccount1);
+        vm.expectRevert(DeFiInteractorModule.ApprovalExceedsLimit.selector);
+        module.executeOnProtocol(address(token), data, address(token), approveAmount);
+    }
+
+    function testApproveWithAcquiredSucceeds() public {
+        // Setup
+        _setupSubAccount(subAccount1);
+        module.updateSpendingAllowance(subAccount1, 100 * 10**18); // $100 allowance
+        module.updateAcquiredBalance(subAccount1, address(token), 500 * 10**18); // 500 acquired
+
+        // Register token for approve
+        module.registerParser(address(token), address(parser));
+
+        // Approve 550 tokens:
+        // - 500 from acquired (free)
+        // - 50 from original ($50 USD value)
+        // Should succeed because $50 <= $100 allowance
+        uint256 approveAmount = 550 * 10**18;
+        bytes memory data = abi.encodeWithSelector(
+            APPROVE_SELECTOR,
+            address(protocol),
+            approveAmount
+        );
+
+        vm.prank(subAccount1);
+        module.executeOnProtocol(address(token), data, address(token), approveAmount);
+
+        assertEq(token.allowance(address(safe), address(protocol)), approveAmount);
+    }
+
+    function testApproveSpenderMustBeAllowed() public {
+        // Setup
+        _setupSubAccount(subAccount1);
+        module.updateSpendingAllowance(subAccount1, 10000 * 10**18);
+
+        // Register token for approve
+        module.registerParser(address(token), address(parser));
+
+        // Try to approve for a non-allowed spender
+        address notAllowedSpender = makeAddr("notAllowed");
+        uint256 approveAmount = 100 * 10**18;
+        bytes memory data = abi.encodeWithSelector(
+            APPROVE_SELECTOR,
+            notAllowedSpender, // NOT in allowed addresses
+            approveAmount
+        );
+
+        vm.prank(subAccount1);
+        vm.expectRevert(DeFiInteractorModule.SpenderNotAllowed.selector);
+        module.executeOnProtocol(address(token), data, address(token), approveAmount);
     }
 
     // ============ Helper Functions ============
