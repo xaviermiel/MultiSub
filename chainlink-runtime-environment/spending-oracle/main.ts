@@ -58,12 +58,12 @@ const configSchema = z.object({
 	proxyAddress: z.string(),
 	tokens: z.array(TokenSchema),
 	// Cron schedule for periodic allowance refresh (e.g., "*/5 * * * *" for every 5 minutes)
-	refreshSchedule: z.string().default('*/5 * * * *'),
+	refreshSchedule: z.string(),
 	// Window duration in seconds (default 24 hours)
-	windowDurationSeconds: z.number().default(86400),
+	windowDurationSeconds: z.number(),
 	// How many blocks to look back for events (approximate 24h worth)
 	// Ethereum: ~7200 blocks/day, Arbitrum: ~300000 blocks/day
-	blocksToLookBack: z.number().default(7200),
+	blocksToLookBack: z.number(),
 })
 
 type Config = z.infer<typeof configSchema>
@@ -312,6 +312,50 @@ const getActiveSubaccounts = (runtime: Runtime<Config>): Address[] => {
 }
 
 /**
+ * Convert SDK BigInt (Uint8Array absVal) to native bigint
+ */
+const sdkBigIntToBigInt = (sdkBigInt: { absVal: Uint8Array; sign: bigint }): bigint => {
+	// absVal is big-endian bytes representing the absolute value
+	let result = 0n
+	for (const byte of sdkBigInt.absVal) {
+		result = (result << 8n) | BigInt(byte)
+	}
+	// Apply sign (negative if sign < 0)
+	return sdkBigInt.sign < 0n ? -result : result
+}
+
+/**
+ * Get current finalized block number from the chain
+ */
+const getCurrentBlockNumber = (runtime: Runtime<Config>): bigint => {
+	const evmClient = createEvmClient(runtime)
+
+	try {
+		const headerResult = evmClient
+			.headerByNumber(runtime, {
+				blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
+			})
+			.result()
+
+		if (headerResult.header?.blockNumber) {
+			// blockNumber is SDK BigInt type with Uint8Array absVal
+			return sdkBigIntToBigInt(headerResult.header.blockNumber)
+		}
+		return 0n
+	} catch (error) {
+		runtime.log(`Error getting current block number: ${error}`)
+		return 0n
+	}
+}
+
+/**
+ * Convert address to padded 32-byte hex string for topic filtering
+ */
+const addressToTopicBytes = (address: Address): string => {
+	return '0x' + address.slice(2).toLowerCase().padStart(64, '0')
+}
+
+/**
  * Query historical ProtocolExecution events from the past 24h
  */
 const queryHistoricalEvents = (
@@ -324,15 +368,35 @@ const queryHistoricalEvents = (
 	runtime.log(`Querying historical events (last ${runtime.config.blocksToLookBack} blocks)...`)
 
 	try {
-		// Query logs from the module address
+		// Get current finalized block number
+		const currentBlock = getCurrentBlockNumber(runtime)
+		if (currentBlock === 0n) {
+			runtime.log('Could not determine current block number')
+			return events
+		}
+
+		const fromBlock = currentBlock - BigInt(runtime.config.blocksToLookBack)
+		runtime.log(`Block range: ${fromBlock} to ${currentBlock}`)
+
+		// Build topics array for filterLogs
+		// topics[0] = event signature, topics[1] = indexed subAccount (optional)
+		const topics: Array<{ topic: string[] }> = [
+			{ topic: [PROTOCOL_EXECUTION_EVENT_SIG] },
+		]
+
+		if (subAccount) {
+			topics.push({ topic: [addressToTopicBytes(subAccount)] })
+		}
+
+		// Query logs using filterLogs with proper FilterLogsRequest structure
 		const logsResult = evmClient
-			.getLogs(runtime, {
-				address: runtime.config.moduleAddress as Address,
-				topics: subAccount
-					? [PROTOCOL_EXECUTION_EVENT_SIG, `0x000000000000000000000000${subAccount.slice(2)}`]
-					: [PROTOCOL_EXECUTION_EVENT_SIG],
-				fromBlock: `0x${(BigInt(LAST_FINALIZED_BLOCK_NUMBER) - BigInt(runtime.config.blocksToLookBack)).toString(16)}`,
-				toBlock: LAST_FINALIZED_BLOCK_NUMBER,
+			.filterLogs(runtime, {
+				filterQuery: {
+					addresses: [runtime.config.moduleAddress],
+					topics: topics,
+					fromBlock: { absVal: fromBlock.toString(), sign: '' },
+					toBlock: { absVal: currentBlock.toString(), sign: '' },
+				},
 			})
 			.result()
 
@@ -359,11 +423,40 @@ const queryHistoricalEvents = (
 }
 
 /**
+ * Convert Uint8Array to hex string
+ */
+const uint8ArrayToHex = (arr: Uint8Array): `0x${string}` => {
+	return ('0x' + Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('')) as `0x${string}`
+}
+
+/**
+ * Extract address from 32-byte topic (last 20 bytes)
+ */
+const topicToAddress = (topic: Uint8Array | string): Address => {
+	if (typeof topic === 'string') {
+		// Handle string format (hex)
+		return ('0x' + topic.slice(-40)) as Address
+	}
+	// Handle Uint8Array format (take last 20 bytes)
+	const addressBytes = topic.slice(-20)
+	return uint8ArrayToHex(addressBytes) as Address
+}
+
+/**
  * Parse ProtocolExecution event from log data
+ * Handles both SDK Log type (Uint8Array) and JSON format (string)
  */
 const parseProtocolExecutionEvent = (log: any): ProtocolExecutionEvent => {
-	const subAccount = ('0x' + log.topics[1].slice(-40)) as Address
-	const target = ('0x' + log.topics[2].slice(-40)) as Address
+	// Handle topics - SDK returns Uint8Array[], may also be string[]
+	const topic1 = log.topics[1]
+	const topic2 = log.topics[2]
+	const subAccount = topicToAddress(topic1)
+	const target = topicToAddress(topic2)
+
+	// Handle data - SDK returns Uint8Array, may also be string
+	const data = typeof log.data === 'string'
+		? log.data as `0x${string}`
+		: uint8ArrayToHex(log.data)
 
 	const decoded = decodeAbiParameters(
 		[
@@ -375,8 +468,18 @@ const parseProtocolExecutionEvent = (log: any): ProtocolExecutionEvent => {
 			{ name: 'spendingCost', type: 'uint256' },
 			{ name: 'timestamp', type: 'uint256' },
 		],
-		log.data as `0x${string}`,
+		data,
 	)
+
+	// Handle blockNumber - SDK returns BigInt type with Uint8Array absVal
+	let blockNumber = 0n
+	if (log.blockNumber) {
+		if (typeof log.blockNumber === 'bigint' || typeof log.blockNumber === 'number') {
+			blockNumber = BigInt(log.blockNumber)
+		} else if (log.blockNumber.absVal) {
+			blockNumber = sdkBigIntToBigInt(log.blockNumber)
+		}
+	}
 
 	return {
 		subAccount,
@@ -388,7 +491,7 @@ const parseProtocolExecutionEvent = (log: any): ProtocolExecutionEvent => {
 		amountOut: decoded[4],
 		spendingCost: decoded[5],
 		timestamp: decoded[6],
-		blockNumber: BigInt(log.blockNumber || 0),
+		blockNumber,
 	}
 }
 
@@ -757,10 +860,11 @@ const initWorkflow = (config: Config) => {
 
 	return [
 		// Event trigger: Process each ProtocolExecution event
+		// logTrigger uses topics array where topics[0] contains event signatures
 		cre.handler(
 			evmClient.logTrigger({
 				addresses: [config.moduleAddress],
-				eventSignatures: [PROTOCOL_EXECUTION_EVENT_SIG],
+				topics: [{ values: [PROTOCOL_EXECUTION_EVENT_SIG] }],
 			}),
 			onProtocolExecution,
 		),
