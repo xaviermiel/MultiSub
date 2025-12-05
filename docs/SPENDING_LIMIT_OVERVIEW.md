@@ -116,7 +116,7 @@ Day Start:
 │  │              On-Chain Contract                          │    │
 │  │  1. Classify operation from function selector           │    │
 │  │  2. Verify tokenIn/amount match calldata                │    │
-│  │  3. Check spending allowance                            │    │
+│  │  3. Check & update spending allowance                   │    │
 │  │  4. Execute through Safe                                │    │
 │  │  5. Emit ProtocolExecution event                        │    │
 │  └─────────────────────────────────────────────────────────┘    │
