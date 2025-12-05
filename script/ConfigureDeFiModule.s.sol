@@ -9,7 +9,7 @@ import {MorphoParser} from "../src/parsers/MorphoParser.sol";
 
 /**
  * @title ConfigureDeFiModule
- * @notice Comprehensive script to configure selectors, parsers, and price feeds
+ * @notice Script to configure selectors, parsers, and price feeds for supported protocols
  * @dev Run with: forge script script/ConfigureDeFiModule.s.sol --rpc-url $RPC_URL --broadcast
  */
 contract ConfigureDeFiModule is Script {
@@ -17,6 +17,7 @@ contract ConfigureDeFiModule is Script {
 
     // Aave V3
     address constant AAVE_V3_POOL = 0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2;
+    address constant AAVE_V3_REWARDS = 0x8164Cc65827dcFe994AB23944CBC90e0aa80bFcb;
 
     // Uniswap V3
     address constant UNISWAP_V3_ROUTER = 0xE592427A0AEce92De3Edee1F18E0157C05861564;
@@ -41,17 +42,29 @@ contract ConfigureDeFiModule is Script {
     // ERC20
     bytes4 constant APPROVE_SELECTOR = 0x095ea7b3; // approve(address,uint256)
 
-    // Aave V3
+    // Aave V3 Pool
     bytes4 constant AAVE_SUPPLY_SELECTOR = 0x617ba037;   // supply(address,uint256,address,uint16)
     bytes4 constant AAVE_WITHDRAW_SELECTOR = 0x69328dec; // withdraw(address,uint256,address)
     bytes4 constant AAVE_BORROW_SELECTOR = 0xa415bcad;   // borrow(address,uint256,uint256,uint16,address)
     bytes4 constant AAVE_REPAY_SELECTOR = 0x573ade81;    // repay(address,uint256,uint256,address)
+
+    // Aave V3 Rewards (CLAIM)
+    bytes4 constant AAVE_CLAIM_REWARDS = 0x3111e7b3;           // claimRewards(address[],uint256,address,address)
+    bytes4 constant AAVE_CLAIM_REWARDS_ON_BEHALF = 0x9a99b4f0; // claimRewardsOnBehalf(...)
+    bytes4 constant AAVE_CLAIM_ALL_REWARDS = 0x74d945ec;       // claimAllRewards(address[],address)
+    bytes4 constant AAVE_CLAIM_ALL_ON_BEHALF = 0x0c3fea64;     // claimAllRewardsOnBehalf(...)
 
     // Uniswap V3
     bytes4 constant EXACT_INPUT_SINGLE_SELECTOR = 0x414bf389;
     bytes4 constant EXACT_INPUT_SELECTOR = 0xc04b8d59;
     bytes4 constant EXACT_OUTPUT_SINGLE_SELECTOR = 0xdb3e2198;
     bytes4 constant EXACT_OUTPUT_SELECTOR = 0xf28c0498;
+
+    // Morpho (ERC4626)
+    bytes4 constant MORPHO_DEPOSIT_SELECTOR = 0x6e553f65;   // deposit(uint256,address)
+    bytes4 constant MORPHO_MINT_SELECTOR = 0x94bf804d;      // mint(uint256,address)
+    bytes4 constant MORPHO_WITHDRAW_SELECTOR = 0xb460af94;  // withdraw(uint256,address,address)
+    bytes4 constant MORPHO_REDEEM_SELECTOR = 0xba087652;    // redeem(uint256,address,address)
 
     DeFiInteractorModule public module;
 
@@ -81,11 +94,13 @@ contract ConfigureDeFiModule is Script {
     function _deployAndRegisterParsers() internal {
         console.log("\n1. Deploying and registering parsers...");
 
-        // Aave V3 Parser
+        // Aave V3 Parser (handles Pool and RewardsController)
         AaveV3Parser aaveParser = new AaveV3Parser();
         module.registerParser(AAVE_V3_POOL, address(aaveParser));
+        module.registerParser(AAVE_V3_REWARDS, address(aaveParser));
         console.log("   AaveV3Parser deployed at:", address(aaveParser));
         console.log("   Registered for Aave V3 Pool:", AAVE_V3_POOL);
+        console.log("   Registered for Aave V3 Rewards:", AAVE_V3_REWARDS);
 
         // Uniswap V3 Parser
         UniswapV3Parser uniswapParser = new UniswapV3Parser();
@@ -94,6 +109,12 @@ contract ConfigureDeFiModule is Script {
         console.log("   UniswapV3Parser deployed at:", address(uniswapParser));
         console.log("   Registered for Uniswap V3 Router:", UNISWAP_V3_ROUTER);
         console.log("   Registered for Uniswap V3 Router02:", UNISWAP_V3_ROUTER_02);
+
+        // Morpho Parser (for ERC4626 vaults)
+        // Note: Register for specific Morpho vault addresses as needed
+        MorphoParser morphoParser = new MorphoParser();
+        console.log("   MorphoParser deployed at:", address(morphoParser));
+        console.log("   Note: Register for specific Morpho vault addresses");
     }
 
     function _registerSelectors() internal {
@@ -101,33 +122,59 @@ contract ConfigureDeFiModule is Script {
 
         // ERC20 Approve
         module.registerSelector(APPROVE_SELECTOR, DeFiInteractorModule.OperationType.APPROVE);
-        console.log("   APPROVE (0x095ea7b3) -> APPROVE");
+        console.log("   APPROVE -> APPROVE");
 
-        // Aave V3
+        // ============ Aave V3 Pool ============
         module.registerSelector(AAVE_SUPPLY_SELECTOR, DeFiInteractorModule.OperationType.DEPOSIT);
-        console.log("   AAVE_SUPPLY (0x617ba037) -> DEPOSIT");
+        console.log("   AAVE_SUPPLY -> DEPOSIT");
 
         module.registerSelector(AAVE_WITHDRAW_SELECTOR, DeFiInteractorModule.OperationType.WITHDRAW);
-        console.log("   AAVE_WITHDRAW (0x69328dec) -> WITHDRAW");
+        console.log("   AAVE_WITHDRAW -> WITHDRAW");
 
         module.registerSelector(AAVE_BORROW_SELECTOR, DeFiInteractorModule.OperationType.WITHDRAW);
-        console.log("   AAVE_BORROW (0xa415bcad) -> WITHDRAW");
+        console.log("   AAVE_BORROW -> WITHDRAW");
 
         module.registerSelector(AAVE_REPAY_SELECTOR, DeFiInteractorModule.OperationType.DEPOSIT);
-        console.log("   AAVE_REPAY (0x573ade81) -> DEPOSIT");
+        console.log("   AAVE_REPAY -> DEPOSIT");
 
-        // Uniswap V3
+        // ============ Aave V3 Rewards (CLAIM) ============
+        module.registerSelector(AAVE_CLAIM_REWARDS, DeFiInteractorModule.OperationType.CLAIM);
+        console.log("   AAVE_CLAIM_REWARDS -> CLAIM");
+
+        module.registerSelector(AAVE_CLAIM_REWARDS_ON_BEHALF, DeFiInteractorModule.OperationType.CLAIM);
+        console.log("   AAVE_CLAIM_REWARDS_ON_BEHALF -> CLAIM");
+
+        module.registerSelector(AAVE_CLAIM_ALL_REWARDS, DeFiInteractorModule.OperationType.CLAIM);
+        console.log("   AAVE_CLAIM_ALL_REWARDS -> CLAIM");
+
+        module.registerSelector(AAVE_CLAIM_ALL_ON_BEHALF, DeFiInteractorModule.OperationType.CLAIM);
+        console.log("   AAVE_CLAIM_ALL_ON_BEHALF -> CLAIM");
+
+        // ============ Uniswap V3 (SWAP) ============
         module.registerSelector(EXACT_INPUT_SINGLE_SELECTOR, DeFiInteractorModule.OperationType.SWAP);
-        console.log("   EXACT_INPUT_SINGLE (0x414bf389) -> SWAP");
+        console.log("   EXACT_INPUT_SINGLE -> SWAP");
 
         module.registerSelector(EXACT_INPUT_SELECTOR, DeFiInteractorModule.OperationType.SWAP);
-        console.log("   EXACT_INPUT (0xc04b8d59) -> SWAP");
+        console.log("   EXACT_INPUT -> SWAP");
 
         module.registerSelector(EXACT_OUTPUT_SINGLE_SELECTOR, DeFiInteractorModule.OperationType.SWAP);
-        console.log("   EXACT_OUTPUT_SINGLE (0xdb3e2198) -> SWAP");
+        console.log("   EXACT_OUTPUT_SINGLE -> SWAP");
 
         module.registerSelector(EXACT_OUTPUT_SELECTOR, DeFiInteractorModule.OperationType.SWAP);
-        console.log("   EXACT_OUTPUT (0xf28c0498) -> SWAP");
+        console.log("   EXACT_OUTPUT -> SWAP");
+
+        // ============ Morpho (ERC4626) ============
+        module.registerSelector(MORPHO_DEPOSIT_SELECTOR, DeFiInteractorModule.OperationType.DEPOSIT);
+        console.log("   MORPHO_DEPOSIT -> DEPOSIT");
+
+        module.registerSelector(MORPHO_MINT_SELECTOR, DeFiInteractorModule.OperationType.DEPOSIT);
+        console.log("   MORPHO_MINT -> DEPOSIT");
+
+        module.registerSelector(MORPHO_WITHDRAW_SELECTOR, DeFiInteractorModule.OperationType.WITHDRAW);
+        console.log("   MORPHO_WITHDRAW -> WITHDRAW");
+
+        module.registerSelector(MORPHO_REDEEM_SELECTOR, DeFiInteractorModule.OperationType.WITHDRAW);
+        console.log("   MORPHO_REDEEM -> WITHDRAW");
     }
 
     function _configurePriceFeeds() internal {
@@ -142,22 +189,18 @@ contract ConfigureDeFiModule is Script {
         tokens[1] = USDT;
         feeds[1] = USDT_USD_FEED;
 
-        tokens[2] = WETH;
-        feeds[2] = ETH_USD_FEED;
+        tokens[2] = DAI;
+        feeds[2] = DAI_USD_FEED;
 
-        tokens[3] = WBTC;
-        feeds[3] = BTC_USD_FEED;
+        tokens[3] = WETH;
+        feeds[3] = ETH_USD_FEED;
 
-        tokens[4] = DAI;
-        feeds[4] = DAI_USD_FEED;
+        tokens[4] = WBTC;
+        feeds[4] = BTC_USD_FEED;
 
         module.setTokenPriceFeeds(tokens, feeds);
 
-        console.log("   USDC -> ", USDC_USD_FEED);
-        console.log("   USDT -> ", USDT_USD_FEED);
-        console.log("   WETH -> ", ETH_USD_FEED);
-        console.log("   WBTC -> ", BTC_USD_FEED);
-        console.log("   DAI  -> ", DAI_USD_FEED);
+        console.log("   USDC, USDT, DAI, WETH, WBTC price feeds configured");
     }
 }
 
