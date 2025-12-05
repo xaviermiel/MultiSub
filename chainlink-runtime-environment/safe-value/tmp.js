@@ -109,7 +109,7 @@ function size(value2) {
   return value2.length;
 }
 var init_size = () => {};
-var version = "2.41.2";
+var version = "2.34.0";
 function walk(err, fn) {
   if (fn?.(err))
     return err;
@@ -1303,9 +1303,9 @@ function encodeBytes(value2, { param }) {
       encoded: concat([padHex(numberToHex(bytesSize, { size: 32 })), value_])
     };
   }
-  if (bytesSize !== Number.parseInt(paramSize, 10))
+  if (bytesSize !== Number.parseInt(paramSize))
     throw new AbiEncodingBytesSizeMismatchError({
-      expectedSize: Number.parseInt(paramSize, 10),
+      expectedSize: Number.parseInt(paramSize),
       value: value2
     });
   return { dynamic: false, encoded: padHex(value2, { dir: "right" }) };
@@ -1410,7 +1410,7 @@ function getAbiItem(parameters) {
     return;
   if (abiItems.length === 1)
     return abiItems[0];
-  let matchedAbiItem;
+  let matchedAbiItem = undefined;
   for (const abiItem of abiItems) {
     if (!("inputs" in abiItem))
       continue;
@@ -1893,12 +1893,12 @@ function decodeBytes(cursor, param, { staticPosition }) {
     cursor.setPosition(staticPosition + 32);
     return [bytesToHex2(data), 32];
   }
-  const value2 = bytesToHex2(cursor.readBytes(Number.parseInt(size2, 10), 32));
+  const value2 = bytesToHex2(cursor.readBytes(Number.parseInt(size2), 32));
   return [value2, 32];
 }
 function decodeNumber(cursor, param) {
   const signed = param.type.startsWith("int");
-  const size2 = Number.parseInt(param.type.split("int")[1] || "256", 10);
+  const size2 = Number.parseInt(param.type.split("int")[1] || "256");
   const value2 = cursor.readBytes(32);
   return [
     size2 > 48 ? bytesToBigInt(value2, { signed }) : bytesToNumber(value2, { signed }),
@@ -16061,11 +16061,8 @@ class Runner {
   }
 }
 var zeroAddress = "0x0000000000000000000000000000000000000000";
-init_decodeAbiParameters();
 init_decodeFunctionResult();
 init_encodeFunctionData();
-init_toHex();
-init_keccak256();
 var DeFiInteractorModule = [
   {
     type: "function",
@@ -16270,520 +16267,490 @@ var DeFiInteractorModule = [
     anonymous: false
   }
 ];
-var OperationType;
-((OperationType2) => {
-  OperationType2[OperationType2["UNKNOWN"] = 0] = "UNKNOWN";
-  OperationType2[OperationType2["SWAP"] = 1] = "SWAP";
-  OperationType2[OperationType2["DEPOSIT"] = 2] = "DEPOSIT";
-  OperationType2[OperationType2["WITHDRAW"] = 3] = "WITHDRAW";
-  OperationType2[OperationType2["CLAIM"] = 4] = "CLAIM";
-  OperationType2[OperationType2["APPROVE"] = 5] = "APPROVE";
-})(OperationType ||= {});
 var EVENT_SIGNATURES = {
   ProtocolExecution: "0x" + "ProtocolExecution(address,address,uint8,address,uint256,address,uint256,uint256,uint256)",
   TransferExecuted: "0x" + "TransferExecuted(address,address,address,uint256,uint256,uint256)",
   SafeValueUpdated: "0x" + "SafeValueUpdated(uint256,uint256,uint256)"
 };
-var TokenSchema = exports_external.object({
-  address: exports_external.string(),
-  priceFeedAddress: exports_external.string(),
-  symbol: exports_external.string()
-});
+var ERC20WithDecimals = [
+  {
+    inputs: [{ name: "account", type: "address", internalType: "address" }],
+    name: "balanceOf",
+    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "decimals",
+    outputs: [{ name: "", type: "uint8", internalType: "uint8" }],
+    stateMutability: "view",
+    type: "function"
+  }
+];
+var ChainlinkPriceFeedABI = [
+  {
+    inputs: [],
+    name: "latestRoundData",
+    outputs: [
+      { name: "roundId", type: "uint80" },
+      { name: "answer", type: "int256" },
+      { name: "startedAt", type: "uint256" },
+      { name: "updatedAt", type: "uint256" },
+      { name: "answeredInRound", type: "uint80" }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "decimals",
+    outputs: [{ name: "", type: "uint8" }],
+    stateMutability: "view",
+    type: "function"
+  }
+];
+var MorphoVaultABI = [
+  {
+    inputs: [{ name: "account", type: "address", internalType: "address" }],
+    name: "balanceOf",
+    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "decimals",
+    outputs: [{ name: "", type: "uint8", internalType: "uint8" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [{ name: "shares", type: "uint256", internalType: "uint256" }],
+    name: "convertToAssets",
+    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "asset",
+    outputs: [{ name: "", type: "address", internalType: "address" }],
+    stateMutability: "view",
+    type: "function"
+  }
+];
+var UniswapV2PairABI = [
+  {
+    inputs: [{ name: "account", type: "address", internalType: "address" }],
+    name: "balanceOf",
+    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "decimals",
+    outputs: [{ name: "", type: "uint8", internalType: "uint8" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "totalSupply",
+    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "getReserves",
+    outputs: [
+      { name: "reserve0", type: "uint112", internalType: "uint112" },
+      { name: "reserve1", type: "uint112", internalType: "uint112" },
+      { name: "blockTimestampLast", type: "uint32", internalType: "uint32" }
+    ],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "token0",
+    outputs: [{ name: "", type: "address", internalType: "address" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "token1",
+    outputs: [{ name: "", type: "address", internalType: "address" }],
+    stateMutability: "view",
+    type: "function"
+  }
+];
 var configSchema = exports_external.object({
+  schedule: exports_external.string(),
   moduleAddress: exports_external.string(),
   chainSelectorName: exports_external.string(),
   gasLimit: exports_external.string(),
   proxyAddress: exports_external.string(),
-  tokens: exports_external.array(TokenSchema),
-  refreshSchedule: exports_external.string(),
-  windowDurationSeconds: exports_external.number(),
-  blocksToLookBack: exports_external.number()
+  tokens: exports_external.array(exports_external.object({
+    address: exports_external.string(),
+    priceFeedAddress: exports_external.string(),
+    symbol: exports_external.string(),
+    type: exports_external.enum(["erc20", "aave-atoken", "morpho-vault", "uniswap-v2-lp", "uniswap-v3-position"]).optional(),
+    underlyingAsset: exports_external.string().optional(),
+    token0: exports_external.string().optional(),
+    token1: exports_external.string().optional(),
+    priceFeed0: exports_external.string().optional(),
+    priceFeed1: exports_external.string().optional()
+  }))
 });
-var PROTOCOL_EXECUTION_EVENT_SIG = keccak256(toHex("ProtocolExecution(address,address,uint8,address,uint256,address,uint256,uint256,uint256)"));
-var TRANSFER_EXECUTED_EVENT_SIG = keccak256(toHex("TransferExecuted(address,address,address,uint256,uint256,uint256)"));
-var getNetworkConfig = (runtime2) => {
-  const isTestnet = runtime2.config.chainSelectorName.includes("testnet") || runtime2.config.chainSelectorName.includes("sepolia");
+var safeJsonStringify = (obj) => JSON.stringify(obj, (_, value2) => typeof value2 === "bigint" ? value2.toString() : value2, 2);
+var getSafeAddress = (runtime2) => {
   const network248 = getNetwork({
     chainFamily: "evm",
     chainSelectorName: runtime2.config.chainSelectorName,
-    isTestnet
+    isTestnet: true
+  });
+  runtime2.log("0");
+  if (!network248) {
+    throw new Error(`Network not found for chain selector name: ${runtime2.config.chainSelectorName}`);
+  }
+  const evmClient = new cre.capabilities.EVMClient(network248.chainSelector.selector);
+  try {
+    const testCallData = encodeFunctionData({
+      abi: DeFiInteractorModule,
+      functionName: "getTokenBalances",
+      args: [[]]
+    });
+    const testCall = evmClient.callContract(runtime2, {
+      call: encodeCallMsg({
+        from: zeroAddress,
+        to: runtime2.config.moduleAddress,
+        data: testCallData
+      }),
+      blockNumber: LAST_FINALIZED_BLOCK_NUMBER
+    }).result();
+  } catch (testError) {
+    runtime2.log(`Contract test failed: ${testError}`);
+  }
+  const callData = encodeFunctionData({
+    abi: DeFiInteractorModule,
+    functionName: "avatar"
+  });
+  let contractCall;
+  try {
+    contractCall = evmClient.callContract(runtime2, {
+      call: encodeCallMsg({
+        from: zeroAddress,
+        to: runtime2.config.moduleAddress,
+        data: callData
+      }),
+      blockNumber: LAST_FINALIZED_BLOCK_NUMBER
+    }).result();
+  } catch (error) {
+    runtime2.log(`Error calling avatar(): ${error}`);
+    runtime2.log(`Error details: ${JSON.stringify(error, null, 2)}`);
+    throw error;
+  }
+  const safeAddress = decodeFunctionResult({
+    abi: DeFiInteractorModule,
+    functionName: "avatar",
+    data: bytesToHex(contractCall.data)
+  });
+  return safeAddress;
+};
+var getTokenDecimals = (runtime2, tokenAddress, chainSelectorName) => {
+  const network248 = getNetwork({
+    chainFamily: "evm",
+    chainSelectorName,
+    isTestnet: true
   });
   if (!network248) {
-    throw new Error(`Network not found for: ${runtime2.config.chainSelectorName}`);
+    throw new Error(`Network not found for chain selector name: ${chainSelectorName}`);
   }
-  return network248;
-};
-var createEvmClient = (runtime2) => {
-  const network248 = getNetworkConfig(runtime2);
-  return new cre.capabilities.EVMClient(network248.chainSelector.selector);
-};
-var getCurrentBlockTimestamp = () => {
-  return BigInt(Math.floor(Date.now() / 1000));
-};
-var getSubAccountLimits = (runtime2, subAccount) => {
-  const evmClient = createEvmClient(runtime2);
+  const evmClient = new cre.capabilities.EVMClient(network248.chainSelector.selector);
   const callData = encodeFunctionData({
-    abi: DeFiInteractorModule,
-    functionName: "getSubAccountLimits",
-    args: [subAccount]
+    abi: ERC20WithDecimals,
+    functionName: "decimals"
   });
+  let contractCall;
   try {
-    const result = evmClient.callContract(runtime2, {
+    contractCall = evmClient.callContract(runtime2, {
       call: encodeCallMsg({
         from: zeroAddress,
-        to: runtime2.config.moduleAddress,
+        to: tokenAddress,
         data: callData
       }),
       blockNumber: LAST_FINALIZED_BLOCK_NUMBER
     }).result();
-    if (!result.data || result.data.length === 0) {
-      return { maxSpendingBps: 500n, windowDuration: 86400n };
-    }
-    const [maxSpendingBps, windowDuration] = decodeFunctionResult({
-      abi: DeFiInteractorModule,
-      functionName: "getSubAccountLimits",
-      data: bytesToHex(result.data)
-    });
-    return { maxSpendingBps, windowDuration };
   } catch (error) {
-    runtime2.log(`Error getting subaccount limits: ${error}`);
-    return { maxSpendingBps: 500n, windowDuration: 86400n };
+    runtime2.log(`Error calling decimals() on token ${tokenAddress}: ${error}`);
+    throw new Error(`Failed to get decimals for token ${tokenAddress}: ${error}`);
   }
-};
-var getSafeValue = (runtime2) => {
-  const evmClient = createEvmClient(runtime2);
-  const callData = encodeFunctionData({
-    abi: DeFiInteractorModule,
-    functionName: "getSafeValue"
+  if (!contractCall.data || contractCall.data.length === 0) {
+    throw new Error(`Empty response when calling decimals() on token ${tokenAddress}`);
+  }
+  const decimals = decodeFunctionResult({
+    abi: ERC20WithDecimals,
+    functionName: "decimals",
+    data: bytesToHex(contractCall.data)
   });
+  return Number(decimals);
+};
+var getChainlinkPrice = (runtime2, priceFeedAddress, chainSelectorName) => {
+  const network248 = getNetwork({
+    chainFamily: "evm",
+    chainSelectorName,
+    isTestnet: true
+  });
+  if (!network248) {
+    throw new Error(`Network not found for chain selector name: ${chainSelectorName}`);
+  }
+  const evmClient = new cre.capabilities.EVMClient(network248.chainSelector.selector);
+  const priceCallData = encodeFunctionData({
+    abi: ChainlinkPriceFeedABI,
+    functionName: "latestRoundData"
+  });
+  let priceCall;
   try {
-    const result = evmClient.callContract(runtime2, {
+    priceCall = evmClient.callContract(runtime2, {
       call: encodeCallMsg({
         from: zeroAddress,
-        to: runtime2.config.moduleAddress,
-        data: callData
+        to: priceFeedAddress,
+        data: priceCallData
       }),
       blockNumber: LAST_FINALIZED_BLOCK_NUMBER
     }).result();
-    if (!result.data || result.data.length === 0) {
-      return 0n;
-    }
-    const [totalValueUSD] = decodeFunctionResult({
-      abi: DeFiInteractorModule,
-      functionName: "getSafeValue",
-      data: bytesToHex(result.data)
-    });
-    return totalValueUSD;
   } catch (error) {
-    runtime2.log(`Error getting safe value: ${error}`);
-    return 0n;
+    runtime2.log(`Error calling latestRoundData() on price feed ${priceFeedAddress}: ${error}`);
+    throw new Error(`Failed to get price from feed ${priceFeedAddress}: ${error}`);
   }
-};
-var getActiveSubaccounts = (runtime2) => {
-  const evmClient = createEvmClient(runtime2);
-  const callData = encodeFunctionData({
-    abi: DeFiInteractorModule,
-    functionName: "getSubaccountsByRole",
-    args: [1]
+  if (!priceCall.data || priceCall.data.length === 0) {
+    throw new Error(`Empty response when calling latestRoundData() on price feed ${priceFeedAddress}`);
+  }
+  const [, answer] = decodeFunctionResult({
+    abi: ChainlinkPriceFeedABI,
+    functionName: "latestRoundData",
+    data: bytesToHex(priceCall.data)
   });
+  const decimalsCallData = encodeFunctionData({
+    abi: ChainlinkPriceFeedABI,
+    functionName: "decimals"
+  });
+  let decimalsCall;
   try {
-    const result = evmClient.callContract(runtime2, {
+    decimalsCall = evmClient.callContract(runtime2, {
       call: encodeCallMsg({
         from: zeroAddress,
-        to: runtime2.config.moduleAddress,
-        data: callData
+        to: priceFeedAddress,
+        data: decimalsCallData
       }),
       blockNumber: LAST_FINALIZED_BLOCK_NUMBER
     }).result();
-    if (!result.data || result.data.length === 0) {
-      return [];
-    }
-    return decodeFunctionResult({
-      abi: DeFiInteractorModule,
-      functionName: "getSubaccountsByRole",
-      data: bytesToHex(result.data)
-    });
   } catch (error) {
-    runtime2.log(`Error getting subaccounts: ${error}`);
-    return [];
+    runtime2.log(`Error calling decimals() on price feed ${priceFeedAddress}: ${error}`);
+    throw new Error(`Failed to get decimals from price feed ${priceFeedAddress}: ${error}`);
   }
+  if (!decimalsCall.data || decimalsCall.data.length === 0) {
+    throw new Error(`Empty response when calling decimals() on price feed ${priceFeedAddress}`);
+  }
+  const decimals = decodeFunctionResult({
+    abi: ChainlinkPriceFeedABI,
+    functionName: "decimals",
+    data: bytesToHex(decimalsCall.data)
+  });
+  return { price: BigInt(answer), decimals };
 };
-var sdkBigIntToBigInt = (sdkBigInt) => {
-  let result = 0n;
-  for (const byte of sdkBigInt.absVal) {
-    result = result << 8n | BigInt(byte);
+var calculateMorphoValue = (runtime2, tokenConfig, sharesBalance) => {
+  const network248 = getNetwork({
+    chainFamily: "evm",
+    chainSelectorName: runtime2.config.chainSelectorName,
+    isTestnet: true
+  });
+  if (!network248) {
+    throw new Error(`Network not found`);
   }
-  return sdkBigInt.sign < 0n ? -result : result;
+  const evmClient = new cre.capabilities.EVMClient(network248.chainSelector.selector);
+  const convertCallData = encodeFunctionData({
+    abi: MorphoVaultABI,
+    functionName: "convertToAssets",
+    args: [sharesBalance]
+  });
+  const convertCall = evmClient.callContract(runtime2, {
+    call: encodeCallMsg({
+      from: zeroAddress,
+      to: tokenConfig.address,
+      data: convertCallData
+    }),
+    blockNumber: LAST_FINALIZED_BLOCK_NUMBER
+  }).result();
+  const underlyingAmount = decodeFunctionResult({
+    abi: MorphoVaultABI,
+    functionName: "convertToAssets",
+    data: bytesToHex(convertCall.data)
+  });
+  runtime2.log(`  Morpho: ${sharesBalance.toString()} shares = ${underlyingAmount.toString()} underlying assets`);
+  const underlyingDecimals = getTokenDecimals(runtime2, tokenConfig.underlyingAsset, runtime2.config.chainSelectorName);
+  const { price: underlyingPrice, decimals: priceDecimals } = getChainlinkPrice(runtime2, tokenConfig.priceFeedAddress, runtime2.config.chainSelectorName);
+  return underlyingAmount * underlyingPrice * BigInt(10 ** 18) / BigInt(10 ** underlyingDecimals) / BigInt(10 ** priceDecimals);
 };
-var getCurrentBlockNumber = (runtime2) => {
-  const evmClient = createEvmClient(runtime2);
-  try {
-    const headerResult = evmClient.headerByNumber(runtime2, {
-      blockNumber: LAST_FINALIZED_BLOCK_NUMBER
-    }).result();
-    if (headerResult.header?.blockNumber) {
-      return sdkBigIntToBigInt(headerResult.header.blockNumber);
-    }
-    return 0n;
-  } catch (error) {
-    runtime2.log(`Error getting current block number: ${error}`);
-    return 0n;
+var calculateUniswapV2LPValue = (runtime2, tokenConfig, lpBalance) => {
+  const network248 = getNetwork({
+    chainFamily: "evm",
+    chainSelectorName: runtime2.config.chainSelectorName,
+    isTestnet: true
+  });
+  if (!network248) {
+    throw new Error(`Network not found`);
   }
+  const evmClient = new cre.capabilities.EVMClient(network248.chainSelector.selector);
+  const totalSupplyCallData = encodeFunctionData({
+    abi: UniswapV2PairABI,
+    functionName: "totalSupply"
+  });
+  const totalSupplyCall = evmClient.callContract(runtime2, {
+    call: encodeCallMsg({
+      from: zeroAddress,
+      to: tokenConfig.address,
+      data: totalSupplyCallData
+    }),
+    blockNumber: LAST_FINALIZED_BLOCK_NUMBER
+  }).result();
+  const totalSupply = decodeFunctionResult({
+    abi: UniswapV2PairABI,
+    functionName: "totalSupply",
+    data: bytesToHex(totalSupplyCall.data)
+  });
+  const reservesCallData = encodeFunctionData({
+    abi: UniswapV2PairABI,
+    functionName: "getReserves"
+  });
+  const reservesCall = evmClient.callContract(runtime2, {
+    call: encodeCallMsg({
+      from: zeroAddress,
+      to: tokenConfig.address,
+      data: reservesCallData
+    }),
+    blockNumber: LAST_FINALIZED_BLOCK_NUMBER
+  }).result();
+  const [reserve0, reserve1] = decodeFunctionResult({
+    abi: UniswapV2PairABI,
+    functionName: "getReserves",
+    data: bytesToHex(reservesCall.data)
+  });
+  const ownedToken0 = BigInt(reserve0) * lpBalance / totalSupply;
+  const ownedToken1 = BigInt(reserve1) * lpBalance / totalSupply;
+  runtime2.log(`  Uniswap V2 LP: owns ${ownedToken0.toString()} token0, ${ownedToken1.toString()} token1`);
+  const decimals0 = getTokenDecimals(runtime2, tokenConfig.token0, runtime2.config.chainSelectorName);
+  const decimals1 = getTokenDecimals(runtime2, tokenConfig.token1, runtime2.config.chainSelectorName);
+  const { price: price0, decimals: priceDecimals0 } = getChainlinkPrice(runtime2, tokenConfig.priceFeed0, runtime2.config.chainSelectorName);
+  const { price: price1, decimals: priceDecimals1 } = getChainlinkPrice(runtime2, tokenConfig.priceFeed1, runtime2.config.chainSelectorName);
+  const value0 = ownedToken0 * price0 * BigInt(10 ** 18) / BigInt(10 ** decimals0) / BigInt(10 ** priceDecimals0);
+  const value1 = ownedToken1 * price1 * BigInt(10 ** 18) / BigInt(10 ** decimals1) / BigInt(10 ** priceDecimals1);
+  return value0 + value1;
 };
-var addressToTopicBytes = (address) => {
-  return "0x" + address.slice(2).toLowerCase().padStart(64, "0");
+var getBatchTokenBalances = (runtime2) => {
+  const config = runtime2.config;
+  const network248 = getNetwork({
+    chainFamily: "evm",
+    chainSelectorName: config.chainSelectorName,
+    isTestnet: true
+  });
+  if (!network248) {
+    throw new Error(`Network not found for chain selector name: ${config.chainSelectorName}`);
+  }
+  const evmClient = new cre.capabilities.EVMClient(network248.chainSelector.selector);
+  const tokenAddresses = config.tokens.map((t) => t.address);
+  const callData = encodeFunctionData({
+    abi: DeFiInteractorModule,
+    functionName: "getTokenBalances",
+    args: [tokenAddresses]
+  });
+  const contractCall = evmClient.callContract(runtime2, {
+    call: encodeCallMsg({
+      from: zeroAddress,
+      to: config.moduleAddress,
+      data: callData
+    }),
+    blockNumber: LAST_FINALIZED_BLOCK_NUMBER
+  }).result();
+  const balances = decodeFunctionResult({
+    abi: DeFiInteractorModule,
+    functionName: "getTokenBalances",
+    data: bytesToHex(contractCall.data)
+  });
+  const balanceMap = new Map;
+  for (let i2 = 0;i2 < tokenAddresses.length; i2++) {
+    balanceMap.set(tokenAddresses[i2].toLowerCase(), balances[i2]);
+  }
+  return balanceMap;
 };
-var queryHistoricalEvents = (runtime2, subAccount) => {
-  const evmClient = createEvmClient(runtime2);
-  const events = [];
-  runtime2.log(`Querying historical events (last ${runtime2.config.blocksToLookBack} blocks)...`);
-  try {
-    const currentBlock = getCurrentBlockNumber(runtime2);
-    if (currentBlock === 0n) {
-      runtime2.log("Could not determine current block number");
-      return events;
-    }
-    const fromBlock = currentBlock - BigInt(runtime2.config.blocksToLookBack);
-    runtime2.log(`Block range: ${fromBlock} to ${currentBlock}`);
-    const topics = [
-      { topic: [PROTOCOL_EXECUTION_EVENT_SIG] }
-    ];
-    if (subAccount) {
-      topics.push({ topic: [addressToTopicBytes(subAccount)] });
-    }
-    const logsResult = evmClient.filterLogs(runtime2, {
-      filterQuery: {
-        addresses: [runtime2.config.moduleAddress],
-        topics,
-        fromBlock: { absVal: fromBlock.toString(), sign: "" },
-        toBlock: { absVal: currentBlock.toString(), sign: "" }
-      }
-    }).result();
-    if (!logsResult.logs || logsResult.logs.length === 0) {
-      runtime2.log("No historical events found");
-      return events;
-    }
-    runtime2.log(`Found ${logsResult.logs.length} historical events`);
-    for (const log of logsResult.logs) {
-      try {
-        const event = parseProtocolExecutionEvent(log);
-        events.push(event);
-      } catch (error) {
-        runtime2.log(`Error parsing event: ${error}`);
-      }
-    }
-  } catch (error) {
-    runtime2.log(`Error querying historical events: ${error}`);
-  }
-  return events;
-};
-var uint8ArrayToHex = (arr) => {
-  return "0x" + Array.from(arr).map((b) => b.toString(16).padStart(2, "0")).join("");
-};
-var topicToAddress = (topic) => {
-  if (typeof topic === "string") {
-    return "0x" + topic.slice(-40);
-  }
-  const addressBytes = topic.slice(-20);
-  return uint8ArrayToHex(addressBytes);
-};
-var parseProtocolExecutionEvent = (log) => {
-  const topic1 = log.topics[1];
-  const topic2 = log.topics[2];
-  const subAccount = topicToAddress(topic1);
-  const target = topicToAddress(topic2);
-  const data = typeof log.data === "string" ? log.data : uint8ArrayToHex(log.data);
-  const decoded = decodeAbiParameters([
-    { name: "opType", type: "uint8" },
-    { name: "tokenIn", type: "address" },
-    { name: "amountIn", type: "uint256" },
-    { name: "tokenOut", type: "address" },
-    { name: "amountOut", type: "uint256" },
-    { name: "spendingCost", type: "uint256" },
-    { name: "timestamp", type: "uint256" }
-  ], data);
-  let blockNumber = 0n;
-  if (log.blockNumber) {
-    if (typeof log.blockNumber === "bigint" || typeof log.blockNumber === "number") {
-      blockNumber = BigInt(log.blockNumber);
-    } else if (log.blockNumber.absVal) {
-      blockNumber = sdkBigIntToBigInt(log.blockNumber);
-    }
-  }
-  let logIndex = 0;
-  if (log.logIndex !== undefined) {
-    if (typeof log.logIndex === "number") {
-      logIndex = log.logIndex;
-    } else if (typeof log.logIndex === "bigint") {
-      logIndex = Number(log.logIndex);
-    } else if (log.logIndex.absVal) {
-      logIndex = Number(sdkBigIntToBigInt(log.logIndex));
-    }
-  }
-  return {
-    subAccount,
-    target,
-    opType: decoded[0],
-    tokenIn: decoded[1],
-    amountIn: decoded[2],
-    tokenOut: decoded[3],
-    amountOut: decoded[4],
-    spendingCost: decoded[5],
-    timestamp: decoded[6],
-    blockNumber,
-    logIndex
-  };
-};
-var parseTransferExecutedEvent = (log) => {
-  const topic1 = log.topics[1];
-  const topic2 = log.topics[2];
-  const topic3 = log.topics[3];
-  const subAccount = topicToAddress(topic1);
-  const token = topicToAddress(topic2);
-  const recipient = topicToAddress(topic3);
-  const data = typeof log.data === "string" ? log.data : uint8ArrayToHex(log.data);
-  const decoded = decodeAbiParameters([
-    { name: "amount", type: "uint256" },
-    { name: "spendingCost", type: "uint256" },
-    { name: "timestamp", type: "uint256" }
-  ], data);
-  let blockNumber = 0n;
-  if (log.blockNumber) {
-    if (typeof log.blockNumber === "bigint" || typeof log.blockNumber === "number") {
-      blockNumber = BigInt(log.blockNumber);
-    } else if (log.blockNumber.absVal) {
-      blockNumber = sdkBigIntToBigInt(log.blockNumber);
-    }
-  }
-  let logIndex = 0;
-  if (log.logIndex !== undefined) {
-    if (typeof log.logIndex === "number") {
-      logIndex = log.logIndex;
-    } else if (typeof log.logIndex === "bigint") {
-      logIndex = Number(log.logIndex);
-    } else if (log.logIndex.absVal) {
-      logIndex = Number(sdkBigIntToBigInt(log.logIndex));
-    }
-  }
-  return {
-    subAccount,
-    token,
-    recipient,
-    amount: decoded[0],
-    spendingCost: decoded[1],
-    timestamp: decoded[2],
-    blockNumber,
-    logIndex
-  };
-};
-var queryTransferEvents = (runtime2, subAccount) => {
-  const evmClient = createEvmClient(runtime2);
-  const events = [];
-  runtime2.log(`Querying transfer events (last ${runtime2.config.blocksToLookBack} blocks)...`);
-  try {
-    const currentBlock = getCurrentBlockNumber(runtime2);
-    if (currentBlock === 0n) {
-      runtime2.log("Could not determine current block number");
-      return events;
-    }
-    const fromBlock = currentBlock - BigInt(runtime2.config.blocksToLookBack);
-    const topics = [
-      { topic: [TRANSFER_EXECUTED_EVENT_SIG] }
-    ];
-    if (subAccount) {
-      topics.push({ topic: [addressToTopicBytes(subAccount)] });
-    }
-    const logsResult = evmClient.filterLogs(runtime2, {
-      filterQuery: {
-        addresses: [runtime2.config.moduleAddress],
-        topics,
-        fromBlock: { absVal: fromBlock.toString(), sign: "" },
-        toBlock: { absVal: currentBlock.toString(), sign: "" }
-      }
-    }).result();
-    if (!logsResult.logs || logsResult.logs.length === 0) {
-      runtime2.log("No transfer events found");
-      return events;
-    }
-    runtime2.log(`Found ${logsResult.logs.length} transfer events`);
-    for (const log of logsResult.logs) {
-      try {
-        const event = parseTransferExecutedEvent(log);
-        events.push(event);
-      } catch (error) {
-        runtime2.log(`Error parsing transfer event: ${error}`);
-      }
-    }
-  } catch (error) {
-    runtime2.log(`Error querying transfer events: ${error}`);
-  }
-  return events;
-};
-var buildSubAccountState = (runtime2, events, transferEvents, subAccount, currentTimestamp, subAccountWindowDuration) => {
-  const windowDuration = subAccountWindowDuration ?? BigInt(runtime2.config.windowDurationSeconds);
-  const windowStart = currentTimestamp - windowDuration;
-  const state = {
-    spendingRecords: [],
-    depositRecords: [],
-    tokenMovements: new Map,
-    totalSpendingInWindow: 0n,
-    acquiredBalances: new Map
-  };
-  const relevantEvents = events.filter((e) => e.subAccount.toLowerCase() === subAccount.toLowerCase()).filter((e) => e.timestamp >= windowStart).sort((a, b) => Number(a.timestamp - b.timestamp));
-  const relevantTransfers = transferEvents.filter((e) => e.subAccount.toLowerCase() === subAccount.toLowerCase()).filter((e) => e.timestamp >= windowStart).sort((a, b) => Number(a.timestamp - b.timestamp));
-  runtime2.log(`Processing ${relevantEvents.length} events for ${subAccount} in window`);
-  const runningAcquired = new Map;
-  for (const event of relevantEvents) {
-    const tokenInLower = event.tokenIn.toLowerCase();
-    const tokenOutLower = event.tokenOut.toLowerCase();
-    if (event.opType === 1 || event.opType === 2) {
-      if (event.spendingCost > 0n) {
-        state.spendingRecords.push({
-          amount: event.spendingCost,
-          timestamp: event.timestamp
-        });
-        state.totalSpendingInWindow += event.spendingCost;
-      }
-      if (event.tokenIn !== zeroAddress && event.amountIn > 0n) {
-        const currentAcquired = runningAcquired.get(tokenInLower) || 0n;
-        const usedFromAcquired = event.amountIn > currentAcquired ? currentAcquired : event.amountIn;
-        if (usedFromAcquired > 0n) {
-          runningAcquired.set(tokenInLower, currentAcquired - usedFromAcquired);
-          if (!state.tokenMovements.has(tokenInLower)) {
-            state.tokenMovements.set(tokenInLower, []);
-          }
-          state.tokenMovements.get(tokenInLower).push({
-            token: event.tokenIn,
-            amount: usedFromAcquired,
-            timestamp: event.timestamp,
-            isOutput: false
-          });
-          runtime2.log(`  Used ${usedFromAcquired} acquired ${event.tokenIn}`);
-        }
-      }
-    }
-    if (event.opType === 2) {
-      state.depositRecords.push({
-        subAccount: event.subAccount,
-        target: event.target,
-        tokenIn: event.tokenIn,
-        amountIn: event.amountIn,
-        timestamp: event.timestamp
-      });
-    }
-    let acquiredAmount = 0n;
-    let acquiredToken = null;
-    if (event.opType === 1) {
-      if (event.tokenOut !== zeroAddress && event.amountOut > 0n) {
-        acquiredToken = tokenOutLower;
-        acquiredAmount = event.amountOut;
-      }
-    } else if (event.opType === 3) {
-      if (event.tokenOut !== zeroAddress && event.amountOut > 0n) {
-        const hasMatchingDeposit = state.depositRecords.some((d) => d.target.toLowerCase() === event.target.toLowerCase() && d.subAccount.toLowerCase() === event.subAccount.toLowerCase());
-        if (hasMatchingDeposit) {
-          acquiredToken = tokenOutLower;
-          acquiredAmount = event.amountOut;
-          runtime2.log(`  Withdrawal matched to deposit: ${event.amountOut} of ${event.tokenOut}`);
-        } else {
-          runtime2.log(`  Withdrawal NOT matched: ${event.amountOut} of ${event.tokenOut}`);
-        }
-      }
-    } else if (event.opType === 4) {
-      if (event.tokenOut !== zeroAddress && event.amountOut > 0n) {
-        const hasMatchingDeposit = state.depositRecords.some((d) => d.target.toLowerCase() === event.target.toLowerCase() && d.subAccount.toLowerCase() === event.subAccount.toLowerCase());
-        if (hasMatchingDeposit) {
-          acquiredToken = tokenOutLower;
-          acquiredAmount = event.amountOut;
-          runtime2.log(`  Claim matched to deposit: ${event.amountOut} of ${event.tokenOut}`);
-        } else {
-          runtime2.log(`  Claim NOT matched: ${event.amountOut} of ${event.tokenOut}`);
-        }
-      }
-    }
-    if (acquiredToken && acquiredAmount > 0n) {
-      const current = runningAcquired.get(acquiredToken) || 0n;
-      runningAcquired.set(acquiredToken, current + acquiredAmount);
-      if (!state.tokenMovements.has(acquiredToken)) {
-        state.tokenMovements.set(acquiredToken, []);
-      }
-      state.tokenMovements.get(acquiredToken).push({
-        token: acquiredToken,
-        amount: acquiredAmount,
-        timestamp: event.timestamp,
-        isOutput: true
-      });
-      runtime2.log(`  Added ${acquiredAmount} acquired ${acquiredToken}`);
-    }
-  }
-  runtime2.log(`Processing ${relevantTransfers.length} transfers for ${subAccount} in window`);
-  for (const transfer of relevantTransfers) {
-    if (transfer.spendingCost > 0n) {
-      state.spendingRecords.push({
-        amount: transfer.spendingCost,
-        timestamp: transfer.timestamp
-      });
-      state.totalSpendingInWindow += transfer.spendingCost;
-      runtime2.log(`  Transfer spending: ${transfer.spendingCost}`);
-    }
-    const tokenLower = transfer.token.toLowerCase();
-    if (transfer.amount > 0n) {
-      const currentAcquired = runningAcquired.get(tokenLower) || 0n;
-      const usedFromAcquired = transfer.amount > currentAcquired ? currentAcquired : transfer.amount;
-      if (usedFromAcquired > 0n) {
-        runningAcquired.set(tokenLower, currentAcquired - usedFromAcquired);
-        if (!state.tokenMovements.has(tokenLower)) {
-          state.tokenMovements.set(tokenLower, []);
-        }
-        state.tokenMovements.get(tokenLower).push({
-          token: transfer.token,
-          amount: usedFromAcquired,
-          timestamp: transfer.timestamp,
-          isOutput: false
-        });
-        runtime2.log(`  Transfer used ${usedFromAcquired} acquired ${transfer.token}`);
-      }
-    }
-  }
-  for (const [token, movements] of state.tokenMovements) {
-    const validMovements = movements.filter((m) => m.timestamp >= windowStart);
-    let netAcquired = 0n;
-    for (const m of validMovements) {
-      if (m.isOutput) {
-        netAcquired += m.amount;
-      } else {
-        netAcquired -= m.amount;
-      }
-    }
-    if (netAcquired < 0n) {
-      netAcquired = 0n;
-    }
-    state.acquiredBalances.set(token, netAcquired);
-  }
-  runtime2.log(`State built: spending=${state.totalSpendingInWindow}, acquired tokens=${state.acquiredBalances.size}`);
-  return state;
-};
-var calculateSpendingAllowance = (runtime2, subAccount, state) => {
-  const safeValue = getSafeValue(runtime2);
-  const { maxSpendingBps } = getSubAccountLimits(runtime2, subAccount);
-  const maxSpending = safeValue * maxSpendingBps / 10000n;
-  const newAllowance = maxSpending > state.totalSpendingInWindow ? maxSpending - state.totalSpendingInWindow : 0n;
-  runtime2.log(`Allowance: safeValue=${safeValue}, maxBps=${maxSpendingBps}, max=${maxSpending}, spent=${state.totalSpendingInWindow}, new=${newAllowance}`);
-  return newAllowance;
-};
-var pushBatchUpdate = (runtime2, subAccount, newAllowance, acquiredBalances) => {
-  const evmClient = createEvmClient(runtime2);
+var calculateSafeValue = (runtime2) => {
+  const config = runtime2.config;
   const tokens = [];
-  const balances = [];
-  for (const [token, balance] of acquiredBalances) {
-    tokens.push(token);
-    balances.push(balance);
+  let totalValueUSD = 0n;
+  const safeAddress = getSafeAddress(runtime2);
+  runtime2.log(`Monitoring Safe: ${safeAddress}`);
+  runtime2.log("Fetching all token balances in batch...");
+  const balanceMap = getBatchTokenBalances(runtime2);
+  for (const tokenConfig of config.tokens) {
+    const tokenType = tokenConfig.type || "erc20";
+    runtime2.log(`Processing ${tokenType}: ${tokenConfig.symbol} (${tokenConfig.address})`);
+    let valueUSD = 0n;
+    let balance = 0n;
+    let decimals = 0;
+    let priceUSD = 0n;
+    balance = balanceMap.get(tokenConfig.address.toLowerCase()) || 0n;
+    if (tokenType === "morpho-vault") {
+      valueUSD = calculateMorphoValue(runtime2, tokenConfig, balance);
+      decimals = getTokenDecimals(runtime2, tokenConfig.address, config.chainSelectorName);
+      const { price } = getChainlinkPrice(runtime2, tokenConfig.priceFeedAddress, config.chainSelectorName);
+      priceUSD = price;
+    } else if (tokenType === "uniswap-v2-lp") {
+      valueUSD = calculateUniswapV2LPValue(runtime2, tokenConfig, balance);
+      decimals = getTokenDecimals(runtime2, tokenConfig.address, config.chainSelectorName);
+      priceUSD = 0n;
+    } else {
+      decimals = getTokenDecimals(runtime2, tokenConfig.address, config.chainSelectorName);
+      const { price, decimals: priceDecimals } = getChainlinkPrice(runtime2, tokenConfig.priceFeedAddress, config.chainSelectorName);
+      priceUSD = price;
+      runtime2.log(`  ${tokenConfig.symbol}: balance=${balance.toString()}, decimals=${decimals}, price=${priceUSD.toString()} (${priceDecimals} decimals)`);
+      valueUSD = balance * priceUSD * BigInt(10 ** 18) / BigInt(10 ** decimals) / BigInt(10 ** priceDecimals);
+    }
+    runtime2.log(`  Value: $${(Number(valueUSD) / 1000000000000000000).toFixed(2)} USD`);
+    totalValueUSD += valueUSD;
+    tokens.push({
+      tokenAddress: tokenConfig.address,
+      symbol: tokenConfig.symbol,
+      balance,
+      priceUSD,
+      decimals
+    });
   }
-  runtime2.log(`Pushing batch update: subAccount=${subAccount}, allowance=${newAllowance}, tokens=${tokens.length}`);
+  return {
+    totalValueUSD,
+    tokens,
+    timestamp: Date.now()
+  };
+};
+var writeSafeValueToChain = (runtime2, safeValueData) => {
+  const config = runtime2.config;
+  const network248 = getNetwork({
+    chainFamily: "evm",
+    chainSelectorName: config.chainSelectorName,
+    isTestnet: true
+  });
+  if (!network248) {
+    throw new Error(`Network not found for chain selector name: ${config.chainSelectorName}`);
+  }
+  const evmClient = new cre.capabilities.EVMClient(network248.chainSelector.selector);
+  runtime2.log(`Writing Safe value to chain: ${safeValueData.totalValueUSD.toString()} (${(Number(safeValueData.totalValueUSD) / 1000000000000000000).toFixed(2)} USD)`);
   const callData = encodeFunctionData({
     abi: DeFiInteractorModule,
-    functionName: "batchUpdate",
-    args: [subAccount, newAllowance, tokens, balances]
+    functionName: "updateSafeValue",
+    args: [safeValueData.totalValueUSD]
   });
   const reportResponse = runtime2.report({
     encodedPayload: hexToBase64(callData),
@@ -16792,137 +16759,41 @@ var pushBatchUpdate = (runtime2, subAccount, newAllowance, acquiredBalances) => 
     hashingAlgo: "keccak256"
   }).result();
   const resp = evmClient.writeReport(runtime2, {
-    receiver: runtime2.config.proxyAddress,
+    receiver: config.proxyAddress,
     report: reportResponse,
     gasConfig: {
-      gasLimit: runtime2.config.gasLimit
+      gasLimit: config.gasLimit
     }
   }).result();
-  if (resp.txStatus !== TxStatus.SUCCESS) {
-    throw new Error(`Failed to push batch update: ${resp.errorMessage || resp.txStatus}`);
+  const txStatus = resp.txStatus;
+  if (txStatus !== TxStatus.SUCCESS) {
+    throw new Error(`Failed to write report: ${resp.errorMessage || txStatus}`);
   }
-  const txHash = bytesToHex(resp.txHash || new Uint8Array(32));
-  runtime2.log(`Batch update complete. TxHash: ${txHash}`);
+  const txHash = resp.txHash || new Uint8Array(32);
+  runtime2.log(`Safe value updated on-chain. TxHash: ${bytesToHex(txHash)}`);
+  return bytesToHex(txHash);
+};
+var onCronTrigger = (runtime2, payload) => {
+  if (!payload.scheduledExecutionTime) {
+    throw new Error("Scheduled execution time is required");
+  }
+  runtime2.log("=== Safe Value Monitor: Starting check ===");
+  runtime2.log(`Module Address: ${runtime2.config.moduleAddress}`);
+  runtime2.log(`Timestamp: ${new Date().toISOString()}`);
+  const safeValueData = calculateSafeValue(runtime2);
+  runtime2.log("=== Safe Value Calculation ===");
+  runtime2.log(safeJsonStringify(safeValueData));
+  runtime2.log(`Total USD Value: $${(Number(safeValueData.totalValueUSD) / 1000000000000000000).toFixed(2)}`);
+  const txHash = writeSafeValueToChain(runtime2, safeValueData);
+  runtime2.log("=== Safe Value Monitor: Complete ===");
   return txHash;
 };
-var onProtocolExecution = (runtime2, payload) => {
-  runtime2.log("=== Spending Oracle: ProtocolExecution Event ===");
-  try {
-    const log = payload.log;
-    if (!log || !log.topics || log.topics.length < 3) {
-      runtime2.log("Invalid event log format");
-      return "Invalid event";
-    }
-    const newEvent = parseProtocolExecutionEvent(log);
-    const currentTimestamp = getCurrentBlockTimestamp();
-    runtime2.log(`New event: ${OperationType[newEvent.opType]} by ${newEvent.subAccount}`);
-    runtime2.log(`  TokenIn: ${newEvent.tokenIn}, AmountIn: ${newEvent.amountIn}`);
-    runtime2.log(`  TokenOut: ${newEvent.tokenOut}, AmountOut: ${newEvent.amountOut}`);
-    runtime2.log(`  SpendingCost: ${newEvent.spendingCost}`);
-    const historicalEvents = queryHistoricalEvents(runtime2, newEvent.subAccount);
-    const transferEvents = queryTransferEvents(runtime2, newEvent.subAccount);
-    const allEvents = [...historicalEvents];
-    const isDuplicate = allEvents.some((e) => e.blockNumber === newEvent.blockNumber && e.logIndex === newEvent.logIndex);
-    if (!isDuplicate) {
-      allEvents.push(newEvent);
-    }
-    const { windowDuration } = getSubAccountLimits(runtime2, newEvent.subAccount);
-    const state = buildSubAccountState(runtime2, allEvents, transferEvents, newEvent.subAccount, currentTimestamp, windowDuration);
-    const newAllowance = calculateSpendingAllowance(runtime2, newEvent.subAccount, state);
-    const txHash = pushBatchUpdate(runtime2, newEvent.subAccount, newAllowance, state.acquiredBalances);
-    runtime2.log(`=== Event Processing Complete ===`);
-    return txHash;
-  } catch (error) {
-    runtime2.log(`Error processing event: ${error}`);
-    return `Error: ${error}`;
-  }
-};
-var onCronRefresh = (runtime2, _payload) => {
-  runtime2.log("=== Spending Oracle: Periodic Refresh ===");
-  try {
-    const currentTimestamp = getCurrentBlockTimestamp();
-    const subaccounts = getActiveSubaccounts(runtime2);
-    runtime2.log(`Found ${subaccounts.length} active subaccounts`);
-    if (subaccounts.length === 0) {
-      runtime2.log("No active subaccounts, skipping refresh");
-      return "No subaccounts";
-    }
-    const allEvents = queryHistoricalEvents(runtime2);
-    const allTransfers = queryTransferEvents(runtime2);
-    const results = [];
-    for (const subAccount of subaccounts) {
-      try {
-        runtime2.log(`Processing subaccount: ${subAccount}`);
-        const { windowDuration } = getSubAccountLimits(runtime2, subAccount);
-        const state = buildSubAccountState(runtime2, allEvents, allTransfers, subAccount, currentTimestamp, windowDuration);
-        const newAllowance = calculateSpendingAllowance(runtime2, subAccount, state);
-        const txHash = pushBatchUpdate(runtime2, subAccount, newAllowance, state.acquiredBalances);
-        results.push(`${subAccount}: ${txHash}`);
-      } catch (error) {
-        runtime2.log(`Error processing ${subAccount}: ${error}`);
-        results.push(`${subAccount}: Error - ${error}`);
-      }
-    }
-    runtime2.log(`=== Periodic Refresh Complete ===`);
-    return results.join("; ");
-  } catch (error) {
-    runtime2.log(`Error in periodic refresh: ${error}`);
-    return `Error: ${error}`;
-  }
-};
-var onTransferExecuted = (runtime2, payload) => {
-  runtime2.log("=== Spending Oracle: TransferExecuted Event ===");
-  try {
-    const log = payload.log;
-    if (!log || !log.topics || log.topics.length < 4) {
-      runtime2.log("Invalid transfer event log format");
-      return "Invalid event";
-    }
-    const newTransfer = parseTransferExecutedEvent(log);
-    const currentTimestamp = getCurrentBlockTimestamp();
-    runtime2.log(`New transfer: ${newTransfer.amount} of ${newTransfer.token} to ${newTransfer.recipient}`);
-    runtime2.log(`  SpendingCost: ${newTransfer.spendingCost}`);
-    const historicalEvents = queryHistoricalEvents(runtime2, newTransfer.subAccount);
-    const transferEvents = queryTransferEvents(runtime2, newTransfer.subAccount);
-    const allTransfers = [...transferEvents];
-    const isDuplicate = allTransfers.some((e) => e.blockNumber === newTransfer.blockNumber && e.logIndex === newTransfer.logIndex);
-    if (!isDuplicate) {
-      allTransfers.push(newTransfer);
-    }
-    const { windowDuration } = getSubAccountLimits(runtime2, newTransfer.subAccount);
-    const state = buildSubAccountState(runtime2, historicalEvents, allTransfers, newTransfer.subAccount, currentTimestamp, windowDuration);
-    const newAllowance = calculateSpendingAllowance(runtime2, newTransfer.subAccount, state);
-    const txHash = pushBatchUpdate(runtime2, newTransfer.subAccount, newAllowance, state.acquiredBalances);
-    runtime2.log(`=== Transfer Event Processing Complete ===`);
-    return txHash;
-  } catch (error) {
-    runtime2.log(`Error processing transfer event: ${error}`);
-    return `Error: ${error}`;
-  }
-};
 var initWorkflow = (config) => {
-  const network248 = getNetwork({
-    chainFamily: "evm",
-    chainSelectorName: config.chainSelectorName,
-    isTestnet: config.chainSelectorName.includes("testnet") || config.chainSelectorName.includes("sepolia")
-  });
-  if (!network248) {
-    throw new Error(`Network not found: ${config.chainSelectorName}`);
-  }
-  const evmClient = new cre.capabilities.EVMClient(network248.chainSelector.selector);
   const cronTrigger = new cre.capabilities.CronCapability;
   return [
-    cre.handler(evmClient.logTrigger({
-      addresses: [config.moduleAddress],
-      topics: [{ values: [PROTOCOL_EXECUTION_EVENT_SIG] }]
-    }), onProtocolExecution),
-    cre.handler(evmClient.logTrigger({
-      addresses: [config.moduleAddress],
-      topics: [{ values: [TRANSFER_EXECUTED_EVENT_SIG] }]
-    }), onTransferExecuted),
     cre.handler(cronTrigger.trigger({
-      schedule: config.refreshSchedule
-    }), onCronRefresh)
+      schedule: config.schedule
+    }), onCronTrigger)
   ];
 };
 async function main() {
