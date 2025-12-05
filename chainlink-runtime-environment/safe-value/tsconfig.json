@@ -11,7 +11,7 @@
     "forceConsistentCasingInFileNames": true
   },
   "include": [
-    "main.ts"
+    "safe-monitor.ts"
   ]
 }
 
