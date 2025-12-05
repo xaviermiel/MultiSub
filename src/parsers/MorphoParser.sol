@@ -12,6 +12,8 @@ import {IMorphoVault} from "../interfaces/IMorphoVault.sol";
  *      so this parser queries the vault's asset() function
  */
 contract MorphoParser is ICalldataParser {
+    error UnsupportedSelector();
+
     // ERC4626 function selectors
     bytes4 public constant DEPOSIT_SELECTOR = 0x6e553f65;   // deposit(uint256,address)
     bytes4 public constant MINT_SELECTOR = 0x94bf804d;      // mint(uint256,address)
@@ -26,7 +28,7 @@ contract MorphoParser is ICalldataParser {
             // Query the vault for its underlying asset
             return IMorphoVault(target).asset();
         }
-        revert("MorphoParser: unsupported selector for input token");
+        revert UnsupportedSelector();
     }
 
     /// @inheritdoc ICalldataParser
@@ -41,7 +43,7 @@ contract MorphoParser is ICalldataParser {
             // Note: This is shares, not assets - may need conversion
             (amount,) = abi.decode(data[4:], (uint256, address));
         } else {
-            revert("MorphoParser: unsupported selector for input amount");
+            revert UnsupportedSelector();
         }
     }
 
@@ -53,7 +55,7 @@ contract MorphoParser is ICalldataParser {
             // Query the vault for its underlying asset
             return IMorphoVault(target).asset();
         }
-        revert("MorphoParser: unsupported selector for output token");
+        revert UnsupportedSelector();
     }
 
     /// @inheritdoc ICalldataParser

@@ -100,25 +100,4 @@ abstract contract Module {
         return ISafe(target).execTransactionFromModule(to, value, data, operation);
     }
 
-    /**
-     * @notice Execute a transaction from the module with return data
-     * @param to Target address
-     * @param value ETH value to send
-     * @param data Transaction data
-     * @param operation Call (0) or DelegateCall (1)
-     * @return success Whether the transaction succeeded
-     * @return returnData The return data from the call
-     */
-    function execAndReturnData(
-        address to,
-        uint256 value,
-        bytes memory data,
-        ISafe.Operation operation
-    ) internal returns (bool success, bytes memory returnData) {
-        success = exec(to, value, data, operation);
-
-        // Note: Safe's execTransactionFromModule doesn't return data
-        // This is a limitation of the current Safe interface
-        returnData = "";
-    }
 }

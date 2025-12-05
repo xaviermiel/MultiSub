@@ -9,6 +9,8 @@ import {ICalldataParser} from "../interfaces/ICalldataParser.sol";
  * @dev Extracts token/amount from Aave V3 function calldata
  */
 contract AaveV3Parser is ICalldataParser {
+    error UnsupportedSelector();
+
     // Aave V3 Pool function selectors
     bytes4 public constant SUPPLY_SELECTOR = 0x617ba037;      // supply(address,uint256,address,uint16)
     bytes4 public constant WITHDRAW_SELECTOR = 0x69328dec;    // withdraw(address,uint256,address)
@@ -32,9 +34,8 @@ contract AaveV3Parser is ICalldataParser {
         } else if (_isClaimSelector(selector)) {
             // CLAIM operations don't have input tokens
             return address(0);
-        } else {
-            revert("AaveV3Parser: unsupported selector for input token");
         }
+        revert UnsupportedSelector();
     }
 
     /// @inheritdoc ICalldataParser
@@ -48,9 +49,8 @@ contract AaveV3Parser is ICalldataParser {
         } else if (_isClaimSelector(selector)) {
             // CLAIM operations don't have input amounts
             return 0;
-        } else {
-            revert("AaveV3Parser: unsupported selector for input amount");
         }
+        revert UnsupportedSelector();
     }
 
     /// @inheritdoc ICalldataParser
@@ -75,9 +75,8 @@ contract AaveV3Parser is ICalldataParser {
             // claimAllRewards doesn't specify reward token in calldata
             // Returns address(0) - oracle tracks balance changes
             return address(0);
-        } else {
-            revert("AaveV3Parser: unsupported selector for output token");
         }
+        revert UnsupportedSelector();
     }
 
     /// @inheritdoc ICalldataParser

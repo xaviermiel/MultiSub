@@ -122,21 +122,19 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
     // ============ Events ============
 
-    event RoleAssigned(address indexed member, uint16 indexed roleId, uint256 timestamp);
-    event RoleRevoked(address indexed member, uint16 indexed roleId, uint256 timestamp);
+    event RoleAssigned(address indexed member, uint16 indexed roleId);
+    event RoleRevoked(address indexed member, uint16 indexed roleId);
 
     event SubAccountLimitsSet(
         address indexed subAccount,
         uint256 maxSpendingBps,
-        uint256 windowDuration,
-        uint256 timestamp
+        uint256 windowDuration
     );
 
     event AllowedAddressesSet(
         address indexed subAccount,
         address[] targets,
-        bool allowed,
-        uint256 timestamp
+        bool allowed
     );
 
     /// @notice Emitted on every protocol interaction (for oracle consumption)
@@ -148,8 +146,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         uint256 amountIn,
         address tokenOut,
         uint256 amountOut,
-        uint256 spendingCost,
-        uint256 timestamp
+        uint256 spendingCost
     );
 
     event TransferExecuted(
@@ -157,32 +154,29 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         address indexed token,
         address indexed recipient,
         uint256 amount,
-        uint256 spendingCost,
-        uint256 timestamp
+        uint256 spendingCost
     );
 
-    event SafeValueUpdated(uint256 totalValueUSD, uint256 timestamp, uint256 updateCount);
+    event SafeValueUpdated(uint256 totalValueUSD, uint256 updateCount);
     event OracleUpdated(address indexed oldOracle, address indexed newOracle);
 
     event SpendingAllowanceUpdated(
         address indexed subAccount,
-        uint256 newAllowance,
-        uint256 timestamp
+        uint256 newAllowance
     );
 
     event AcquiredBalanceUpdated(
         address indexed subAccount,
         address indexed token,
-        uint256 newBalance,
-        uint256 timestamp
+        uint256 newBalance
     );
 
     event SelectorRegistered(bytes4 indexed selector, OperationType opType);
     event SelectorUnregistered(bytes4 indexed selector);
     event ParserRegistered(address indexed protocol, address parser);
 
-    event EmergencyPaused(address indexed by, uint256 timestamp);
-    event EmergencyUnpaused(address indexed by, uint256 timestamp);
+    event EmergencyPaused(address indexed by);
+    event EmergencyUnpaused(address indexed by);
 
     // ============ Errors ============
 
@@ -204,6 +198,16 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     error SpenderNotAllowed();
     error NoParserRegistered(address target);
     error ExceedsAbsoluteMaxSpending(uint256 requested, uint256 maximum);
+    error CannotRegisterUnknown();
+    error LengthMismatch();
+    error ExceedsMaxBps();
+
+    // ============ Modifiers ============
+
+    modifier onlyOracle() {
+        if (msg.sender != authorizedOracle) revert OnlyAuthorizedOracle();
+        _;
+    }
 
     // ============ Constructor ============
 
@@ -224,12 +228,12 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
     function pause() external onlyOwner {
         _pause();
-        emit EmergencyPaused(msg.sender, block.timestamp);
+        emit EmergencyPaused(msg.sender);
     }
 
     function unpause() external onlyOwner {
         _unpause();
-        emit EmergencyUnpaused(msg.sender, block.timestamp);
+        emit EmergencyUnpaused(msg.sender);
     }
 
     // ============ Role Management ============
@@ -239,7 +243,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         if (!subAccountRoles[member][roleId]) {
             subAccountRoles[member][roleId] = true;
             subaccounts[roleId].push(member);
-            emit RoleAssigned(member, roleId, block.timestamp);
+            emit RoleAssigned(member, roleId);
         }
     }
 
@@ -248,7 +252,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         if (subAccountRoles[member][roleId]) {
             subAccountRoles[member][roleId] = false;
             _removeFromSubaccountArray(roleId, member);
-            emit RoleRevoked(member, roleId, block.timestamp);
+            emit RoleRevoked(member, roleId);
         }
     }
 
@@ -284,7 +288,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
      * @param opType The operation type classification
      */
     function registerSelector(bytes4 selector, OperationType opType) external onlyOwner {
-        require(opType != OperationType.UNKNOWN, "Cannot register as UNKNOWN");
+        if (opType == OperationType.UNKNOWN) revert CannotRegisterUnknown();
         selectorType[selector] = opType;
         emit SelectorRegistered(selector, opType);
     }
@@ -326,7 +330,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             isConfigured: true
         });
 
-        emit SubAccountLimitsSet(subAccount, maxSpendingBps, windowDuration, block.timestamp);
+        emit SubAccountLimitsSet(subAccount, maxSpendingBps, windowDuration);
     }
 
     function getSubAccountLimits(address subAccount) public view returns (
@@ -350,7 +354,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             if (targets[i] == address(0)) revert InvalidAddress();
             allowedAddresses[subAccount][targets[i]] = allowed;
         }
-        emit AllowedAddressesSet(subAccount, targets, allowed, block.timestamp);
+        emit AllowedAddressesSet(subAccount, targets, allowed);
     }
 
     // ============ Main Entry Point ============
@@ -444,8 +448,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             amountIn,
             tokenOut,
             amountOut,
-            spendingCost,
-            block.timestamp
+            spendingCost
         );
 
         return "";
@@ -489,8 +492,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             0,          // no amountIn
             tokenOut,
             amountOut,
-            0,          // no spending cost
-            block.timestamp
+            0           // no spending cost
         );
 
         return "";
@@ -546,8 +548,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             amount,
             address(0),
             0,
-            0, // No spending cost for approve
-            block.timestamp
+            0 // No spending cost for approve
         );
 
         return "";
@@ -592,26 +593,22 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         bool success = exec(token, 0, transferData, ISafe.Operation.Call);
         if (!success) revert TransactionFailed();
 
-        emit TransferExecuted(msg.sender, token, recipient, amount, spendingCost, block.timestamp);
+        emit TransferExecuted(msg.sender, token, recipient, amount, spendingCost);
 
         return true;
     }
 
     // ============ Oracle Functions ============
 
-    function updateSafeValue(uint256 totalValueUSD) external {
-        if (msg.sender != authorizedOracle) revert OnlyAuthorizedOracle();
-
+    function updateSafeValue(uint256 totalValueUSD) external onlyOracle {
         safeValue.totalValueUSD = totalValueUSD;
         safeValue.lastUpdated = block.timestamp;
         safeValue.updateCount += 1;
 
-        emit SafeValueUpdated(totalValueUSD, block.timestamp, safeValue.updateCount);
+        emit SafeValueUpdated(totalValueUSD, safeValue.updateCount);
     }
 
-    function updateSpendingAllowance(address subAccount, uint256 newAllowance) external {
-        if (msg.sender != authorizedOracle) revert OnlyAuthorizedOracle();
-
+    function updateSpendingAllowance(address subAccount, uint256 newAllowance) external onlyOracle {
         // Ensure Safe value is fresh before calculating max allowance
         _requireFreshSafeValue();
 
@@ -624,20 +621,18 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         spendingAllowance[subAccount] = newAllowance;
         lastOracleUpdate[subAccount] = block.timestamp;
 
-        emit SpendingAllowanceUpdated(subAccount, newAllowance, block.timestamp);
+        emit SpendingAllowanceUpdated(subAccount, newAllowance);
     }
 
     function updateAcquiredBalance(
         address subAccount,
         address token,
         uint256 newBalance
-    ) external {
-        if (msg.sender != authorizedOracle) revert OnlyAuthorizedOracle();
-
+    ) external onlyOracle {
         acquiredBalance[subAccount][token] = newBalance;
         lastOracleUpdate[subAccount] = block.timestamp;
 
-        emit AcquiredBalanceUpdated(subAccount, token, newBalance, block.timestamp);
+        emit AcquiredBalanceUpdated(subAccount, token, newBalance);
     }
 
     /**
@@ -648,9 +643,8 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         uint256 newAllowance,
         address[] calldata tokens,
         uint256[] calldata balances
-    ) external {
-        if (msg.sender != authorizedOracle) revert OnlyAuthorizedOracle();
-        require(tokens.length == balances.length, "Length mismatch");
+    ) external onlyOracle {
+        if (tokens.length != balances.length) revert LengthMismatch();
 
         // Ensure Safe value is fresh before calculating max allowance
         _requireFreshSafeValue();
@@ -666,10 +660,10 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
         for (uint256 i = 0; i < tokens.length; i++) {
             acquiredBalance[subAccount][tokens[i]] = balances[i];
-            emit AcquiredBalanceUpdated(subAccount, tokens[i], balances[i], block.timestamp);
+            emit AcquiredBalanceUpdated(subAccount, tokens[i], balances[i]);
         }
 
-        emit SpendingAllowanceUpdated(subAccount, newAllowance, block.timestamp);
+        emit SpendingAllowanceUpdated(subAccount, newAllowance);
     }
 
     function setAuthorizedOracle(address newOracle) external onlyOwner {
@@ -684,7 +678,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
      * @param newMaxBps New maximum in basis points (e.g., 2000 = 20%)
      */
     function setAbsoluteMaxSpendingBps(uint256 newMaxBps) external onlyOwner {
-        require(newMaxBps <= 10000, "Cannot exceed 100%");
+        if (newMaxBps > 10000) revert ExceedsMaxBps();
         absoluteMaxSpendingBps = newMaxBps;
     }
 
@@ -700,7 +694,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         address[] calldata tokens,
         address[] calldata priceFeeds
     ) external onlyOwner {
-        require(tokens.length == priceFeeds.length, "Length mismatch");
+        if (tokens.length != priceFeeds.length) revert LengthMismatch();
         for (uint256 i = 0; i < tokens.length; i++) {
             if (tokens[i] == address(0)) revert InvalidAddress();
             if (priceFeeds[i] == address(0)) revert InvalidPriceFeed();

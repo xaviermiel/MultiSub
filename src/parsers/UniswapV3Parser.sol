@@ -9,6 +9,9 @@ import {ICalldataParser} from "../interfaces/ICalldataParser.sol";
  * @dev Extracts token/amount from Uniswap V3 function calldata
  */
 contract UniswapV3Parser is ICalldataParser {
+    error UnsupportedSelector();
+    error InvalidPath();
+
     // Uniswap V3 SwapRouter function selectors
     bytes4 public constant EXACT_INPUT_SINGLE_SELECTOR = 0x414bf389;  // exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))
     bytes4 public constant EXACT_INPUT_SELECTOR = 0xc04b8d59;          // exactInput((bytes,address,uint256,uint256,uint256))
@@ -28,19 +31,19 @@ contract UniswapV3Parser is ICalldataParser {
         } else if (selector == EXACT_INPUT_SELECTOR) {
             // ExactInputParams: path contains tokenIn as first 20 bytes
             (bytes memory path,,,,) = abi.decode(data[4:], (bytes, address, uint256, uint256, uint256));
-            require(path.length >= 20, "UniswapV3Parser: invalid path");
+            if (path.length < 20) revert InvalidPath();
             assembly {
                 token := mload(add(path, 20))
             }
         } else if (selector == EXACT_OUTPUT_SELECTOR) {
             // ExactOutputParams: path is reversed, tokenIn is last 20 bytes
             (bytes memory path,,,,) = abi.decode(data[4:], (bytes, address, uint256, uint256, uint256));
-            require(path.length >= 20, "UniswapV3Parser: invalid path");
+            if (path.length < 20) revert InvalidPath();
             assembly {
                 token := mload(add(add(path, 32), sub(mload(path), 20)))
             }
         } else {
-            revert("UniswapV3Parser: unsupported selector for input token");
+            revert UnsupportedSelector();
         }
     }
 
@@ -61,7 +64,7 @@ contract UniswapV3Parser is ICalldataParser {
             // ExactOutputParams: amountInMaximum is 5th field
             (,,,, amount) = abi.decode(data[4:], (bytes, address, uint256, uint256, uint256));
         } else {
-            revert("UniswapV3Parser: unsupported selector for input amount");
+            revert UnsupportedSelector();
         }
     }
 
@@ -75,19 +78,19 @@ contract UniswapV3Parser is ICalldataParser {
         } else if (selector == EXACT_INPUT_SELECTOR) {
             // ExactInputParams: path contains tokenOut as last 20 bytes
             (bytes memory path,,,,) = abi.decode(data[4:], (bytes, address, uint256, uint256, uint256));
-            require(path.length >= 20, "UniswapV3Parser: invalid path");
+            if (path.length < 20) revert InvalidPath();
             assembly {
                 token := mload(add(add(path, 32), sub(mload(path), 20)))
             }
         } else if (selector == EXACT_OUTPUT_SELECTOR) {
             // ExactOutputParams: path is reversed, tokenOut is first 20 bytes
             (bytes memory path,,,,) = abi.decode(data[4:], (bytes, address, uint256, uint256, uint256));
-            require(path.length >= 20, "UniswapV3Parser: invalid path");
+            if (path.length < 20) revert InvalidPath();
             assembly {
                 token := mload(add(path, 20))
             }
         } else {
-            revert("UniswapV3Parser: unsupported selector for output token");
+            revert UnsupportedSelector();
         }
     }
 
