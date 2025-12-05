@@ -207,6 +207,13 @@ contract ConfigureDeFiModule is Script {
 /**
  * @title ConfigureSubAccount
  * @notice Script to configure a sub-account with roles and permissions
+ * @dev Environment variables:
+ *      - DEFI_MODULE_ADDRESS: The DeFiInteractorModule address
+ *      - SUB_ACCOUNT_ADDRESS: The sub-account wallet address
+ *      - MAX_SPENDING_BPS: Max spending in basis points (default: 500 = 5%)
+ *      - WINDOW_DURATION: Time window in seconds (default: 86400 = 1 day)
+ *      - GRANT_TRANSFER_ROLE: Whether to grant transfer role (default: false)
+ *      - ALLOWED_ADDRESSES: Comma-separated list of allowed protocol addresses
  */
 contract ConfigureSubAccount is Script {
     function run() external {
@@ -218,14 +225,14 @@ contract ConfigureSubAccount is Script {
         DeFiInteractorModule module = DeFiInteractorModule(moduleAddress);
 
         console.log("Configuring sub-account:", subAccount);
-        console.log("  Max spending: %s bps (%s%%)", maxSpendingBps, maxSpendingBps / 100);
+        console.log("  Max spending: %s bps", maxSpendingBps);
         console.log("  Window duration: %s seconds", windowDuration);
 
         vm.startBroadcast();
 
         // 1. Grant DEFI_EXECUTE_ROLE
         module.grantRole(subAccount, module.DEFI_EXECUTE_ROLE());
-        console.log("\n1. Granted DEFI_EXECUTE_ROLE");
+        console.log("1. Granted DEFI_EXECUTE_ROLE");
 
         // 2. Optionally grant DEFI_TRANSFER_ROLE
         bool grantTransfer = vm.envOr("GRANT_TRANSFER_ROLE", false);
@@ -238,13 +245,14 @@ contract ConfigureSubAccount is Script {
         module.setSubAccountLimits(subAccount, maxSpendingBps, windowDuration);
         console.log("3. Set sub-account limits");
 
-        // 4. Set allowed addresses from environment (comma-separated)
+        // 4. Set allowed addresses
         string memory allowedStr = vm.envOr("ALLOWED_ADDRESSES", string(""));
         if (bytes(allowedStr).length > 0) {
-            // Parse comma-separated addresses
             address[] memory allowed = _parseAddresses(allowedStr);
             module.setAllowedAddresses(subAccount, allowed, true);
             console.log("4. Set %s allowed addresses", allowed.length);
+        } else {
+            console.log("4. No ALLOWED_ADDRESSES set - skipping");
         }
 
         vm.stopBroadcast();
@@ -252,35 +260,124 @@ contract ConfigureSubAccount is Script {
         console.log("\n=== Sub-account Configuration Complete ===");
     }
 
+    /**
+     * @notice Parse comma-separated addresses from string
+     * @param input Comma-separated addresses (e.g., "0x123...,0x456...")
+     * @return Array of parsed addresses
+     */
     function _parseAddresses(string memory input) internal pure returns (address[] memory) {
-        // Simple implementation - assumes max 10 addresses
-        address[] memory temp = new address[](10);
-        uint256 count = 0;
-
+        // Count commas to determine array size
         bytes memory inputBytes = bytes(input);
-        bytes memory current = new bytes(42);
-        uint256 currentLen = 0;
+        uint256 count = 1;
+        for (uint256 i = 0; i < inputBytes.length; i++) {
+            if (inputBytes[i] == ",") count++;
+        }
+
+        address[] memory result = new address[](count);
+        uint256 resultIndex = 0;
+        uint256 start = 0;
 
         for (uint256 i = 0; i <= inputBytes.length; i++) {
             if (i == inputBytes.length || inputBytes[i] == ",") {
-                if (currentLen > 0) {
-                    // Convert bytes to address
-                    string memory addrStr = string(current);
-                    temp[count] = vm.parseAddress(addrStr);
-                    count++;
-                    currentLen = 0;
+                // Extract substring from start to i
+                bytes memory addrBytes = new bytes(i - start);
+                uint256 writeIndex = 0;
+                for (uint256 j = start; j < i; j++) {
+                    // Skip spaces
+                    if (inputBytes[j] != " ") {
+                        addrBytes[writeIndex] = inputBytes[j];
+                        writeIndex++;
+                    }
                 }
-            } else if (inputBytes[i] != " ") {
-                current[currentLen] = inputBytes[i];
-                currentLen++;
+                // Trim to actual length
+                bytes memory trimmed = new bytes(writeIndex);
+                for (uint256 k = 0; k < writeIndex; k++) {
+                    trimmed[k] = addrBytes[k];
+                }
+
+                if (trimmed.length > 0) {
+                    result[resultIndex] = vm.parseAddress(string(trimmed));
+                    resultIndex++;
+                }
+                start = i + 1;
             }
         }
 
-        // Trim array
-        address[] memory result = new address[](count);
-        for (uint256 i = 0; i < count; i++) {
-            result[i] = temp[i];
+        // Trim result array if needed
+        if (resultIndex < count) {
+            address[] memory trimmedResult = new address[](resultIndex);
+            for (uint256 i = 0; i < resultIndex; i++) {
+                trimmedResult[i] = result[i];
+            }
+            return trimmedResult;
         }
+
         return result;
+    }
+}
+
+/**
+ * @title ConfigureSubAccountPreset
+ * @notice Script to configure a sub-account with preset protocol configurations
+ * @dev Use PRESET env var: "aave", "uniswap", "all"
+ */
+contract ConfigureSubAccountPreset is Script {
+    // Protocol addresses (Mainnet)
+    address constant AAVE_V3_POOL = 0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2;
+    address constant AAVE_V3_REWARDS = 0x8164Cc65827dcFe994AB23944CBC90e0aa80bFcb;
+    address constant UNISWAP_V3_ROUTER = 0xE592427A0AEce92De3Edee1F18E0157C05861564;
+    address constant UNISWAP_V3_ROUTER_02 = 0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45;
+
+    function run() external {
+        address moduleAddress = vm.envAddress("DEFI_MODULE_ADDRESS");
+        address subAccount = vm.envAddress("SUB_ACCOUNT_ADDRESS");
+        string memory preset = vm.envOr("PRESET", string("all"));
+        uint256 maxSpendingBps = vm.envOr("MAX_SPENDING_BPS", uint256(500));
+        uint256 windowDuration = vm.envOr("WINDOW_DURATION", uint256(1 days));
+
+        DeFiInteractorModule module = DeFiInteractorModule(moduleAddress);
+
+        console.log("Configuring sub-account with preset:", preset);
+
+        vm.startBroadcast();
+
+        // Grant role and set limits
+        module.grantRole(subAccount, module.DEFI_EXECUTE_ROLE());
+        module.setSubAccountLimits(subAccount, maxSpendingBps, windowDuration);
+
+        // Set allowed addresses based on preset
+        address[] memory allowed = _getPresetAddresses(preset);
+        if (allowed.length > 0) {
+            module.setAllowedAddresses(subAccount, allowed, true);
+            console.log("Allowed %s protocol addresses", allowed.length);
+        }
+
+        vm.stopBroadcast();
+    }
+
+    function _getPresetAddresses(string memory preset) internal pure returns (address[] memory) {
+        bytes32 presetHash = keccak256(bytes(preset));
+
+        if (presetHash == keccak256("aave")) {
+            address[] memory addrs = new address[](2);
+            addrs[0] = AAVE_V3_POOL;
+            addrs[1] = AAVE_V3_REWARDS;
+            return addrs;
+        } else if (presetHash == keccak256("uniswap")) {
+            address[] memory addrs = new address[](2);
+            addrs[0] = UNISWAP_V3_ROUTER;
+            addrs[1] = UNISWAP_V3_ROUTER_02;
+            return addrs;
+        } else if (presetHash == keccak256("all")) {
+            address[] memory addrs = new address[](4);
+            addrs[0] = AAVE_V3_POOL;
+            addrs[1] = AAVE_V3_REWARDS;
+            addrs[2] = UNISWAP_V3_ROUTER;
+            addrs[3] = UNISWAP_V3_ROUTER_02;
+            return addrs;
+        }
+
+        // Empty array for unknown preset
+        return new address[](0);
     }
 }
