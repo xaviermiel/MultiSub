@@ -429,7 +429,7 @@ contract DeFiInteractorModuleTest is Test {
         assertEq(module.absoluteMaxSpendingBps(), 500);
 
         // Cannot exceed 100%
-        vm.expectRevert("Cannot exceed 100%");
+        vm.expectRevert(DeFiInteractorModule.ExceedsMaxBps.selector);
         module.setAbsoluteMaxSpendingBps(10001);
     }
 
