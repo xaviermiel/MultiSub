@@ -32,15 +32,19 @@ contract UniswapV3Parser is ICalldataParser {
             // ExactInputParams: path contains tokenIn as first 20 bytes
             (bytes memory path,,,,) = abi.decode(data[4:], (bytes, address, uint256, uint256, uint256));
             if (path.length < 20) revert InvalidPath();
+            // Extract first 20 bytes of path as address
             assembly {
-                token := mload(add(path, 20))
+                // Load 32 bytes starting at path + 32 (skip length)
+                // Shift right 96 bits to get address in lower 20 bytes
+                token := shr(96, mload(add(path, 32)))
             }
         } else if (selector == EXACT_OUTPUT_SELECTOR) {
             // ExactOutputParams: path is reversed, tokenIn is last 20 bytes
             (bytes memory path,,,,) = abi.decode(data[4:], (bytes, address, uint256, uint256, uint256));
             if (path.length < 20) revert InvalidPath();
+            // Extract last 20 bytes of path as address
             assembly {
-                token := mload(add(add(path, 32), sub(mload(path), 20)))
+                token := shr(96, mload(add(add(path, 32), sub(mload(path), 20))))
             }
         } else {
             revert UnsupportedSelector();
@@ -79,15 +83,25 @@ contract UniswapV3Parser is ICalldataParser {
             // ExactInputParams: path contains tokenOut as last 20 bytes
             (bytes memory path,,,,) = abi.decode(data[4:], (bytes, address, uint256, uint256, uint256));
             if (path.length < 20) revert InvalidPath();
+            // Extract last 20 bytes of path as address
+            // path layout: [length (32 bytes)][data...]
+            // We need bytes at position (length - 20) to (length)
             assembly {
-                token := mload(add(add(path, 32), sub(mload(path), 20)))
+                // Load 32 bytes starting at (path + 32 + length - 20)
+                // This gives us [12 garbage bytes][20 address bytes]
+                // Shift right 96 bits (12 bytes) to get address in lower 20 bytes
+                token := shr(96, mload(add(add(path, 32), sub(mload(path), 20))))
             }
         } else if (selector == EXACT_OUTPUT_SELECTOR) {
             // ExactOutputParams: path is reversed, tokenOut is first 20 bytes
             (bytes memory path,,,,) = abi.decode(data[4:], (bytes, address, uint256, uint256, uint256));
             if (path.length < 20) revert InvalidPath();
+            // Extract first 20 bytes of path as address
             assembly {
-                token := mload(add(path, 20))
+                // Load 32 bytes starting at path + 32 (skip length)
+                // This gives us [20 address bytes][12 garbage bytes]
+                // Shift right 96 bits to get address in lower 20 bytes
+                token := shr(96, mload(add(path, 32)))
             }
         } else {
             revert UnsupportedSelector();
