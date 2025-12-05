@@ -74,24 +74,75 @@ forge script script/SetupDeFiModule.s.sol --broadcast
 - **DEFI_EXECUTE_ROLE (1)**: Approve tokens & execute protocol operations
 - **DEFI_TRANSFER_ROLE (2)**: Transfer tokens from Safe
 
+### Acquired Balance Model
+The spending limit mechanism distinguishes between:
+- **Original tokens** (in Safe at start of window) → using them **costs spending**
+- **Acquired tokens** (received from operations) → **free to use**
+
+This allows sub-accounts to chain operations (swap → deposit → withdraw) without hitting limits on every step.
+
+**Critical Rules:**
+1. Only the exact amount received is marked as acquired
+2. Acquired status expires after 24 hours (tokens become "original" again)
+
+### Operation Types
+
+| Operation | Costs Spending? | Output Acquired? |
+|-----------|-----------------|------------------|
+| **Swap** | Yes (original only) | Yes |
+| **Deposit** | Yes (original only) | No |
+| **Withdraw** | No (FREE) | Conditional* |
+| **Claim Rewards** | No (FREE) | Conditional* |
+| **Approve** | No (capped) | N/A |
+| **Transfer Out** | Always | N/A |
+
+\* Only if deposit matched by the same subaccount to the same protocol in the time window.
+
 ### Granular Controls
 - **Per-Sub-Account Allowlists**: Each sub-account has its own protocol whitelist
-- **Custom Limits**: Configurable deposit/withdraw/loss percentages per sub-account
-- **Time Windows**: Rolling 24-hour windows prevent rapid drain attacks
+- **Custom Limits**: Configurable spending percentages per sub-account
+- **Rolling Windows**: 24-hour rolling windows prevent rapid drain attacks
 
 ### Security
-- Separate approval workflow (prevents approval draining)
-- Time-windowed cumulative limits (prevents rapid drain attacks)
+- **Selector-Based Classification**: Operations classified by function selector
+- **Calldata Verification**: Token/amount extracted from calldata and verified
+- **Allowlist Enforcement**: Sub-accounts can only interact with whitelisted protocols
+- **Oracle Freshness Check**: Operations blocked if oracle data is stale (>15 minutes)
+- **Hard Safety Cap**: Oracle cannot set allowances above absolute maximum
 - Emergency pause mechanism
 - Instant role revocation
-- Unusual activity detection
 
 ## Default Limits
 
 If not configured, sub-accounts use:
-- **Max transfer**: 1% per 24 hours
-- **Max Loss**: 5% per 24 hours
-- **Window**: 24 hours (86400 seconds)
+- **Max Spending**: 5% of portfolio per 24 hours
+- **Window**: Rolling 24 hours (86400 seconds)
+
+## Hybrid On-Chain/Off-Chain Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Sub-Account calls executeOnProtocol(target, data)              │
+│       ▼                                                         │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │              On-Chain Contract                          │    │
+│  │  1. Classify operation from function selector           │    │
+│  │  2. Verify tokenIn/amount match calldata                │    │
+│  │  3. Check & update spending allowance                   │    │
+│  │  4. Execute through Safe                                │    │
+│  │  5. Emit ProtocolExecution event                        │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│       ▼                                                         │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │              Off-Chain Oracle (Chainlink CRE)           │    │
+│  │  1. Monitor events                                      │    │
+│  │  2. Track spending in rolling 24h window                │    │
+│  │  3. Match deposits to withdrawals (for acquired status) │    │
+│  │  4. Calculate spending allowances                       │    │
+│  │  5. Update contract state if needed                     │    │
+│  └─────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 ## Testing
 
@@ -106,14 +157,14 @@ forge test --gas-report
 forge test --match-test testGrantRole -vvv
 ```
 
-## Security
+## Emergency Controls
 
-**Built-in Protection**:
-- Role-based access control
-- Time-windowed cumulative limits
-- Separate approval workflow
-- Emergency pause mechanism
-- Reentrancy guards
+| Control | Purpose |
+|---------|---------|
+| `pause()` | Freeze all module operations |
+| `revokeRole()` | Remove sub-account permissions instantly |
+| `unregisterSelector()` | Block specific operation types |
+| `setAllowedAddresses(false)` | Remove protocol from whitelist |
 
 ## Chainlink Runtime Environment (CRE) Integration
 
