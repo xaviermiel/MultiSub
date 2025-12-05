@@ -10,7 +10,6 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /**
  * @title DeFiInteractorModule
@@ -21,8 +20,6 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
  *      - Spending is one-way: consumed by deposits/swaps, never recovered
  */
 contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
-    using SafeERC20 for IERC20;
-
     // ============ Constants ============
 
     /// @notice Role ID for generic protocol execution
@@ -609,18 +606,9 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     }
 
     function updateSpendingAllowance(address subAccount, uint256 newAllowance) external onlyOracle {
-        // Ensure Safe value is fresh before calculating max allowance
-        _requireFreshSafeValue();
-
-        // Enforce absolute maximum spending cap (safety backstop)
-        uint256 maxAllowance = (safeValue.totalValueUSD * absoluteMaxSpendingBps) / 10000;
-        if (newAllowance > maxAllowance) {
-            revert ExceedsAbsoluteMaxSpending(newAllowance, maxAllowance);
-        }
-
+        _enforceAllowanceCap(newAllowance);
         spendingAllowance[subAccount] = newAllowance;
         lastOracleUpdate[subAccount] = block.timestamp;
-
         emit SpendingAllowanceUpdated(subAccount, newAllowance);
     }
 
@@ -645,15 +633,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         uint256[] calldata balances
     ) external onlyOracle {
         if (tokens.length != balances.length) revert LengthMismatch();
-
-        // Ensure Safe value is fresh before calculating max allowance
-        _requireFreshSafeValue();
-
-        // Enforce absolute maximum spending cap (safety backstop)
-        uint256 maxAllowance = (safeValue.totalValueUSD * absoluteMaxSpendingBps) / 10000;
-        if (newAllowance > maxAllowance) {
-            revert ExceedsAbsoluteMaxSpending(newAllowance, maxAllowance);
-        }
+        _enforceAllowanceCap(newAllowance);
 
         spendingAllowance[subAccount] = newAllowance;
         lastOracleUpdate[subAccount] = block.timestamp;
@@ -715,6 +695,14 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         if (safeValue.lastUpdated == 0) revert StalePortfolioValue();
         if (block.timestamp - safeValue.lastUpdated > maxSafeValueAge) {
             revert StalePortfolioValue();
+        }
+    }
+
+    function _enforceAllowanceCap(uint256 newAllowance) internal view {
+        _requireFreshSafeValue();
+        uint256 maxAllowance = (safeValue.totalValueUSD * absoluteMaxSpendingBps) / 10000;
+        if (newAllowance > maxAllowance) {
+            revert ExceedsAbsoluteMaxSpending(newAllowance, maxAllowance);
         }
     }
 
