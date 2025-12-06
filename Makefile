@@ -15,13 +15,13 @@ install:
 build:
 	forge build
 
-# Run tests
+# Run tests (using test profile to suppress size warnings)
 test:
-	forge test -vv
+	FOUNDRY_PROFILE=test forge test -vv
 
 # Run tests with gas reporting
 test-gas:
-	forge test --gas-report
+	FOUNDRY_PROFILE=test forge test --gas-report
 
 # Run tests with coverage
 coverage:

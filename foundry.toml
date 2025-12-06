@@ -14,6 +14,13 @@ remappings = [
     "@openzeppelin/community-contracts/=lib/openzeppelin-community-contracts/contracts/"
 ]
 
+# Test profile - optimize for size to avoid initcode limit warnings
+[profile.test]
+via_ir = true
+optimizer = true
+optimizer_runs = 1
+ignored_error_codes = [5740, 3860]  # Suppress contract size warnings for tests
+
 [rpc_endpoints]
 sepolia = "${SEPOLIA_RPC_URL}"
 
