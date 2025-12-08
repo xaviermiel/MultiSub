@@ -70,7 +70,7 @@ export const config = {
   moduleAddress: process.env.MODULE_ADDRESS as `0x${string}`,
 
   // Cron schedules
-  safeValueCron: process.env.SAFE_VALUE_CRON || '*/30 * * * * *', // Every 30 seconds
+  safeValueCron: process.env.SAFE_VALUE_CRON || '*/30 * * * *', // Every 30 minutes
   spendingOracleCron: process.env.SPENDING_ORACLE_CRON || '*/5 * * * *', // Every 5 minutes
 
   // Polling
