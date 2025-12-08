@@ -235,22 +235,47 @@ async function getBatchTokenBalances(tokenAddresses: Address[]): Promise<Map<str
 }
 
 /**
+ * Get native ETH balance for an address
+ */
+async function getNativeEthBalance(address: Address): Promise<bigint> {
+  try {
+    return await publicClient.getBalance({ address })
+  } catch (error) {
+    log(`Error getting native ETH balance: ${error}`)
+    return 0n
+  }
+}
+
+/**
  * Calculate total Safe value
  */
 async function calculateSafeValue(): Promise<bigint> {
   const tokens = config.tokens
   let totalValueUSD = 0n
 
-  if (tokens.length === 0) {
-    log('No tokens configured for safe value calculation')
-    return 0n
-  }
-
   // Get Safe address
   const safeAddress = await getSafeAddress()
   log(`Monitoring Safe: ${safeAddress}`)
 
-  // Batch fetch all balances
+  // First, calculate native ETH value
+  const ethBalance = await getNativeEthBalance(safeAddress)
+  if (ethBalance > 0n) {
+    log(`Processing native ETH`)
+    const { price: ethPrice, decimals: priceDecimals } = await getChainlinkPrice(
+      '0x694AA1769357215DE4FAC081bf1f309aDC325306' as Address // ETH/USD Sepolia
+    )
+    const ethValueUSD = (ethBalance * ethPrice * BigInt(10 ** 18)) / BigInt(10 ** 18) / BigInt(10 ** priceDecimals)
+    log(`  ETH: balance=${formatUnits(ethBalance, 18)}, price=${formatUnits(ethPrice, priceDecimals)} USD`)
+    log(`  Value: $${formatUnits(ethValueUSD, 18)} USD`)
+    totalValueUSD += ethValueUSD
+  }
+
+  if (tokens.length === 0) {
+    log('No ERC20 tokens configured for safe value calculation')
+    return totalValueUSD
+  }
+
+  // Batch fetch all ERC20 balances
   const tokenAddresses = tokens.map(t => t.address as Address)
   const balanceMap = await getBatchTokenBalances(tokenAddresses)
 
