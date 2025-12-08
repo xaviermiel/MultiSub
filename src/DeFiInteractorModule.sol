@@ -67,7 +67,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     mapping(address => uint256) public lastOracleUpdate;
 
     /// @notice Maximum age for oracle data before operations are blocked
-    uint256 public maxOracleAge = 15 minutes;
+    uint256 public maxOracleAge = 60 minutes;
 
     // ============ Safe Value Storage ============
 
@@ -82,7 +82,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     SafeValue public safeValue;
 
     /// @notice Maximum age for Safe value before considered stale
-    uint256 public maxSafeValueAge = 15 minutes;
+    uint256 public maxSafeValueAge = 60 minutes;
 
     /// @notice Absolute maximum spending percentage (safety backstop, oracle cannot exceed)
     /// @dev Default 20% (2000 basis points). Even if oracle is compromised, cannot exceed this.
