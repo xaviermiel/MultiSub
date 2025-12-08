@@ -510,9 +510,11 @@ async function pollForNewEvents() {
 
     log(`Polling blocks ${lastProcessedBlock + 1n} to ${currentBlock}`)
 
-    // Query new events
-    const protocolEvents = await queryProtocolExecutionEvents(lastProcessedBlock + 1n, currentBlock)
-    const transferEvents = await queryTransferEvents(lastProcessedBlock + 1n, currentBlock)
+    // Query new events in parallel
+    const [protocolEvents, transferEvents] = await Promise.all([
+      queryProtocolExecutionEvents(lastProcessedBlock + 1n, currentBlock),
+      queryTransferEvents(lastProcessedBlock + 1n, currentBlock),
+    ])
 
     if (protocolEvents.length > 0 || transferEvents.length > 0) {
       log(`Found ${protocolEvents.length} protocol events and ${transferEvents.length} transfer events`)
@@ -526,10 +528,10 @@ async function pollForNewEvents() {
         affectedSubaccounts.add(e.subAccount)
       }
 
-      // Process each affected subaccount
-      for (const subAccount of affectedSubaccounts) {
-        await processSubaccount(subAccount)
-      }
+      // Process all affected subaccounts in parallel
+      await Promise.allSettled(
+        [...affectedSubaccounts].map((subAccount) => processSubaccount(subAccount, currentBlock))
+      )
     }
 
     lastProcessedBlock = currentBlock
@@ -540,17 +542,17 @@ async function pollForNewEvents() {
 
 // ============ Subaccount Processing ============
 
-async function processSubaccount(subAccount: Address) {
+async function processSubaccount(subAccount: Address, currentBlock?: bigint) {
   const currentTimestamp = BigInt(Math.floor(Date.now() / 1000))
-  const currentBlock = await publicClient.getBlockNumber()
-  const fromBlock = currentBlock - BigInt(config.blocksToLookBack)
+  const blockNumber = currentBlock ?? await publicClient.getBlockNumber()
+  const fromBlock = blockNumber - BigInt(config.blocksToLookBack)
 
-  // Get window duration for this subaccount
-  const { windowDuration } = await getSubAccountLimits(subAccount)
-
-  // Query all relevant events
-  const protocolEvents = await queryProtocolExecutionEvents(fromBlock, currentBlock, subAccount)
-  const transferEvents = await queryTransferEvents(fromBlock, currentBlock, subAccount)
+  // Query limits and events in parallel
+  const [{ windowDuration }, protocolEvents, transferEvents] = await Promise.all([
+    getSubAccountLimits(subAccount),
+    queryProtocolExecutionEvents(fromBlock, blockNumber, subAccount),
+    queryTransferEvents(fromBlock, blockNumber, subAccount),
+  ])
 
   // Build state
   const state = buildSubAccountState(protocolEvents, transferEvents, subAccount, currentTimestamp, windowDuration)
@@ -568,7 +570,11 @@ async function onCronRefresh() {
   log('=== Spending Oracle: Periodic Refresh ===')
 
   try {
-    const subaccounts = await getActiveSubaccounts()
+    // Fetch subaccounts and current block in parallel
+    const [subaccounts, currentBlock] = await Promise.all([
+      getActiveSubaccounts(),
+      publicClient.getBlockNumber(),
+    ])
     log(`Found ${subaccounts.length} active subaccounts`)
 
     if (subaccounts.length === 0) {
@@ -576,14 +582,20 @@ async function onCronRefresh() {
       return
     }
 
-    for (const subAccount of subaccounts) {
-      try {
+    // Process all subaccounts in parallel
+    const results = await Promise.allSettled(
+      subaccounts.map(async (subAccount) => {
         log(`Processing subaccount: ${subAccount}`)
-        await processSubaccount(subAccount)
-      } catch (error) {
-        log(`Error processing ${subAccount}: ${error}`)
+        return processSubaccount(subAccount, currentBlock)
+      })
+    )
+
+    // Log any failures
+    results.forEach((result, i) => {
+      if (result.status === 'rejected') {
+        log(`Error processing ${subaccounts[i]}: ${result.reason}`)
       }
-    }
+    })
 
     log('=== Periodic Refresh Complete ===')
   } catch (error) {
