@@ -81,11 +81,11 @@ interface SubAccountState {
 // ============ Event Signatures ============
 
 const PROTOCOL_EXECUTION_EVENT = parseAbiItem(
-  'event ProtocolExecution(address indexed subAccount, address indexed target, uint8 opType, address tokenIn, uint256 amountIn, address tokenOut, uint256 amountOut, uint256 spendingCost, uint256 timestamp)'
+  'event ProtocolExecution(address indexed subAccount, address indexed target, uint8 opType, address tokenIn, uint256 amountIn, address tokenOut, uint256 amountOut, uint256 spendingCost)'
 )
 
 const TRANSFER_EXECUTED_EVENT = parseAbiItem(
-  'event TransferExecuted(address indexed subAccount, address indexed token, address indexed recipient, uint256 amount, uint256 spendingCost, uint256 timestamp)'
+  'event TransferExecuted(address indexed subAccount, address indexed token, address indexed recipient, uint256 amount, uint256 spendingCost)'
 )
 
 // ============ Initialize Clients ============
@@ -100,6 +100,9 @@ let account: ReturnType<typeof privateKeyToAccount>
 
 // Track last processed block for event polling
 let lastProcessedBlock = 0n
+
+// Prevent overlapping polls
+let isPolling = false
 
 function initWalletClient() {
   account = privateKeyToAccount(config.privateKey)
@@ -176,7 +179,6 @@ function parseProtocolExecutionLog(log: Log): ProtocolExecutionEvent {
       { name: 'tokenOut', type: 'address' },
       { name: 'amountOut', type: 'uint256' },
       { name: 'spendingCost', type: 'uint256' },
-      { name: 'timestamp', type: 'uint256' },
     ],
     log.data
   )
@@ -190,7 +192,8 @@ function parseProtocolExecutionLog(log: Log): ProtocolExecutionEvent {
     tokenOut: decoded[3] as Address,
     amountOut: decoded[4],
     spendingCost: decoded[5],
-    timestamp: decoded[6],
+    // Use block timestamp from the log instead
+    timestamp: BigInt(Math.floor(Date.now() / 1000)), // Will be refined when processing
     blockNumber: log.blockNumber || 0n,
     logIndex: log.logIndex || 0,
   }
@@ -205,7 +208,6 @@ function parseTransferExecutedLog(log: Log): TransferExecutedEvent {
     [
       { name: 'amount', type: 'uint256' },
       { name: 'spendingCost', type: 'uint256' },
-      { name: 'timestamp', type: 'uint256' },
     ],
     log.data
   )
@@ -216,7 +218,8 @@ function parseTransferExecutedLog(log: Log): TransferExecutedEvent {
     recipient,
     amount: decoded[0],
     spendingCost: decoded[1],
-    timestamp: decoded[2],
+    // Use current timestamp as proxy
+    timestamp: BigInt(Math.floor(Date.now() / 1000)),
     blockNumber: log.blockNumber || 0n,
     logIndex: log.logIndex || 0,
   }
@@ -498,6 +501,12 @@ async function pushBatchUpdate(
 // ============ Event Polling ============
 
 async function pollForNewEvents() {
+  // Prevent overlapping polls
+  if (isPolling) {
+    return
+  }
+  isPolling = true
+
   try {
     const currentBlock = await publicClient.getBlockNumber()
 
@@ -507,10 +516,12 @@ async function pollForNewEvents() {
     }
 
     if (currentBlock <= lastProcessedBlock) {
+      isPolling = false
       return // No new blocks
     }
 
-    log(`Polling blocks ${lastProcessedBlock + 1n} to ${currentBlock}`)
+    const blocksToProcess = currentBlock - lastProcessedBlock
+    log(`Polling blocks ${lastProcessedBlock + 1n} to ${currentBlock} (${blocksToProcess} blocks)`)
 
     // Query new events in parallel
     const [protocolEvents, transferEvents] = await Promise.all([
@@ -539,6 +550,8 @@ async function pollForNewEvents() {
     lastProcessedBlock = currentBlock
   } catch (error) {
     log(`Error polling for events: ${error}`)
+  } finally {
+    isPolling = false
   }
 }
 

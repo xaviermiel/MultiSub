@@ -73,8 +73,8 @@ export const config = {
   safeValueCron: process.env.SAFE_VALUE_CRON || '*/30 * * * *', // Every 30 minutes
   spendingOracleCron: process.env.SPENDING_ORACLE_CRON || '*/5 * * * *', // Every 5 minutes
 
-  // Polling
-  pollIntervalMs: parseInt(process.env.POLL_INTERVAL_MS || '10000'),
+  // Polling (15s default - slightly longer than Sepolia's ~12s block time)
+  pollIntervalMs: parseInt(process.env.POLL_INTERVAL_MS || '15000'),
   blocksToLookBack: parseInt(process.env.BLOCKS_TO_LOOK_BACK || '7200'),
   windowDurationSeconds: parseInt(process.env.WINDOW_DURATION_SECONDS || '86400'),
 
