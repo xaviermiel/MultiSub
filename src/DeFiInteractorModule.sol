@@ -368,7 +368,6 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     ) external nonReentrant whenNotPaused returns (bytes memory) {
         // 1. Validate permissions
         if (!hasRole(msg.sender, DEFI_EXECUTE_ROLE)) revert Unauthorized();
-        if (!allowedAddresses[msg.sender][target]) revert AddressNotAllowed();
         _requireFreshOracle(msg.sender);
 
         // 2. Classify operation from selector
@@ -376,14 +375,21 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         OperationType opType = selectorType[selector];
 
         // 3. Route based on type
+        // Note: APPROVE skips allowedAddresses check on target (the token) since
+        // _executeApproveWithCap validates the spender is whitelisted
         if (opType == OperationType.UNKNOWN) {
             revert UnknownSelector(selector);
-        } else if (opType == OperationType.WITHDRAW || opType == OperationType.CLAIM) {
+        } else if (opType == OperationType.APPROVE) {
+            return _executeApproveWithCap(msg.sender, target, data);
+        }
+
+        // All other operations require target to be whitelisted
+        if (!allowedAddresses[msg.sender][target]) revert AddressNotAllowed();
+
+        if (opType == OperationType.WITHDRAW || opType == OperationType.CLAIM) {
             return _executeNoSpendingCheck(msg.sender, target, data, opType);
         } else if (opType == OperationType.DEPOSIT || opType == OperationType.SWAP) {
             return _executeWithSpendingCheck(msg.sender, target, data, opType);
-        } else if (opType == OperationType.APPROVE) {
-            return _executeApproveWithCap(msg.sender, target, data);
         }
 
         revert UnknownSelector(selector);
