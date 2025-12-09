@@ -474,6 +474,8 @@ async function pushBatchUpdate(
 
   try {
     const hash = await walletClient.writeContract({
+      chain: config.chain,
+      account,
       address: config.moduleAddress,
       abi: DeFiInteractorModuleABI,
       functionName: 'batchUpdate',
