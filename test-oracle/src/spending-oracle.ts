@@ -60,6 +60,7 @@ interface DepositRecord {
   target: Address
   tokenIn: Address
   amountIn: bigint
+  remainingAmount: bigint  // Tracks how much of the deposit hasn't been withdrawn yet
   timestamp: bigint
 }
 
@@ -338,6 +339,7 @@ function buildSubAccountState(
         target: event.target,
         tokenIn: event.tokenIn,
         amountIn: event.amountIn,
+        remainingAmount: event.amountIn,  // Initially, full amount is available for withdrawal
         timestamp: event.timestamp,
       })
     }
@@ -353,15 +355,38 @@ function buildSubAccountState(
       }
     } else if (event.opType === OperationType.WITHDRAW || event.opType === OperationType.CLAIM) {
       if (event.tokenOut !== '0x0000000000000000000000000000000000000000' && event.amountOut > 0n) {
-        const hasMatchingDeposit = state.depositRecords.some(
-          d => d.target.toLowerCase() === event.target.toLowerCase() &&
-               d.subAccount.toLowerCase() === event.subAccount.toLowerCase()
-        )
+        // Find matching deposits with remaining balance and consume from them
+        let remainingToMatch = event.amountOut
 
-        if (hasMatchingDeposit) {
+        for (const deposit of state.depositRecords) {
+          if (remainingToMatch <= 0n) break
+
+          // Check if this deposit matches (same target and subAccount)
+          if (deposit.target.toLowerCase() === event.target.toLowerCase() &&
+              deposit.subAccount.toLowerCase() === event.subAccount.toLowerCase() &&
+              deposit.remainingAmount > 0n) {
+
+            // Calculate how much we can consume from this deposit
+            const consumeAmount = remainingToMatch > deposit.remainingAmount
+              ? deposit.remainingAmount
+              : remainingToMatch
+
+            // Consume from the deposit
+            deposit.remainingAmount -= consumeAmount
+            remainingToMatch -= consumeAmount
+
+            log(`  ${OperationType[event.opType]} consuming ${consumeAmount} from deposit (remaining in deposit: ${deposit.remainingAmount})`)
+          }
+        }
+
+        // Only the matched portion becomes acquired
+        const matchedAmount = event.amountOut - remainingToMatch
+        if (matchedAmount > 0n) {
           acquiredToken = tokenOutLower
-          acquiredAmount = event.amountOut
-          log(`  ${OperationType[event.opType]} matched to deposit: ${event.amountOut} of ${event.tokenOut}`)
+          acquiredAmount = matchedAmount
+          log(`  ${OperationType[event.opType]} matched to deposit: ${matchedAmount} of ${event.tokenOut} (unmatched: ${remainingToMatch})`)
+        } else {
+          log(`  ${OperationType[event.opType]} NOT matched to any deposit: ${event.amountOut} of ${event.tokenOut}`)
         }
       }
     }
