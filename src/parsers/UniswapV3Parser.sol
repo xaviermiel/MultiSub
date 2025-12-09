@@ -12,37 +12,59 @@ contract UniswapV3Parser is ICalldataParser {
     error UnsupportedSelector();
     error InvalidPath();
 
-    // Uniswap V3 SwapRouter function selectors
+    // Uniswap V3 SwapRouter function selectors (with deadline in struct)
     bytes4 public constant EXACT_INPUT_SINGLE_SELECTOR = 0x414bf389;  // exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))
     bytes4 public constant EXACT_INPUT_SELECTOR = 0xc04b8d59;          // exactInput((bytes,address,uint256,uint256,uint256))
     bytes4 public constant EXACT_OUTPUT_SINGLE_SELECTOR = 0xdb3e2198; // exactOutputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))
     bytes4 public constant EXACT_OUTPUT_SELECTOR = 0xf28c0498;         // exactOutput((bytes,address,uint256,uint256,uint256))
+
+    // SwapRouter02 function selectors (no deadline in struct, handled via multicall)
+    bytes4 public constant EXACT_INPUT_SINGLE_02_SELECTOR = 0x04e45aaf;  // exactInputSingle((address,address,uint24,address,uint256,uint256,uint160))
+    bytes4 public constant EXACT_INPUT_02_SELECTOR = 0xb858183f;          // exactInput((bytes,address,uint256,uint256))
+    bytes4 public constant EXACT_OUTPUT_SINGLE_02_SELECTOR = 0x5023b4df; // exactOutputSingle((address,address,uint24,address,uint256,uint256,uint160))
+    bytes4 public constant EXACT_OUTPUT_02_SELECTOR = 0x09b81346;         // exactOutput((bytes,address,uint256,uint256))
 
     /// @inheritdoc ICalldataParser
     function extractInputToken(address, bytes calldata data) external pure override returns (address token) {
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == EXACT_INPUT_SINGLE_SELECTOR) {
-            // ExactInputSingleParams: tokenIn is first field
+            // ExactInputSingleParams (V1): tokenIn is first field
             (token,,,,,,,) = abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint256, uint160));
+        } else if (selector == EXACT_INPUT_SINGLE_02_SELECTOR) {
+            // ExactInputSingleParams (V2): no deadline, tokenIn is first field
+            (token,,,,,,) = abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint160));
         } else if (selector == EXACT_OUTPUT_SINGLE_SELECTOR) {
-            // ExactOutputSingleParams: tokenIn is first field, tokenOut is second
+            // ExactOutputSingleParams (V1): tokenIn is first field, tokenOut is second
             (token,,,,,,,) = abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint256, uint160));
+        } else if (selector == EXACT_OUTPUT_SINGLE_02_SELECTOR) {
+            // ExactOutputSingleParams (V2): no deadline
+            (token,,,,,,) = abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint160));
         } else if (selector == EXACT_INPUT_SELECTOR) {
-            // ExactInputParams: path contains tokenIn as first 20 bytes
+            // ExactInputParams (V1): path contains tokenIn as first 20 bytes
             (bytes memory path,,,,) = abi.decode(data[4:], (bytes, address, uint256, uint256, uint256));
             if (path.length < 20) revert InvalidPath();
-            // Extract first 20 bytes of path as address
             assembly {
-                // Load 32 bytes starting at path + 32 (skip length)
-                // Shift right 96 bits to get address in lower 20 bytes
+                token := shr(96, mload(add(path, 32)))
+            }
+        } else if (selector == EXACT_INPUT_02_SELECTOR) {
+            // ExactInputParams (V2): no deadline
+            (bytes memory path,,,) = abi.decode(data[4:], (bytes, address, uint256, uint256));
+            if (path.length < 20) revert InvalidPath();
+            assembly {
                 token := shr(96, mload(add(path, 32)))
             }
         } else if (selector == EXACT_OUTPUT_SELECTOR) {
-            // ExactOutputParams: path is reversed, tokenIn is last 20 bytes
+            // ExactOutputParams (V1): path is reversed, tokenIn is last 20 bytes
             (bytes memory path,,,,) = abi.decode(data[4:], (bytes, address, uint256, uint256, uint256));
             if (path.length < 20) revert InvalidPath();
-            // Extract last 20 bytes of path as address
+            assembly {
+                token := shr(96, mload(add(add(path, 32), sub(mload(path), 20))))
+            }
+        } else if (selector == EXACT_OUTPUT_02_SELECTOR) {
+            // ExactOutputParams (V2): no deadline
+            (bytes memory path,,,) = abi.decode(data[4:], (bytes, address, uint256, uint256));
+            if (path.length < 20) revert InvalidPath();
             assembly {
                 token := shr(96, mload(add(add(path, 32), sub(mload(path), 20))))
             }
@@ -56,17 +78,29 @@ contract UniswapV3Parser is ICalldataParser {
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == EXACT_INPUT_SINGLE_SELECTOR) {
-            // ExactInputSingleParams: amountIn is 6th field (index 5)
+            // ExactInputSingleParams (V1): amountIn is 6th field (index 5, after deadline)
             (,,,,, amount,,) = abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint256, uint160));
+        } else if (selector == EXACT_INPUT_SINGLE_02_SELECTOR) {
+            // ExactInputSingleParams (V2): amountIn is 5th field (no deadline)
+            (,,,, amount,,) = abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint160));
         } else if (selector == EXACT_INPUT_SELECTOR) {
-            // ExactInputParams: amountIn is 4th field
+            // ExactInputParams (V1): amountIn is 4th field
             (,,, amount,) = abi.decode(data[4:], (bytes, address, uint256, uint256, uint256));
+        } else if (selector == EXACT_INPUT_02_SELECTOR) {
+            // ExactInputParams (V2): amountIn is 3rd field (no deadline)
+            (,, amount,) = abi.decode(data[4:], (bytes, address, uint256, uint256));
         } else if (selector == EXACT_OUTPUT_SINGLE_SELECTOR) {
-            // ExactOutputSingleParams: amountInMaximum is 7th field
+            // ExactOutputSingleParams (V1): amountInMaximum is 7th field
             (,,,,,, amount,) = abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint256, uint160));
+        } else if (selector == EXACT_OUTPUT_SINGLE_02_SELECTOR) {
+            // ExactOutputSingleParams (V2): amountInMaximum is 6th field (no deadline)
+            (,,,,, amount,) = abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint160));
         } else if (selector == EXACT_OUTPUT_SELECTOR) {
-            // ExactOutputParams: amountInMaximum is 5th field
+            // ExactOutputParams (V1): amountInMaximum is 5th field
             (,,,, amount) = abi.decode(data[4:], (bytes, address, uint256, uint256, uint256));
+        } else if (selector == EXACT_OUTPUT_02_SELECTOR) {
+            // ExactOutputParams (V2): amountInMaximum is 4th field (no deadline)
+            (,,, amount) = abi.decode(data[4:], (bytes, address, uint256, uint256));
         } else {
             revert UnsupportedSelector();
         }
@@ -77,30 +111,37 @@ contract UniswapV3Parser is ICalldataParser {
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == EXACT_INPUT_SINGLE_SELECTOR || selector == EXACT_OUTPUT_SINGLE_SELECTOR) {
-            // tokenOut is second field
+            // tokenOut is second field (V1)
             (, token,,,,,,) = abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint256, uint160));
+        } else if (selector == EXACT_INPUT_SINGLE_02_SELECTOR || selector == EXACT_OUTPUT_SINGLE_02_SELECTOR) {
+            // tokenOut is second field (V2, no deadline)
+            (, token,,,,,) = abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint160));
         } else if (selector == EXACT_INPUT_SELECTOR) {
-            // ExactInputParams: path contains tokenOut as last 20 bytes
+            // ExactInputParams (V1): path contains tokenOut as last 20 bytes
             (bytes memory path,,,,) = abi.decode(data[4:], (bytes, address, uint256, uint256, uint256));
             if (path.length < 20) revert InvalidPath();
-            // Extract last 20 bytes of path as address
-            // path layout: [length (32 bytes)][data...]
-            // We need bytes at position (length - 20) to (length)
             assembly {
-                // Load 32 bytes starting at (path + 32 + length - 20)
-                // This gives us [12 garbage bytes][20 address bytes]
-                // Shift right 96 bits (12 bytes) to get address in lower 20 bytes
+                token := shr(96, mload(add(add(path, 32), sub(mload(path), 20))))
+            }
+        } else if (selector == EXACT_INPUT_02_SELECTOR) {
+            // ExactInputParams (V2): no deadline
+            (bytes memory path,,,) = abi.decode(data[4:], (bytes, address, uint256, uint256));
+            if (path.length < 20) revert InvalidPath();
+            assembly {
                 token := shr(96, mload(add(add(path, 32), sub(mload(path), 20))))
             }
         } else if (selector == EXACT_OUTPUT_SELECTOR) {
-            // ExactOutputParams: path is reversed, tokenOut is first 20 bytes
+            // ExactOutputParams (V1): path is reversed, tokenOut is first 20 bytes
             (bytes memory path,,,,) = abi.decode(data[4:], (bytes, address, uint256, uint256, uint256));
             if (path.length < 20) revert InvalidPath();
-            // Extract first 20 bytes of path as address
             assembly {
-                // Load 32 bytes starting at path + 32 (skip length)
-                // This gives us [20 address bytes][12 garbage bytes]
-                // Shift right 96 bits to get address in lower 20 bytes
+                token := shr(96, mload(add(path, 32)))
+            }
+        } else if (selector == EXACT_OUTPUT_02_SELECTOR) {
+            // ExactOutputParams (V2): no deadline
+            (bytes memory path,,,) = abi.decode(data[4:], (bytes, address, uint256, uint256));
+            if (path.length < 20) revert InvalidPath();
+            assembly {
                 token := shr(96, mload(add(path, 32)))
             }
         } else {
@@ -113,7 +154,11 @@ contract UniswapV3Parser is ICalldataParser {
         return selector == EXACT_INPUT_SINGLE_SELECTOR ||
                selector == EXACT_INPUT_SELECTOR ||
                selector == EXACT_OUTPUT_SINGLE_SELECTOR ||
-               selector == EXACT_OUTPUT_SELECTOR;
+               selector == EXACT_OUTPUT_SELECTOR ||
+               selector == EXACT_INPUT_SINGLE_02_SELECTOR ||
+               selector == EXACT_INPUT_02_SELECTOR ||
+               selector == EXACT_OUTPUT_SINGLE_02_SELECTOR ||
+               selector == EXACT_OUTPUT_02_SELECTOR;
     }
 
     /**
@@ -125,7 +170,11 @@ contract UniswapV3Parser is ICalldataParser {
         if (selector == EXACT_INPUT_SINGLE_SELECTOR ||
             selector == EXACT_INPUT_SELECTOR ||
             selector == EXACT_OUTPUT_SINGLE_SELECTOR ||
-            selector == EXACT_OUTPUT_SELECTOR) {
+            selector == EXACT_OUTPUT_SELECTOR ||
+            selector == EXACT_INPUT_SINGLE_02_SELECTOR ||
+            selector == EXACT_INPUT_02_SELECTOR ||
+            selector == EXACT_OUTPUT_SINGLE_02_SELECTOR ||
+            selector == EXACT_OUTPUT_02_SELECTOR) {
             return 1; // SWAP
         }
         return 0; // UNKNOWN
