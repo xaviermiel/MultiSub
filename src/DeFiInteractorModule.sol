@@ -395,6 +395,44 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         revert UnknownSelector(selector);
     }
 
+    /**
+     * @notice Execute a protocol interaction with ETH value
+     * @param target The protocol address to call
+     * @param data The calldata to execute
+     * @dev Same as executeOnProtocol but allows sending ETH (msg.value)
+     */
+    function executeOnProtocolWithValue(
+        address target,
+        bytes calldata data
+    ) external payable nonReentrant whenNotPaused returns (bytes memory) {
+        // 1. Validate permissions
+        if (!hasRole(msg.sender, DEFI_EXECUTE_ROLE)) revert Unauthorized();
+        _requireFreshOracle(msg.sender);
+
+        // 2. Classify operation from selector
+        bytes4 selector = bytes4(data[:4]);
+        OperationType opType = selectorType[selector];
+
+        // 3. Route based on type
+        if (opType == OperationType.UNKNOWN) {
+            revert UnknownSelector(selector);
+        } else if (opType == OperationType.APPROVE) {
+            // APPROVE doesn't use ETH value
+            return _executeApproveWithCap(msg.sender, target, data);
+        }
+
+        // All other operations require target to be whitelisted
+        if (!allowedAddresses[msg.sender][target]) revert AddressNotAllowed();
+
+        if (opType == OperationType.WITHDRAW || opType == OperationType.CLAIM) {
+            return _executeNoSpendingCheckWithValue(msg.sender, target, data, opType, msg.value);
+        } else if (opType == OperationType.DEPOSIT || opType == OperationType.SWAP) {
+            return _executeWithSpendingCheckWithValue(msg.sender, target, data, opType, msg.value);
+        }
+
+        revert UnknownSelector(selector);
+    }
+
     // ============ Spending Check Logic ============
 
     function _executeWithSpendingCheck(
@@ -457,6 +495,72 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         return "";
     }
 
+    function _executeWithSpendingCheckWithValue(
+        address subAccount,
+        address target,
+        bytes calldata data,
+        OperationType opType,
+        uint256 value
+    ) internal returns (bytes memory) {
+        // 1. Parser is REQUIRED to extract token/amount from calldata
+        ICalldataParser parser = protocolParsers[target];
+        if (address(parser) == address(0)) {
+            revert NoParserRegistered(target);
+        }
+
+        // 2. Extract token and amount from calldata via parser
+        address tokenIn = parser.extractInputToken(target, data);
+        uint256 amountIn = parser.extractInputAmount(target, data);
+
+        // 3. For ETH swaps, use native ETH (address(0)) and the msg.value
+        if (tokenIn == address(0) && value > 0) {
+            amountIn = value;
+        }
+
+        // 4. Calculate spending cost (acquired balance is free)
+        uint256 acquired = acquiredBalance[subAccount][tokenIn];
+        uint256 fromOriginal = amountIn > acquired ? amountIn - acquired : 0;
+        uint256 spendingCost = _estimateTokenValueUSD(tokenIn, fromOriginal);
+
+        // 5. Check spending allowance
+        if (spendingCost > spendingAllowance[subAccount]) {
+            revert ExceedsSpendingLimit();
+        }
+
+        // 6. Deduct spending and acquired balance
+        spendingAllowance[subAccount] -= spendingCost;
+        uint256 usedFromAcquired = amountIn > acquired ? acquired : amountIn;
+        acquiredBalance[subAccount][tokenIn] -= usedFromAcquired;
+
+        // 7. Capture balance before for output tracking
+        address tokenOut = _getOutputToken(target, data, parser);
+        uint256 balanceBefore = tokenOut != address(0) ? IERC20(tokenOut).balanceOf(avatar) : 0;
+
+        // 8. Execute with value
+        bool success = exec(target, value, data, ISafe.Operation.Call);
+        if (!success) revert TransactionFailed();
+
+        // 9. Calculate output amount
+        uint256 amountOut = 0;
+        if (tokenOut != address(0)) {
+            amountOut = IERC20(tokenOut).balanceOf(avatar) - balanceBefore;
+        }
+
+        // 10. Emit event for oracle
+        emit ProtocolExecution(
+            subAccount,
+            target,
+            opType,
+            tokenIn,
+            amountIn,
+            tokenOut,
+            amountOut,
+            spendingCost
+        );
+
+        return "";
+    }
+
     // ============ No Spending Check Logic ============
 
     function _executeNoSpendingCheck(
@@ -477,6 +581,49 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
         // 3. Execute (NO spending check - withdrawals and claims are free)
         bool success = exec(target, 0, data, ISafe.Operation.Call);
+        if (!success) revert TransactionFailed();
+
+        // 4. Calculate received amount
+        uint256 amountOut = 0;
+        if (tokenOut != address(0)) {
+            amountOut = IERC20(tokenOut).balanceOf(avatar) - balanceBefore;
+        }
+
+        // 5. Emit event for oracle to:
+        //    - Mark received as acquired if matched to deposit (both WITHDRAW and CLAIM)
+        emit ProtocolExecution(
+            subAccount,
+            target,
+            opType,
+            address(0), // no tokenIn for withdraw/claim
+            0,          // no amountIn
+            tokenOut,
+            amountOut,
+            0           // no spending cost
+        );
+
+        return "";
+    }
+
+    function _executeNoSpendingCheckWithValue(
+        address subAccount,
+        address target,
+        bytes calldata data,
+        OperationType opType,
+        uint256 value
+    ) internal returns (bytes memory) {
+        // 1. Parser is required for WITHDRAW/CLAIM to track output tokens for acquired balance
+        ICalldataParser parser = protocolParsers[target];
+        if (address(parser) == address(0)) {
+            revert NoParserRegistered(target);
+        }
+
+        // 2. Get output token from parser (parser may query vault for ERC4626)
+        address tokenOut = parser.extractOutputToken(target, data);
+        uint256 balanceBefore = tokenOut != address(0) ? IERC20(tokenOut).balanceOf(avatar) : 0;
+
+        // 3. Execute with value (NO spending check - withdrawals and claims are free)
+        bool success = exec(target, value, data, ISafe.Operation.Call);
         if (!success) revert TransactionFailed();
 
         // 4. Calculate received amount
