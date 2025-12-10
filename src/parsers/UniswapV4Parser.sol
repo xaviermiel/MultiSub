@@ -204,7 +204,7 @@ contract UniswapV4Parser is ICalldataParser {
         if (selector != MODIFY_LIQUIDITIES_SELECTOR) return 0;
 
         (bytes memory unlockData,) = abi.decode(data[4:], (bytes, uint256));
-        (bytes memory actions,) = _decodeActionsAndParams(unlockData);
+        (bytes memory actions, bytes[] memory params) = _decodeActionsAndParams(unlockData);
 
         // Check first liquidity action to determine operation type
         for (uint256 i = 0; i < actions.length; i++) {
@@ -218,8 +218,22 @@ contract UniswapV4Parser is ICalldataParser {
                 return 2; // DEPOSIT
             }
 
-            // Withdraw operations (removing liquidity)
-            if (action == BURN_POSITION || action == DECREASE_LIQUIDITY) {
+            // DECREASE_LIQUIDITY with liquidity=0 is fee collection (CLAIM)
+            // DECREASE_LIQUIDITY with liquidity>0 is withdrawal (WITHDRAW)
+            if (action == DECREASE_LIQUIDITY) {
+                // DecreaseLiquidityParams: (uint256 tokenId, uint128 liquidity, uint128 amount0Min, uint128 amount1Min, bytes hookData)
+                // liquidity is at offset 32 (after tokenId)
+                if (params[i].length >= 64) {
+                    uint128 liquidity = _readUint128(params[i], 32);
+                    if (liquidity == 0) {
+                        return 4; // CLAIM (fee collection only)
+                    }
+                }
+                return 3; // WITHDRAW (actual liquidity removal)
+            }
+
+            // Burn position is always withdraw
+            if (action == BURN_POSITION) {
                 return 3; // WITHDRAW
             }
         }
@@ -337,5 +351,19 @@ contract UniswapV4Parser is ICalldataParser {
         assembly {
             result := mload(add(add(data, 32), offset))
         }
+    }
+
+    /**
+     * @notice Read a uint128 from a memory bytes array at a given offset
+     * @param data The bytes array
+     * @param offset The offset in bytes
+     */
+    function _readUint128(bytes memory data, uint256 offset) internal pure returns (uint128 result) {
+        require(data.length >= offset + 32, "Out of bounds");
+        uint256 value;
+        assembly {
+            value := mload(add(add(data, 32), offset))
+        }
+        result = uint128(value);
     }
 }
