@@ -343,21 +343,57 @@ async function writeSafeValueToChain(totalValueUSD: bigint): Promise<string> {
 }
 
 /**
+ * Get current on-chain safe value
+ */
+async function getOnChainSafeValue(): Promise<bigint> {
+  try {
+    const [totalValueUSD] = await publicClient.readContract({
+      address: config.moduleAddress,
+      abi: DeFiInteractorModuleABI,
+      functionName: 'getSafeValue',
+    })
+    return totalValueUSD
+  } catch (error) {
+    log(`Error reading on-chain safe value: ${error}`)
+    return 0n
+  }
+}
+
+// Threshold for considering values "equal" (0.1% tolerance to avoid tx for tiny changes)
+const VALUE_CHANGE_THRESHOLD_BPS = 10n // 0.1%
+
+/**
  * Main cron job handler
  */
 async function onCronTrigger() {
   log('=== Safe Value Monitor: Starting check ===')
 
   try {
-    const totalValueUSD = await calculateSafeValue()
-    log(`Total USD Value: $${formatUnits(totalValueUSD, 18)}`)
+    const [totalValueUSD, onChainValue] = await Promise.all([
+      calculateSafeValue(),
+      getOnChainSafeValue(),
+    ])
+    log(`Total USD Value: $${formatUnits(totalValueUSD, 18)} (on-chain: $${formatUnits(onChainValue, 18)})`)
 
-    if (totalValueUSD > 0n) {
-      await writeSafeValueToChain(totalValueUSD)
-    } else {
+    if (totalValueUSD === 0n) {
       log('Skipping write - total value is 0')
+      log('=== Safe Value Monitor: Complete ===')
+      return
     }
 
+    // Check if change is significant (more than 0.1% difference)
+    const diff = totalValueUSD > onChainValue
+      ? totalValueUSD - onChainValue
+      : onChainValue - totalValueUSD
+    const threshold = (onChainValue * VALUE_CHANGE_THRESHOLD_BPS) / 10000n
+
+    if (diff <= threshold) {
+      log(`Skipping write - value change (${formatUnits(diff, 18)}) below threshold (${formatUnits(threshold, 18)})`)
+      log('=== Safe Value Monitor: Complete ===')
+      return
+    }
+
+    await writeSafeValueToChain(totalValueUSD)
     log('=== Safe Value Monitor: Complete ===')
   } catch (error) {
     log(`Error in safe value update: ${error}`)

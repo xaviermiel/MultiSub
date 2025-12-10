@@ -166,6 +166,36 @@ async function getActiveSubaccounts(): Promise<Address[]> {
   }
 }
 
+async function getOnChainSpendingAllowance(subAccount: Address): Promise<bigint> {
+  try {
+    const allowance = await publicClient.readContract({
+      address: config.moduleAddress,
+      abi: DeFiInteractorModuleABI,
+      functionName: 'getSpendingAllowance',
+      args: [subAccount],
+    })
+    return allowance as bigint
+  } catch (error) {
+    log(`Error getting on-chain spending allowance: ${error}`)
+    return 0n
+  }
+}
+
+async function getOnChainAcquiredBalance(subAccount: Address, token: Address): Promise<bigint> {
+  try {
+    const balance = await publicClient.readContract({
+      address: config.moduleAddress,
+      abi: DeFiInteractorModuleABI,
+      functionName: 'getAcquiredBalance',
+      args: [subAccount, token],
+    })
+    return balance as bigint
+  } catch (error) {
+    log(`Error getting on-chain acquired balance: ${error}`)
+    return 0n
+  }
+}
+
 // ============ Event Parsing ============
 
 function parseProtocolExecutionLog(log: Log): ProtocolExecutionEvent {
@@ -485,20 +515,45 @@ async function calculateSpendingAllowance(
 
 // ============ Contract Write ============
 
+// Threshold for considering allowance values "equal" (0% tolerance for allowances)
+const ALLOWANCE_CHANGE_THRESHOLD_BPS = 0n // 0%
+
 async function pushBatchUpdate(
   subAccount: Address,
   newAllowance: bigint,
   acquiredBalances: Map<Address, bigint>
-): Promise<string> {
+): Promise<string | null> {
+  // Get current on-chain values
+  const onChainAllowance = await getOnChainSpendingAllowance(subAccount)
+
+  // Check if allowance change is significant
+  const allowanceDiff = newAllowance > onChainAllowance
+    ? newAllowance - onChainAllowance
+    : onChainAllowance - newAllowance
+  const allowanceThreshold = (onChainAllowance * ALLOWANCE_CHANGE_THRESHOLD_BPS) / 10000n
+  const allowanceChanged = allowanceDiff > allowanceThreshold
+
+  // Check if any acquired balances changed
   const tokens: Address[] = []
   const balances: bigint[] = []
+  let acquiredChanged = false
 
-  for (const [token, balance] of acquiredBalances) {
+  for (const [token, newBalance] of acquiredBalances) {
+    const onChainBalance = await getOnChainAcquiredBalance(subAccount, token)
+    if (newBalance !== onChainBalance) {
+      acquiredChanged = true
+    }
     tokens.push(token)
-    balances.push(balance)
+    balances.push(newBalance)
   }
 
-  log(`Pushing batch update: subAccount=${subAccount}, allowance=${formatUnits(newAllowance, 18)}, tokens=${tokens.length}`)
+  // Skip if no changes
+  if (!allowanceChanged && !acquiredChanged) {
+    log(`Skipping batch update - no changes (allowance: ${formatUnits(onChainAllowance, 18)} -> ${formatUnits(newAllowance, 18)}, tokens: ${tokens.length})`)
+    return null
+  }
+
+  log(`Pushing batch update: subAccount=${subAccount}, allowance=${formatUnits(newAllowance, 18)} (was ${formatUnits(onChainAllowance, 18)}), tokens=${tokens.length}`)
 
   try {
     const hash = await walletClient.writeContract({
