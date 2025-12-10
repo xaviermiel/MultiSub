@@ -3,7 +3,7 @@
 > A secure self-custody DeFi wallet built as a **custom Zodiac module**, combining Safe multisig security with delegated permission-restricted interactions.
 
 [![Solidity](https://img.shields.io/badge/solidity-0.8.20-blue)]()
-[![Tests](https://img.shields.io/badge/tests-49%2F49%20passing-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-109%2F109%20passing-brightgreen)]()
 [![License](https://img.shields.io/badge/license-MIT-blue)]()
 [![Zodiac](https://img.shields.io/badge/zodiac-module-purple)]()
 
@@ -23,11 +23,17 @@ git clone <repository-url>
 cd MultiSub
 forge install && forge build
 
-# 2. Deploy
-forge script script/DeployDeFiModule.s.sol --broadcast
+# 2. Deploy module and enable on Safe
+SAFE_ADDRESS=0x... AUTHORIZED_UPDATER=0x... \
+forge script script/Deploy.s.sol --rpc-url $RPC_URL --broadcast --private-key $DEPLOYER_PRIVATE_KEY
 
-# 3. Configure
-forge script script/SetupDeFiModule.s.sol --broadcast
+# 3. Deploy parsers and register selectors
+SAFE_ADDRESS=0x... DEFI_MODULE_ADDRESS=0x... \
+forge script script/ConfigureParsersAndSelectors.s.sol --rpc-url $RPC_URL --broadcast --private-key $DEPLOYER_PRIVATE_KEY
+
+# 4. Configure sub-accounts
+SAFE_ADDRESS=0x... DEFI_MODULE_ADDRESS=0x... SUB_ACCOUNT_ADDRESS=0x... \
+forge script script/ConfigureSubaccount.s.sol --rpc-url $RPC_URL --broadcast --private-key $DEPLOYER_PRIVATE_KEY
 ```
 
 **Prerequisites**: [Foundry](https://getfoundry.sh/), a deployed [Safe](https://app.safe.global/)
@@ -62,8 +68,8 @@ forge script script/SetupDeFiModule.s.sol --broadcast
 ┌────────────────────────────────────┐
 │      Sub-Accounts (EOAs)           │
 │                                    │
-│  • approveProtocol()               │
 │  • executeOnProtocol()             │
+│  • executeOnProtocolWithValue()    │
 │  • transferToken()                 │
 └────────────────────────────────────┘
 ```
@@ -71,8 +77,8 @@ forge script script/SetupDeFiModule.s.sol --broadcast
 ## Key Features
 
 ### Streamlined Roles
-- **DEFI_EXECUTE_ROLE (1)**: Approve tokens & execute protocol operations
-- **DEFI_TRANSFER_ROLE (2)**: Transfer tokens from Safe
+- **DEFI_EXECUTE_ROLE (1)**: Execute protocol operations (swaps, deposits, withdrawals, claims, approvals)
+- **DEFI_TRANSFER_ROLE (2)**: Transfer tokens out of Safe
 
 ### Acquired Balance Model
 The spending limit mechanism distinguishes between:
@@ -127,9 +133,9 @@ If not configured, sub-accounts use:
 │  ┌─────────────────────────────────────────────────────────┐    │
 │  │              On-Chain Contract                          │    │
 │  │  1. Classify operation from function selector           │    │
-│  │  2. Verify tokenIn/amount match calldata                │    │
+│  │  2. Extract tokenIn/amount from calldata via parser     │    │
 │  │  3. Check & update spending allowance                   │    │
-│  │  4. Execute through Safe                                │    │
+│  │  4. Execute through Safe (exec → avatar)                │    │
 │  │  5. Emit ProtocolExecution event                        │    │
 │  └─────────────────────────────────────────────────────────┘    │
 │       ▼                                                         │
@@ -139,7 +145,7 @@ If not configured, sub-accounts use:
 │  │  2. Track spending in rolling 24h window                │    │
 │  │  3. Match deposits to withdrawals (for acquired status) │    │
 │  │  4. Calculate spending allowances                       │    │
-│  │  5. Update contract state if needed                     │    │
+│  │  5. Update contract state (spendingAllowance, etc.)     │    │
 │  └─────────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────────┘
 ```

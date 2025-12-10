@@ -110,14 +110,14 @@ Day Start:
 │                                                                 │
 │  Sub-Account Wallet                                             │
 │       │                                                         │
-│       │ calls executeOnProtocol(target, data, tokenIn, amount)  │
+│       │ calls executeOnProtocol(target, data)                   │
 │       ▼                                                         │
 │  ┌─────────────────────────────────────────────────────────┐    │
 │  │              On-Chain Contract                          │    │
 │  │  1. Classify operation from function selector           │    │
-│  │  2. Verify tokenIn/amount match calldata                │    │
+│  │  2. Extract tokenIn/amount from calldata via parser     │    │
 │  │  3. Check & update spending allowance                   │    │
-│  │  4. Execute through Safe                                │    │
+│  │  4. Execute through Safe (exec → avatar)                │    │
 │  │  5. Emit ProtocolExecution event                        │    │
 │  └─────────────────────────────────────────────────────────┘    │
 │       │                                                         │
@@ -129,7 +129,7 @@ Day Start:
 │  │  2. Track spending in rolling 24h window                │    │
 │  │  3. Match deposits to withdrawals (for acquired status) │    │
 │  │  4. Calculate spending allowances                       │    │
-│  │  5. Update contract state                               │    │
+│  │  5. Update contract state (spendingAllowance, etc.)     │    │
 │  └─────────────────────────────────────────────────────────┘    │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
@@ -139,8 +139,8 @@ Day Start:
 
 - **Simple enforcement**: Check `spendingCost <= spendingAllowance`
 - **Selector classification**: Determine operation type from function signature
-- **Calldata verification**: Extract and verify token/amount from calldata
-- **Execute through Safe**: Call protocol via `execTransactionFromModule`
+- **Parser-based extraction**: Extract token/amount from calldata via registered parsers
+- **Execute through Safe**: Call protocol via Zodiac Module's `exec()` function
 
 ### Off-Chain Oracle Responsibilities
 
@@ -208,13 +208,11 @@ const calldata = aavePool.interface.encodeFunctionData("supply", [
 
 await module.executeOnProtocol(
   AAVE_POOL,   // target
-  calldata,    // data
-  USDC,        // tokenIn
-  1000e6       // amountIn
+  calldata     // data
 );
 ```
 
-The contract verifies `tokenIn` and `amountIn` match the calldata, so the wallet cannot cheat.
+The contract extracts `tokenIn` and `amountIn` from the calldata via registered parsers, so the wallet cannot lie about what's being spent.
 
 ---
 

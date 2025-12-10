@@ -150,7 +150,7 @@ address public authorizedOracle;
 mapping(address => uint256) public lastOracleUpdate;
 
 /// @notice Maximum age for oracle data before operations are blocked
-uint256 public maxOracleAge = 15 minutes;
+uint256 public maxOracleAge = 60 minutes;
 
 
 // ============ Selector Registry ============
@@ -275,32 +275,34 @@ All protocol interactions go through a single function:
 ```solidity
 function executeOnProtocol(
     address target,
-    bytes calldata data,
-    address tokenIn,
-    uint256 amountIn
-) external nonReentrant whenNotPaused {
+    bytes calldata data
+) external nonReentrant whenNotPaused returns (bytes memory) {
     // 1. Validate permissions
-    require(hasRole(msg.sender, DEFI_EXECUTE_ROLE), "Unauthorized");
-    require(allowedAddresses[msg.sender][target], "Protocol not allowed");
+    if (!hasRole(msg.sender, DEFI_EXECUTE_ROLE)) revert Unauthorized();
     _requireFreshOracle(msg.sender);
 
-    // 2. Classify operation from selector
-    bytes4 selector = bytes4(data[:4]);
-    OperationType opType = selectorType[selector];
+    // 2. Classify operation - prefer parser-based classification for accuracy
+    OperationType opType = _classifyOperation(target, data);
 
     // 3. Route based on type
+    // Note: APPROVE skips allowedAddresses check on target (the token) since
+    // _executeApproveWithCap validates the spender is whitelisted
     if (opType == OperationType.UNKNOWN) {
-        revert UnknownSelector(selector);
+        revert UnknownSelector(bytes4(data[:4]));
+    } else if (opType == OperationType.APPROVE) {
+        return _executeApproveWithCap(msg.sender, target, data);
     }
-    else if (opType == OperationType.WITHDRAW || opType == OperationType.CLAIM) {
-        _executeNoSpendingCheck(msg.sender, target, data, opType);
+
+    // All other operations require target to be whitelisted
+    if (!allowedAddresses[msg.sender][target]) revert AddressNotAllowed();
+
+    if (opType == OperationType.WITHDRAW || opType == OperationType.CLAIM) {
+        return _executeNoSpendingCheck(msg.sender, target, data, opType);
+    } else if (opType == OperationType.DEPOSIT || opType == OperationType.SWAP) {
+        return _executeWithSpendingCheck(msg.sender, target, data, opType);
     }
-    else if (opType == OperationType.DEPOSIT || opType == OperationType.SWAP) {
-        _executeWithSpendingCheck(msg.sender, target, data, tokenIn, amountIn, opType);
-    }
-    else if (opType == OperationType.APPROVE) {
-        _executeApproveWithCap(msg.sender, target, data, tokenIn, amountIn);
-    }
+
+    revert UnknownSelector(bytes4(data[:4]));
 }
 ```
 
@@ -309,27 +311,61 @@ function executeOnProtocol(
 For DEPOSIT and SWAP operations:
 
 ```solidity
-function _executeWithSpendingCheck(...) internal {
-    // 1. Verify tokenIn/amountIn match calldata (can't lie)
+function _executeWithSpendingCheck(
+    address subAccount,
+    address target,
+    bytes calldata data,
+    OperationType opType
+) internal returns (bytes memory) {
+    // 1. Parser is REQUIRED to extract token/amount from calldata
     ICalldataParser parser = protocolParsers[target];
-    require(parser.extractInputToken(data) == tokenIn, "Token mismatch");
-    require(parser.extractInputAmount(data) == amountIn, "Amount mismatch");
+    if (address(parser) == address(0)) {
+        revert NoParserRegistered(target);
+    }
 
-    // 2. Calculate cost (acquired balance is free)
+    // 2. Validate recipient is the Safe to prevent fund theft
+    address recipient = parser.extractRecipient(target, data, avatar);
+    if (recipient != avatar) {
+        revert InvalidRecipient(recipient, avatar);
+    }
+
+    // 3. Extract token and amount from calldata via parser
+    address tokenIn = parser.extractInputToken(target, data);
+    uint256 amountIn = parser.extractInputAmount(target, data);
+
+    // 4. Calculate spending cost (acquired balance is free)
     uint256 acquired = acquiredBalance[subAccount][tokenIn];
     uint256 fromOriginal = amountIn > acquired ? amountIn - acquired : 0;
     uint256 spendingCost = _estimateTokenValueUSD(tokenIn, fromOriginal);
 
-    // 3. Check allowance
-    require(spendingCost <= spendingAllowance[subAccount], "Exceeds allowance");
+    // 5. Check spending allowance
+    if (spendingCost > spendingAllowance[subAccount]) {
+        revert ExceedsSpendingLimit();
+    }
 
-    // 4. Deduct
+    // 6. Deduct spending and acquired balance
     spendingAllowance[subAccount] -= spendingCost;
-    acquiredBalance[subAccount][tokenIn] -= min(amountIn, acquired);
+    uint256 usedFromAcquired = amountIn > acquired ? acquired : amountIn;
+    acquiredBalance[subAccount][tokenIn] -= usedFromAcquired;
 
-    // 5. Execute and emit event for oracle
-    exec(target, 0, data, Enum.Operation.Call);
-    emit ProtocolExecution(...);
+    // 7. Capture balance before for output tracking
+    address tokenOut = _getOutputToken(target, data, parser);
+    uint256 balanceBefore = tokenOut != address(0) ? IERC20(tokenOut).balanceOf(avatar) : 0;
+
+    // 8. Execute
+    bool success = exec(target, 0, data, ISafe.Operation.Call);
+    if (!success) revert TransactionFailed();
+
+    // 9. Calculate output amount
+    uint256 amountOut = 0;
+    if (tokenOut != address(0)) {
+        amountOut = IERC20(tokenOut).balanceOf(avatar) - balanceBefore;
+    }
+
+    // 10. Emit event for oracle
+    emit ProtocolExecution(subAccount, target, opType, tokenIn, amountIn, tokenOut, amountOut, spendingCost);
+
+    return "";
 }
 ```
 
@@ -338,19 +374,52 @@ function _executeWithSpendingCheck(...) internal {
 For WITHDRAW and CLAIM operations:
 
 ```solidity
-function _executeNoSpendingCheck(...) internal {
-    // 1. Get output token from parser
-    address outputToken = protocolParsers[target].extractOutputToken(data);
-    uint256 balanceBefore = IERC20(outputToken).balanceOf(avatar);
+function _executeNoSpendingCheck(
+    address subAccount,
+    address target,
+    bytes calldata data,
+    OperationType opType
+) internal returns (bytes memory) {
+    // 1. Parser is required for WITHDRAW/CLAIM to track output tokens for acquired balance
+    ICalldataParser parser = protocolParsers[target];
+    if (address(parser) == address(0)) {
+        revert NoParserRegistered(target);
+    }
 
-    // 2. Execute (NO spending check)
-    exec(target, 0, data, Enum.Operation.Call);
+    // 2. Validate recipient is the Safe to prevent fund theft
+    address recipient = parser.extractRecipient(target, data, avatar);
+    if (recipient != avatar) {
+        revert InvalidRecipient(recipient, avatar);
+    }
 
-    // 3. Emit event for oracle to:
-    //    - Mark received as acquired if matched to deposit (WITHDRAW)
-    //    - Mark received as acquired if from subaccount's tx in 24h (CLAIM)
-    uint256 received = IERC20(outputToken).balanceOf(avatar) - balanceBefore;
-    emit ProtocolExecution(...);
+    // 3. Get output token from parser (parser may query vault for ERC4626)
+    address tokenOut = parser.extractOutputToken(target, data);
+    uint256 balanceBefore = tokenOut != address(0) ? IERC20(tokenOut).balanceOf(avatar) : 0;
+
+    // 4. Execute (NO spending check - withdrawals and claims are free)
+    bool success = exec(target, 0, data, ISafe.Operation.Call);
+    if (!success) revert TransactionFailed();
+
+    // 5. Calculate received amount
+    uint256 amountOut = 0;
+    if (tokenOut != address(0)) {
+        amountOut = IERC20(tokenOut).balanceOf(avatar) - balanceBefore;
+    }
+
+    // 6. Emit event for oracle to:
+    //    - Mark received as acquired if matched to deposit (both WITHDRAW and CLAIM)
+    emit ProtocolExecution(
+        subAccount,
+        target,
+        opType,
+        address(0), // no tokenIn for withdraw/claim
+        0,          // no amountIn
+        tokenOut,
+        amountOut,
+        0           // no spending cost
+    );
+
+    return "";
 }
 ```
 
@@ -361,29 +430,56 @@ For APPROVE operations (ERC20 approve/increaseAllowance):
 ```solidity
 function _executeApproveWithCap(
     address subAccount,
-    address target,      // The token contract
-    bytes calldata data,
-    address tokenIn,     // Same as target for approve
-    uint256 amountIn     // Approval amount
-) internal {
-    // 1. Extract spender from calldata (the protocol being approved)
-    address spender = _extractApproveSpender(data);
-    require(allowedAddresses[subAccount][spender], "Spender not allowed");
-
-    // 2. Check cap: acquired tokens unlimited, original capped by spending allowance
-    uint256 acquired = acquiredBalance[subAccount][tokenIn];
-
-    if (amountIn > acquired) {
-        // Portion from original tokens - must fit in spending allowance
-        uint256 originalPortion = amountIn - acquired;
-        uint256 originalValueUSD = _estimateTokenValueUSD(tokenIn, originalPortion);
-        require(originalValueUSD <= spendingAllowance[subAccount], "Approval exceeds limit");
+    address target,  // The token contract being approved
+    bytes calldata data
+) internal returns (bytes memory) {
+    // 1. Extract spender and amount from calldata
+    // approve(address spender, uint256 amount) - spender is first arg, amount is second
+    address spender;
+    uint256 amount;
+    assembly {
+        // Skip selector (4 bytes), load first 32 bytes of args (spender)
+        spender := calldataload(add(data.offset, 4))
+        // Load second 32 bytes of args (amount)
+        amount := calldataload(add(data.offset, 36))
     }
 
-    // 3. Execute approve - does NOT deduct spending (deducted at swap/deposit)
-    exec(target, 0, data, Enum.Operation.Call);
+    // 2. Verify spender is whitelisted
+    if (!allowedAddresses[subAccount][spender]) {
+        revert SpenderNotAllowed();
+    }
 
-    emit ProtocolExecution(subAccount, target, OperationType.APPROVE, ...);
+    // 3. Check cap: acquired tokens unlimited, original capped by spending allowance
+    // For approve, target IS the token being approved
+    address tokenIn = target;
+    uint256 acquired = acquiredBalance[subAccount][tokenIn];
+
+    if (amount > acquired) {
+        // Portion from original tokens - must fit in spending allowance
+        uint256 originalPortion = amount - acquired;
+        uint256 originalValueUSD = _estimateTokenValueUSD(tokenIn, originalPortion);
+        if (originalValueUSD > spendingAllowance[subAccount]) {
+            revert ApprovalExceedsLimit();
+        }
+    }
+
+    // 4. Execute approve - does NOT deduct spending (deducted at swap/deposit)
+    bool success = exec(target, 0, data, ISafe.Operation.Call);
+    if (!success) revert ApprovalFailed();
+
+    // 5. Emit event
+    emit ProtocolExecution(
+        subAccount,
+        target,
+        OperationType.APPROVE,
+        tokenIn,
+        amount,
+        address(0),
+        0,
+        0 // No spending cost for approve
+    );
+
+    return "";
 }
 ```
 
@@ -402,24 +498,43 @@ function transferToken(
     address token,
     address recipient,
     uint256 amount
-) external nonReentrant whenNotPaused {
-    require(hasRole(msg.sender, DEFI_TRANSFER_ROLE), "Unauthorized");
+) external nonReentrant whenNotPaused returns (bool) {
+    if (!hasRole(msg.sender, DEFI_TRANSFER_ROLE)) revert Unauthorized();
+    if (token == address(0) || recipient == address(0)) revert InvalidAddress();
     _requireFreshOracle(msg.sender);
 
-    // Always costs full spending (value leaves Safe)
+    // Transfers always cost full spending (value leaves Safe)
     uint256 spendingCost = _estimateTokenValueUSD(token, amount);
-    require(spendingCost <= spendingAllowance[msg.sender], "Exceeds allowance");
+    if (spendingCost > spendingAllowance[msg.sender]) {
+        revert ExceedsSpendingLimit();
+    }
 
     spendingAllowance[msg.sender] -= spendingCost;
 
-    // Execute
-    exec(token, 0, abi.encodeCall(IERC20.transfer, (recipient, amount)), Enum.Operation.Call);
+    // Also deduct from acquired if available
+    uint256 acquired = acquiredBalance[msg.sender][token];
+    if (acquired > 0) {
+        uint256 deductFromAcquired = amount > acquired ? acquired : amount;
+        acquiredBalance[msg.sender][token] -= deductFromAcquired;
+    }
 
-    emit ProtocolExecution(msg.sender, token, OperationType.TRANSFER, ...);
+    // Execute transfer
+    bytes memory transferData = abi.encodeWithSelector(
+        IERC20.transfer.selector,
+        recipient,
+        amount
+    );
+
+    bool success = exec(token, 0, transferData, ISafe.Operation.Call);
+    if (!success) revert TransactionFailed();
+
+    emit TransferExecuted(msg.sender, token, recipient, amount, spendingCost);
+
+    return true;
 }
 ```
 
-### 4.6 Oracle Updates State
+### 4.7 Oracle Updates State
 
 The oracle monitors `ProtocolExecution` events and updates:
 
@@ -1374,9 +1489,9 @@ The core use case for this protocol is enabling sub-accounts to manage liquidity
 │  │  ┌─────────────────────────────────────────────────────────────┐   │   │
 │  │  │  On-Chain Logic (Secure Enforcement - See Section 13)       │   │   │
 │  │  │  • Classify operation from selector                         │   │   │
-│  │  │  • Verify tokenIn/amountIn from calldata                    │   │   │
+│  │  │  • Extract tokenIn/amountIn from calldata via parser        │   │   │
 │  │  │  • Check: spendingCost <= spendingAllowance                 │   │   │
-│  │  │  • Execute through Safe                                     │   │   │
+│  │  │  • Execute through Safe (exec → avatar)                     │   │   │
 │  │  │  • Emit ProtocolExecution events                            │   │   │
 │  │  └─────────────────────────────────────────────────────────────┘   │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
@@ -1417,7 +1532,7 @@ address public authorizedOracle;
 mapping(address => uint256) public lastOracleUpdate;
 
 /// @notice Maximum age for oracle data before operations are blocked
-uint256 public maxOracleAge = 15 minutes;
+uint256 public maxOracleAge = 60 minutes;
 
 
 // ============ Oracle Update Functions ============
@@ -2280,33 +2395,39 @@ bytes4 constant COMPOUND_CLAIM = bytes4(keccak256("claim(address,address,bool)")
 
 ```solidity
 /// @notice Execute any protocol interaction with automatic classification
-/// @param target Protocol address (must be in allowedAddresses)
+/// @param target Protocol address (must be in allowedAddresses for non-APPROVE ops)
 /// @param data Calldata for the protocol call
-/// @param tokenIn Token being spent (for DEPOSIT/SWAP, verified against calldata)
-/// @param amountIn Amount being spent (for DEPOSIT/SWAP, verified against calldata)
+/// @dev Token and amount are extracted from calldata via registered parsers
 function executeOnProtocol(
     address target,
-    bytes calldata data,
-    address tokenIn,
-    uint256 amountIn
-) external nonReentrant whenNotPaused {
-    require(hasRole(msg.sender, DEFI_EXECUTE_ROLE), "Unauthorized");
-    require(allowedAddresses[msg.sender][target], "Protocol not allowed");
+    bytes calldata data
+) external nonReentrant whenNotPaused returns (bytes memory) {
+    // 1. Validate permissions
+    if (!hasRole(msg.sender, DEFI_EXECUTE_ROLE)) revert Unauthorized();
+    _requireFreshOracle(msg.sender);
 
-    // 1. Classify operation from selector
-    bytes4 selector = bytes4(data[:4]);
-    OperationType opType = selectorType[selector];
+    // 2. Classify operation - prefer parser-based classification for accuracy
+    OperationType opType = _classifyOperation(target, data);
 
-    // 2. Route based on operation type
+    // 3. Route based on operation type
+    // Note: APPROVE skips allowedAddresses check on target (the token) since
+    // _executeApproveWithCap validates the spender is whitelisted
     if (opType == OperationType.UNKNOWN) {
-        revert UnknownSelector(selector);
+        revert UnknownSelector(bytes4(data[:4]));
+    } else if (opType == OperationType.APPROVE) {
+        return _executeApproveWithCap(msg.sender, target, data);
     }
-    else if (opType == OperationType.WITHDRAW || opType == OperationType.CLAIM) {
-        _executeNoSpendingCheck(msg.sender, target, data, opType);
+
+    // All other operations require target to be whitelisted
+    if (!allowedAddresses[msg.sender][target]) revert AddressNotAllowed();
+
+    if (opType == OperationType.WITHDRAW || opType == OperationType.CLAIM) {
+        return _executeNoSpendingCheck(msg.sender, target, data, opType);
+    } else if (opType == OperationType.DEPOSIT || opType == OperationType.SWAP) {
+        return _executeWithSpendingCheck(msg.sender, target, data, opType);
     }
-    else if (opType == OperationType.DEPOSIT || opType == OperationType.SWAP) {
-        _executeWithSpendingCheck(msg.sender, target, data, tokenIn, amountIn, opType);
-    }
+
+    revert UnknownSelector(bytes4(data[:4]));
 }
 ```
 
@@ -2320,40 +2441,47 @@ function _executeNoSpendingCheck(
     address target,
     bytes calldata data,
     OperationType opType
-) internal {
-    // Get expected output token from calldata parser
+) internal returns (bytes memory) {
+    // 1. Parser is required for WITHDRAW/CLAIM to track output tokens for acquired balance
     ICalldataParser parser = protocolParsers[target];
-    address outputToken = address(0);
-    uint256 balanceBefore = 0;
-
-    if (address(parser) != address(0)) {
-        outputToken = parser.extractOutputToken(data);
-        balanceBefore = IERC20(outputToken).balanceOf(avatar);
+    if (address(parser) == address(0)) {
+        revert NoParserRegistered(target);
     }
 
-    // Execute - NO spending check
-    exec(target, 0, data, Enum.Operation.Call);
-
-    // Calculate received
-    uint256 received = 0;
-    if (outputToken != address(0)) {
-        received = IERC20(outputToken).balanceOf(avatar) - balanceBefore;
+    // 2. Validate recipient is the Safe to prevent fund theft
+    address recipient = parser.extractRecipient(target, data, avatar);
+    if (recipient != avatar) {
+        revert InvalidRecipient(recipient, avatar);
     }
 
-    // Emit event for oracle to:
-    // - Add received tokens as "acquired" if matched to deposit (both WITHDRAW and CLAIM)
-    // - Note: Spending is one-way (no recovery on withdrawals)
+    // 3. Get output token from parser (parser may query vault for ERC4626)
+    address tokenOut = parser.extractOutputToken(target, data);
+    uint256 balanceBefore = tokenOut != address(0) ? IERC20(tokenOut).balanceOf(avatar) : 0;
+
+    // 4. Execute (NO spending check - withdrawals and claims are free)
+    bool success = exec(target, 0, data, ISafe.Operation.Call);
+    if (!success) revert TransactionFailed();
+
+    // 5. Calculate received amount
+    uint256 amountOut = 0;
+    if (tokenOut != address(0)) {
+        amountOut = IERC20(tokenOut).balanceOf(avatar) - balanceBefore;
+    }
+
+    // 6. Emit event for oracle to:
+    //    - Mark received as acquired if matched to deposit (both WITHDRAW and CLAIM)
     emit ProtocolExecution(
         subAccount,
         target,
         opType,
-        address(0),  // No token spent
-        0,           // No amount spent
-        outputToken,
-        received,
-        0,           // No spending cost
-        block.timestamp
+        address(0), // no tokenIn for withdraw/claim
+        0,          // no amountIn
+        tokenOut,
+        amountOut,
+        0           // no spending cost
     );
+
+    return "";
 }
 ```
 
@@ -2364,69 +2492,57 @@ function _executeWithSpendingCheck(
     address subAccount,
     address target,
     bytes calldata data,
-    address tokenIn,
-    uint256 amountIn,
     OperationType opType
-) internal {
-    // 1. Get parser and verify tokenIn/amountIn match calldata
+) internal returns (bytes memory) {
+    // 1. Parser is REQUIRED to extract token/amount from calldata
     ICalldataParser parser = protocolParsers[target];
-    require(address(parser) != address(0), "No parser for protocol");
+    if (address(parser) == address(0)) {
+        revert NoParserRegistered(target);
+    }
 
-    address extractedToken = parser.extractInputToken(data);
-    uint256 extractedAmount = parser.extractInputAmount(data);
+    // 2. Validate recipient is the Safe to prevent fund theft
+    address recipient = parser.extractRecipient(target, data, avatar);
+    if (recipient != avatar) {
+        revert InvalidRecipient(recipient, avatar);
+    }
 
-    require(extractedToken == tokenIn, "Token mismatch - verify calldata");
-    require(extractedAmount == amountIn, "Amount mismatch - verify calldata");
+    // 3. Extract token and amount from calldata via parser
+    address tokenIn = parser.extractInputToken(target, data);
+    uint256 amountIn = parser.extractInputAmount(target, data);
 
-    // 2. Calculate spending cost (acquired balance is free)
+    // 4. Calculate spending cost (acquired balance is free)
     uint256 acquired = acquiredBalance[subAccount][tokenIn];
     uint256 fromOriginal = amountIn > acquired ? amountIn - acquired : 0;
     uint256 spendingCost = _estimateTokenValueUSD(tokenIn, fromOriginal);
 
-    // 3. Check spending allowance
-    require(spendingCost <= spendingAllowance[subAccount], "Exceeds spending allowance");
+    // 5. Check spending allowance
+    if (spendingCost > spendingAllowance[subAccount]) {
+        revert ExceedsSpendingLimit();
+    }
 
-    // 4. Deduct from allowance
+    // 6. Deduct spending and acquired balance
     spendingAllowance[subAccount] -= spendingCost;
+    uint256 usedFromAcquired = amountIn > acquired ? acquired : amountIn;
+    acquiredBalance[subAccount][tokenIn] -= usedFromAcquired;
 
-    // 5. Deduct from acquired balance
-    if (amountIn <= acquired) {
-        acquiredBalance[subAccount][tokenIn] -= amountIn;
-    } else {
-        acquiredBalance[subAccount][tokenIn] = 0;
+    // 7. Capture balance before for output tracking
+    address tokenOut = _getOutputToken(target, data, parser);
+    uint256 balanceBefore = tokenOut != address(0) ? IERC20(tokenOut).balanceOf(avatar) : 0;
+
+    // 8. Execute
+    bool success = exec(target, 0, data, ISafe.Operation.Call);
+    if (!success) revert TransactionFailed();
+
+    // 9. Calculate output amount
+    uint256 amountOut = 0;
+    if (tokenOut != address(0)) {
+        amountOut = IERC20(tokenOut).balanceOf(avatar) - balanceBefore;
     }
 
-    // 6. Snapshot output token (for swaps)
-    address outputToken = address(0);
-    uint256 outputBefore = 0;
-    if (opType == OperationType.SWAP) {
-        outputToken = parser.extractOutputToken(data);
-        if (outputToken != address(0)) {
-            outputBefore = IERC20(outputToken).balanceOf(avatar);
-        }
-    }
+    // 10. Emit event for oracle
+    emit ProtocolExecution(subAccount, target, opType, tokenIn, amountIn, tokenOut, amountOut, spendingCost);
 
-    // 7. Execute
-    exec(target, 0, data, Enum.Operation.Call);
-
-    // 8. Calculate output received (for swaps)
-    uint256 outputReceived = 0;
-    if (outputToken != address(0)) {
-        outputReceived = IERC20(outputToken).balanceOf(avatar) - outputBefore;
-    }
-
-    // 9. Emit event for oracle
-    emit ProtocolExecution(
-        subAccount,
-        target,
-        opType,
-        tokenIn,
-        amountIn,
-        outputToken,
-        outputReceived,
-        spendingCost,
-        block.timestamp
-    );
+    return "";
 }
 ```
 
@@ -2437,13 +2553,34 @@ Each supported protocol needs a parser to extract token/amount from calldata:
 ```solidity
 interface ICalldataParser {
     /// @notice Extract the input token from calldata
-    function extractInputToken(bytes calldata data) external pure returns (address);
+    /// @param target The protocol/vault address being called
+    /// @param data The calldata to parse
+    function extractInputToken(address target, bytes calldata data) external view returns (address token);
 
     /// @notice Extract the input amount from calldata
-    function extractInputAmount(bytes calldata data) external pure returns (uint256);
+    /// @param target The protocol/vault address being called
+    /// @param data The calldata to parse
+    function extractInputAmount(address target, bytes calldata data) external view returns (uint256 amount);
 
     /// @notice Extract the output token from calldata (for swaps/withdrawals)
-    function extractOutputToken(bytes calldata data) external pure returns (address);
+    /// @param target The protocol/vault address being called
+    /// @param data The calldata to parse
+    function extractOutputToken(address target, bytes calldata data) external view returns (address token);
+
+    /// @notice Extract the recipient address from calldata
+    /// @param target The protocol/vault address being called
+    /// @param data The calldata to parse
+    /// @param defaultRecipient The default recipient (Safe address) to use when recipient is not explicit
+    /// @dev Module validates that recipient == Safe address to prevent fund theft
+    function extractRecipient(address target, bytes calldata data, address defaultRecipient) external view returns (address recipient);
+
+    /// @notice Check if this parser supports the given selector
+    function supportsSelector(bytes4 selector) external pure returns (bool supported);
+
+    /// @notice Get the operation type for the given calldata
+    /// @return opType 1=SWAP, 2=DEPOSIT, 3=WITHDRAW, 4=CLAIM, 5=APPROVE
+    /// @dev Essential for protocols with single entry points (e.g., Uniswap V4's modifyLiquidities)
+    function getOperationType(bytes calldata data) external pure returns (uint8 opType);
 }
 
 // Registry of parsers per protocol
