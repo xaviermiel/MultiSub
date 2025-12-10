@@ -354,8 +354,8 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         _setupSubAccount(subAccount1);
         module.updateSpendingAllowance(subAccount1, 10000 * 10**18);
 
-        // Fast forward past oracle staleness
-        vm.warp(block.timestamp + 16 minutes);
+        // Fast forward past oracle staleness (maxOracleAge is 60 minutes)
+        vm.warp(block.timestamp + 61 minutes);
 
         bytes memory data = abi.encodeWithSignature("deposit(uint256,address)", 1000 * 10**18, address(safe));
 
@@ -466,8 +466,8 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         // Setup initial state
         module.updateSafeValue(1_000_000 * 10**18);
 
-        // Fast forward past Safe value staleness threshold (15 min default)
-        vm.warp(block.timestamp + 16 minutes);
+        // Fast forward past Safe value staleness threshold (maxSafeValueAge is 60 minutes)
+        vm.warp(block.timestamp + 61 minutes);
 
         // Try to update spending allowance - should fail due to stale Safe value
         vm.expectRevert(DeFiInteractorModule.StalePortfolioValue.selector);
@@ -478,8 +478,8 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         // Setup initial state
         module.updateSafeValue(1_000_000 * 10**18);
 
-        // Fast forward past Safe value staleness threshold
-        vm.warp(block.timestamp + 16 minutes);
+        // Fast forward past Safe value staleness threshold (maxSafeValueAge is 60 minutes)
+        vm.warp(block.timestamp + 61 minutes);
 
         address[] memory tokens = new address[](0);
         uint256[] memory balances = new uint256[](0);
