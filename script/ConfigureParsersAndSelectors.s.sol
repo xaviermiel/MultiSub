@@ -42,10 +42,10 @@ contract ConfigureParsersAndSelectors is Script, SafeTxHelper {
     bytes4 constant AAVE_WITHDRAW = 0x69328dec;
     bytes4 constant AAVE_BORROW = 0xa415bcad;
     bytes4 constant AAVE_REPAY = 0x573ade81;
-    bytes4 constant AAVE_CLAIM_REWARDS = 0x3111e7b3;
-    bytes4 constant AAVE_CLAIM_REWARDS_ON_BEHALF = 0x9a99b4f0;
-    bytes4 constant AAVE_CLAIM_ALL_REWARDS = 0x74d945ec;
-    bytes4 constant AAVE_CLAIM_ALL_ON_BEHALF = 0x0c3fea64;
+    bytes4 constant AAVE_CLAIM_REWARDS = 0x236300dc;            // claimRewards(address[],uint256,address,address)
+    bytes4 constant AAVE_CLAIM_REWARDS_ON_BEHALF = 0x33028b99;  // claimRewardsOnBehalf(address[],uint256,address,address,address)
+    bytes4 constant AAVE_CLAIM_ALL_REWARDS = 0xbb492bf5;        // claimAllRewards(address[],address)
+    bytes4 constant AAVE_CLAIM_ALL_ON_BEHALF = 0x9ff55db9;      // claimAllRewardsOnBehalf(address[],address,address)
     bytes4 constant EXACT_INPUT_SINGLE = 0x414bf389;
     bytes4 constant EXACT_INPUT = 0xc04b8d59;
     bytes4 constant EXACT_OUTPUT_SINGLE = 0xdb3e2198;
