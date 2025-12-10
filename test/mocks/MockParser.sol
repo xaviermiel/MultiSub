@@ -28,6 +28,11 @@ contract MockParser {
         return tokenAddress;
     }
 
+    function extractRecipient(address, bytes calldata data, address) external pure returns (address recipient) {
+        // deposit(uint256,address) and withdraw(uint256,address) - recipient is second param
+        (, recipient) = abi.decode(data[4:], (uint256, address));
+    }
+
     function supportsSelector(bytes4 selector) external pure returns (bool) {
         return selector == DEPOSIT_SELECTOR || selector == WITHDRAW_SELECTOR;
     }

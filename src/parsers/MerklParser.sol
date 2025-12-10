@@ -56,6 +56,24 @@ contract MerklParser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
+    function extractRecipient(address, bytes calldata data, address) external pure override returns (address recipient) {
+        bytes4 selector = bytes4(data[:4]);
+
+        if (selector == CLAIM_SELECTOR) {
+            // claim(address[] users, address[] tokens, uint256[] amounts, bytes32[][] proofs)
+            // In Merkl, the 'users' array contains the recipients of the rewards
+            // Return the first user as the recipient
+            (address[] memory users,,,) = abi.decode(data[4:], (address[], address[], uint256[], bytes32[][]));
+
+            if (users.length > 0) {
+                return users[0];
+            }
+            revert UnsupportedSelector();
+        }
+        revert UnsupportedSelector();
+    }
+
+    /// @inheritdoc ICalldataParser
     function supportsSelector(bytes4 selector) external pure override returns (bool) {
         return selector == CLAIM_SELECTOR;
     }

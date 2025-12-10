@@ -153,6 +153,43 @@ contract UniswapV4Parser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
+    function extractRecipient(address, bytes calldata data, address defaultRecipient) external pure override returns (address recipient) {
+        bytes4 selector = bytes4(data[:4]);
+        if (selector != MODIFY_LIQUIDITIES_SELECTOR) revert UnsupportedSelector();
+
+        (bytes memory unlockData,) = abi.decode(data[4:], (bytes, uint256));
+        (bytes memory actions, bytes[] memory params) = _decodeActionsAndParams(unlockData);
+
+        // Find TAKE, TAKE_PAIR, or SWEEP action to get recipient
+        for (uint256 i = 0; i < actions.length; i++) {
+            uint8 action = uint8(actions[i]);
+
+            if (action == TAKE || action == TAKE_ALL || action == TAKE_PORTION) {
+                // TAKE params: (Currency currency, address recipient, uint256 amount)
+                if (params[i].length >= 64) {
+                    recipient = _readAddress(params[i], 32);
+                    return recipient;
+                }
+            } else if (action == TAKE_PAIR) {
+                // TAKE_PAIR params: (Currency currency0, Currency currency1, address recipient)
+                if (params[i].length >= 96) {
+                    recipient = _readAddress(params[i], 64);
+                    return recipient;
+                }
+            } else if (action == SWEEP) {
+                // SWEEP params: (Currency currency, address recipient)
+                if (params[i].length >= 64) {
+                    recipient = _readAddress(params[i], 32);
+                    return recipient;
+                }
+            }
+        }
+
+        // No explicit recipient found, use default (Safe address)
+        return defaultRecipient;
+    }
+
+    /// @inheritdoc ICalldataParser
     function supportsSelector(bytes4 selector) external pure override returns (bool) {
         return selector == MODIFY_LIQUIDITIES_SELECTOR;
     }

@@ -198,6 +198,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     error CannotRegisterUnknown();
     error LengthMismatch();
     error ExceedsMaxBps();
+    error InvalidRecipient(address recipient, address expected);
 
     // ============ Modifiers ============
 
@@ -447,40 +448,46 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             revert NoParserRegistered(target);
         }
 
-        // 2. Extract token and amount from calldata via parser
+        // 2. Validate recipient is the Safe to prevent fund theft
+        address recipient = parser.extractRecipient(target, data, avatar);
+        if (recipient != avatar) {
+            revert InvalidRecipient(recipient, avatar);
+        }
+
+        // 3. Extract token and amount from calldata via parser
         address tokenIn = parser.extractInputToken(target, data);
         uint256 amountIn = parser.extractInputAmount(target, data);
 
-        // 3. Calculate spending cost (acquired balance is free)
+        // 4. Calculate spending cost (acquired balance is free)
         uint256 acquired = acquiredBalance[subAccount][tokenIn];
         uint256 fromOriginal = amountIn > acquired ? amountIn - acquired : 0;
         uint256 spendingCost = _estimateTokenValueUSD(tokenIn, fromOriginal);
 
-        // 4. Check spending allowance
+        // 5. Check spending allowance
         if (spendingCost > spendingAllowance[subAccount]) {
             revert ExceedsSpendingLimit();
         }
 
-        // 5. Deduct spending and acquired balance
+        // 6. Deduct spending and acquired balance
         spendingAllowance[subAccount] -= spendingCost;
         uint256 usedFromAcquired = amountIn > acquired ? acquired : amountIn;
         acquiredBalance[subAccount][tokenIn] -= usedFromAcquired;
 
-        // 6. Capture balance before for output tracking
+        // 7. Capture balance before for output tracking
         address tokenOut = _getOutputToken(target, data, parser);
         uint256 balanceBefore = tokenOut != address(0) ? IERC20(tokenOut).balanceOf(avatar) : 0;
 
-        // 7. Execute
+        // 8. Execute
         bool success = exec(target, 0, data, ISafe.Operation.Call);
         if (!success) revert TransactionFailed();
 
-        // 8. Calculate output amount
+        // 9. Calculate output amount
         uint256 amountOut = 0;
         if (tokenOut != address(0)) {
             amountOut = IERC20(tokenOut).balanceOf(avatar) - balanceBefore;
         }
 
-        // 9. Emit event for oracle
+        // 10. Emit event for oracle
         emit ProtocolExecution(
             subAccount,
             target,
@@ -508,45 +515,51 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             revert NoParserRegistered(target);
         }
 
-        // 2. Extract token and amount from calldata via parser
+        // 2. Validate recipient is the Safe to prevent fund theft
+        address recipient = parser.extractRecipient(target, data, avatar);
+        if (recipient != avatar) {
+            revert InvalidRecipient(recipient, avatar);
+        }
+
+        // 3. Extract token and amount from calldata via parser
         address tokenIn = parser.extractInputToken(target, data);
         uint256 amountIn = parser.extractInputAmount(target, data);
 
-        // 3. For ETH swaps, use native ETH (address(0)) and the msg.value
+        // 4. For ETH swaps, use native ETH (address(0)) and the msg.value
         if (tokenIn == address(0) && value > 0) {
             amountIn = value;
         }
 
-        // 4. Calculate spending cost (acquired balance is free)
+        // 5. Calculate spending cost (acquired balance is free)
         uint256 acquired = acquiredBalance[subAccount][tokenIn];
         uint256 fromOriginal = amountIn > acquired ? amountIn - acquired : 0;
         uint256 spendingCost = _estimateTokenValueUSD(tokenIn, fromOriginal);
 
-        // 5. Check spending allowance
+        // 6. Check spending allowance
         if (spendingCost > spendingAllowance[subAccount]) {
             revert ExceedsSpendingLimit();
         }
 
-        // 6. Deduct spending and acquired balance
+        // 7. Deduct spending and acquired balance
         spendingAllowance[subAccount] -= spendingCost;
         uint256 usedFromAcquired = amountIn > acquired ? acquired : amountIn;
         acquiredBalance[subAccount][tokenIn] -= usedFromAcquired;
 
-        // 7. Capture balance before for output tracking
+        // 8. Capture balance before for output tracking
         address tokenOut = _getOutputToken(target, data, parser);
         uint256 balanceBefore = tokenOut != address(0) ? IERC20(tokenOut).balanceOf(avatar) : 0;
 
-        // 8. Execute with value
+        // 9. Execute with value
         bool success = exec(target, value, data, ISafe.Operation.Call);
         if (!success) revert TransactionFailed();
 
-        // 9. Calculate output amount
+        // 10. Calculate output amount
         uint256 amountOut = 0;
         if (tokenOut != address(0)) {
             amountOut = IERC20(tokenOut).balanceOf(avatar) - balanceBefore;
         }
 
-        // 10. Emit event for oracle
+        // 11. Emit event for oracle
         emit ProtocolExecution(
             subAccount,
             target,
@@ -575,21 +588,27 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             revert NoParserRegistered(target);
         }
 
-        // 2. Get output token from parser (parser may query vault for ERC4626)
+        // 2. Validate recipient is the Safe to prevent fund theft
+        address recipient = parser.extractRecipient(target, data, avatar);
+        if (recipient != avatar) {
+            revert InvalidRecipient(recipient, avatar);
+        }
+
+        // 3. Get output token from parser (parser may query vault for ERC4626)
         address tokenOut = parser.extractOutputToken(target, data);
         uint256 balanceBefore = tokenOut != address(0) ? IERC20(tokenOut).balanceOf(avatar) : 0;
 
-        // 3. Execute (NO spending check - withdrawals and claims are free)
+        // 4. Execute (NO spending check - withdrawals and claims are free)
         bool success = exec(target, 0, data, ISafe.Operation.Call);
         if (!success) revert TransactionFailed();
 
-        // 4. Calculate received amount
+        // 5. Calculate received amount
         uint256 amountOut = 0;
         if (tokenOut != address(0)) {
             amountOut = IERC20(tokenOut).balanceOf(avatar) - balanceBefore;
         }
 
-        // 5. Emit event for oracle to:
+        // 6. Emit event for oracle to:
         //    - Mark received as acquired if matched to deposit (both WITHDRAW and CLAIM)
         emit ProtocolExecution(
             subAccount,
@@ -618,21 +637,27 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             revert NoParserRegistered(target);
         }
 
-        // 2. Get output token from parser (parser may query vault for ERC4626)
+        // 2. Validate recipient is the Safe to prevent fund theft
+        address recipient = parser.extractRecipient(target, data, avatar);
+        if (recipient != avatar) {
+            revert InvalidRecipient(recipient, avatar);
+        }
+
+        // 3. Get output token from parser (parser may query vault for ERC4626)
         address tokenOut = parser.extractOutputToken(target, data);
         uint256 balanceBefore = tokenOut != address(0) ? IERC20(tokenOut).balanceOf(avatar) : 0;
 
-        // 3. Execute with value (NO spending check - withdrawals and claims are free)
+        // 4. Execute with value (NO spending check - withdrawals and claims are free)
         bool success = exec(target, value, data, ISafe.Operation.Call);
         if (!success) revert TransactionFailed();
 
-        // 4. Calculate received amount
+        // 5. Calculate received amount
         uint256 amountOut = 0;
         if (tokenOut != address(0)) {
             amountOut = IERC20(tokenOut).balanceOf(avatar) - balanceBefore;
         }
 
-        // 5. Emit event for oracle to:
+        // 6. Emit event for oracle to:
         //    - Mark received as acquired if matched to deposit (both WITHDRAW and CLAIM)
         emit ProtocolExecution(
             subAccount,

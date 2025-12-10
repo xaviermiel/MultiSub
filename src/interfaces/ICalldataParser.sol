@@ -33,6 +33,18 @@ interface ICalldataParser {
     function extractOutputToken(address target, bytes calldata data) external view returns (address token);
 
     /**
+     * @notice Extract the recipient address from calldata
+     * @param target The protocol/vault address being called
+     * @param data The calldata to parse
+     * @param defaultRecipient The default recipient (Safe address) to use when recipient is not explicit in calldata
+     * @return recipient The recipient address where output tokens will be sent
+     * @dev For protocols with explicit recipients in calldata, extract and return it.
+     *      For protocols where recipient is implicit (e.g., msg.sender), return defaultRecipient.
+     *      The module will validate that recipient == Safe address to prevent fund theft.
+     */
+    function extractRecipient(address target, bytes calldata data, address defaultRecipient) external view returns (address recipient);
+
+    /**
      * @notice Check if this parser supports the given selector
      * @param selector The function selector
      * @return supported Whether the selector is supported

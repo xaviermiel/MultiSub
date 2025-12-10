@@ -150,6 +150,27 @@ contract UniswapV3Parser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
+    function extractRecipient(address, bytes calldata data, address) external pure override returns (address recipient) {
+        bytes4 selector = bytes4(data[:4]);
+
+        if (selector == EXACT_INPUT_SINGLE_SELECTOR || selector == EXACT_OUTPUT_SINGLE_SELECTOR) {
+            // V1 Single: (tokenIn, tokenOut, fee, recipient, deadline, amountIn, amountOutMin, sqrtPriceLimitX96)
+            (,,, recipient,,,,) = abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint256, uint160));
+        } else if (selector == EXACT_INPUT_SINGLE_02_SELECTOR || selector == EXACT_OUTPUT_SINGLE_02_SELECTOR) {
+            // V2 Single (no deadline): (tokenIn, tokenOut, fee, recipient, amountIn, amountOutMin, sqrtPriceLimitX96)
+            (,,, recipient,,,) = abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint160));
+        } else if (selector == EXACT_INPUT_SELECTOR || selector == EXACT_OUTPUT_SELECTOR) {
+            // V1 Multi: (path, recipient, deadline, amountIn, amountOutMin)
+            (, recipient,,,) = abi.decode(data[4:], (bytes, address, uint256, uint256, uint256));
+        } else if (selector == EXACT_INPUT_02_SELECTOR || selector == EXACT_OUTPUT_02_SELECTOR) {
+            // V2 Multi (no deadline): (path, recipient, amountIn, amountOutMin)
+            (, recipient,,) = abi.decode(data[4:], (bytes, address, uint256, uint256));
+        } else {
+            revert UnsupportedSelector();
+        }
+    }
+
+    /// @inheritdoc ICalldataParser
     function supportsSelector(bytes4 selector) external pure override returns (bool) {
         return selector == EXACT_INPUT_SINGLE_SELECTOR ||
                selector == EXACT_INPUT_SELECTOR ||

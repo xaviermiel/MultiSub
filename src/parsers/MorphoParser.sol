@@ -59,6 +59,25 @@ contract MorphoParser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
+    function extractRecipient(address, bytes calldata data, address) external pure override returns (address recipient) {
+        bytes4 selector = bytes4(data[:4]);
+
+        if (selector == DEPOSIT_SELECTOR || selector == MINT_SELECTOR) {
+            // deposit(uint256 assets, address receiver)
+            // mint(uint256 shares, address receiver)
+            // receiver is where vault shares go
+            (, recipient) = abi.decode(data[4:], (uint256, address));
+        } else if (selector == WITHDRAW_SELECTOR || selector == REDEEM_SELECTOR) {
+            // withdraw(uint256 assets, address receiver, address owner)
+            // redeem(uint256 shares, address receiver, address owner)
+            // receiver is where underlying tokens go
+            (, recipient,) = abi.decode(data[4:], (uint256, address, address));
+        } else {
+            revert UnsupportedSelector();
+        }
+    }
+
+    /// @inheritdoc ICalldataParser
     function supportsSelector(bytes4 selector) external pure override returns (bool) {
         return selector == DEPOSIT_SELECTOR ||
                selector == MINT_SELECTOR ||

@@ -192,6 +192,46 @@ contract UniversalRouterParser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
+    function extractRecipient(address, bytes calldata data, address defaultRecipient) external pure override returns (address recipient) {
+        bytes4 selector = bytes4(data[:4]);
+        if (selector != EXECUTE_SELECTOR) revert UnsupportedSelector();
+
+        (bytes memory commands, bytes[] memory inputs,) = abi.decode(data[4:], (bytes, bytes[], uint256));
+
+        // Find first swap or wrap/unwrap command to get recipient
+        for (uint256 i = 0; i < commands.length && i < inputs.length; i++) {
+            uint8 command = uint8(commands[i]) & 0x3f; // Mask off flag bits
+
+            if (command == WRAP_ETH) {
+                // WRAP_ETH params: (address recipient, uint256 amount)
+                bytes memory wrapInput = inputs[i];
+                if (wrapInput.length >= 64) {
+                    (recipient,) = abi.decode(wrapInput, (address, uint256));
+                    return recipient;
+                }
+            } else if (command == UNWRAP_WETH) {
+                // UNWRAP_WETH params: (address recipient, uint256 amountMin)
+                bytes memory unwrapInput = inputs[i];
+                if (unwrapInput.length >= 64) {
+                    (recipient,) = abi.decode(unwrapInput, (address, uint256));
+                    return recipient;
+                }
+            } else if (command == V3_SWAP_EXACT_IN || command == V3_SWAP_EXACT_OUT ||
+                       command == V2_SWAP_EXACT_IN || command == V2_SWAP_EXACT_OUT) {
+                // V3/V2 swap params: (address recipient, uint256 amountIn, uint256 amountOutMin, ...)
+                bytes memory swapInput = inputs[i];
+                if (swapInput.length >= 32) {
+                    recipient = abi.decode(swapInput, (address));
+                    return recipient;
+                }
+            }
+        }
+
+        // No explicit recipient found, use default (Safe address)
+        return defaultRecipient;
+    }
+
+    /// @inheritdoc ICalldataParser
     function supportsSelector(bytes4 selector) external pure override returns (bool) {
         return selector == EXECUTE_SELECTOR;
     }

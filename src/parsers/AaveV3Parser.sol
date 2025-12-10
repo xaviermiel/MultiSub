@@ -83,6 +83,48 @@ contract AaveV3Parser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
+    function extractRecipient(address, bytes calldata data, address defaultRecipient) external pure override returns (address recipient) {
+        bytes4 selector = bytes4(data[:4]);
+
+        if (selector == SUPPLY_SELECTOR) {
+            // supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode)
+            // onBehalfOf is where aTokens are minted - must be Safe
+            (,, recipient,) = abi.decode(data[4:], (address, uint256, address, uint16));
+        } else if (selector == WITHDRAW_SELECTOR) {
+            // withdraw(address asset, uint256 amount, address to)
+            // 'to' is where withdrawn tokens go
+            (,, recipient) = abi.decode(data[4:], (address, uint256, address));
+        } else if (selector == BORROW_SELECTOR) {
+            // borrow(address asset, uint256 amount, uint256 interestRateMode, uint16 referralCode, address onBehalfOf)
+            // onBehalfOf incurs the debt, but borrowed tokens go to msg.sender
+            // For safety, return defaultRecipient (Safe) as borrowed funds should stay in Safe
+            return defaultRecipient;
+        } else if (selector == REPAY_SELECTOR) {
+            // repay(address asset, uint256 amount, uint256 interestRateMode, address onBehalfOf)
+            // onBehalfOf is whose debt is repaid - must be Safe
+            (,,, recipient) = abi.decode(data[4:], (address, uint256, uint256, address));
+        } else if (selector == CLAIM_REWARDS_SELECTOR) {
+            // claimRewards(address[] assets, uint256 amount, address to, address reward)
+            // 'to' is where rewards go
+            (,, recipient,) = abi.decode(data[4:], (address[], uint256, address, address));
+        } else if (selector == CLAIM_REWARDS_ON_BEHALF_SELECTOR) {
+            // claimRewardsOnBehalf(address[] assets, uint256 amount, address user, address to, address reward)
+            // 'to' is where rewards go (4th param)
+            (,,, recipient,) = abi.decode(data[4:], (address[], uint256, address, address, address));
+        } else if (selector == CLAIM_ALL_REWARDS_SELECTOR) {
+            // claimAllRewards(address[] assets, address to)
+            // 'to' is where rewards go
+            (, recipient) = abi.decode(data[4:], (address[], address));
+        } else if (selector == CLAIM_ALL_ON_BEHALF_SELECTOR) {
+            // claimAllRewardsOnBehalf(address[] assets, address user, address to)
+            // 'to' is where rewards go (3rd param)
+            (,, recipient) = abi.decode(data[4:], (address[], address, address));
+        } else {
+            revert UnsupportedSelector();
+        }
+    }
+
+    /// @inheritdoc ICalldataParser
     function supportsSelector(bytes4 selector) external pure override returns (bool) {
         return selector == SUPPLY_SELECTOR ||
                selector == WITHDRAW_SELECTOR ||
