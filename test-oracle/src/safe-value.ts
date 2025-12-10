@@ -2,7 +2,7 @@
  * Local Safe Value Oracle
  *
  * Calculates the total USD value of all tokens in the Safe and updates the contract.
- * Runs on a cron schedule (default: every 30 seconds).
+ * Runs on a cron schedule (default: every 30 minutes).
  *
  * This is a local version that doesn't require Chainlink CRE infrastructure.
  */
