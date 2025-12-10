@@ -18,10 +18,10 @@ contract AaveV3Parser is ICalldataParser {
     bytes4 public constant REPAY_SELECTOR = 0x573ade81;       // repay(address,uint256,uint256,address)
 
     // Aave V3 RewardsController selectors (CLAIM operations)
-    bytes4 public constant CLAIM_REWARDS_SELECTOR = 0x3111e7b3;           // claimRewards(address[],uint256,address,address)
-    bytes4 public constant CLAIM_REWARDS_ON_BEHALF_SELECTOR = 0x9a99b4f0; // claimRewardsOnBehalf(address[],uint256,address,address,address)
-    bytes4 public constant CLAIM_ALL_REWARDS_SELECTOR = 0x74d945ec;       // claimAllRewards(address[],address)
-    bytes4 public constant CLAIM_ALL_ON_BEHALF_SELECTOR = 0x0c3fea64;     // claimAllRewardsOnBehalf(address[],address,address)
+    bytes4 public constant CLAIM_REWARDS_SELECTOR = 0x236300dc;           // claimRewards(address[],uint256,address,address)
+    bytes4 public constant CLAIM_REWARDS_ON_BEHALF_SELECTOR = 0x33028b99; // claimRewardsOnBehalf(address[],uint256,address,address,address)
+    bytes4 public constant CLAIM_ALL_REWARDS_SELECTOR = 0xbb492bf5;       // claimAllRewards(address[],address)
+    bytes4 public constant CLAIM_ALL_ON_BEHALF_SELECTOR = 0x9ff55db9;     // claimAllRewardsOnBehalf(address[],address,address)
 
     /// @inheritdoc ICalldataParser
     function extractInputToken(address, bytes calldata data) external pure override returns (address token) {

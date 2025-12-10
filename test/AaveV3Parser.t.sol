@@ -30,8 +30,10 @@ contract AaveV3ParserTest is Test {
         assertEq(parser.WITHDRAW_SELECTOR(), bytes4(0x69328dec), "Withdraw selector mismatch");
         assertEq(parser.BORROW_SELECTOR(), bytes4(0xa415bcad), "Borrow selector mismatch");
         assertEq(parser.REPAY_SELECTOR(), bytes4(0x573ade81), "Repay selector mismatch");
-        assertEq(parser.CLAIM_REWARDS_SELECTOR(), bytes4(0x3111e7b3), "ClaimRewards selector mismatch");
-        assertEq(parser.CLAIM_ALL_REWARDS_SELECTOR(), bytes4(0x74d945ec), "ClaimAllRewards selector mismatch");
+        assertEq(parser.CLAIM_REWARDS_SELECTOR(), bytes4(0x236300dc), "ClaimRewards selector mismatch");
+        assertEq(parser.CLAIM_REWARDS_ON_BEHALF_SELECTOR(), bytes4(0x33028b99), "ClaimRewardsOnBehalf selector mismatch");
+        assertEq(parser.CLAIM_ALL_REWARDS_SELECTOR(), bytes4(0xbb492bf5), "ClaimAllRewards selector mismatch");
+        assertEq(parser.CLAIM_ALL_ON_BEHALF_SELECTOR(), bytes4(0x9ff55db9), "ClaimAllOnBehalf selector mismatch");
     }
 
     function testSupportsSelector() public view {
