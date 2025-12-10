@@ -271,11 +271,18 @@ contract UniswapV3ParserTest is Test {
     // ============ Operation Type Tests ============
 
     function testGetOperationType() public view {
-        assertEq(parser.getOperationType(parser.EXACT_INPUT_SINGLE_SELECTOR()), 1, "ExactInputSingle should be SWAP (1)");
-        assertEq(parser.getOperationType(parser.EXACT_INPUT_SELECTOR()), 1, "ExactInput should be SWAP (1)");
-        assertEq(parser.getOperationType(parser.EXACT_OUTPUT_SINGLE_SELECTOR()), 1, "ExactOutputSingle should be SWAP (1)");
-        assertEq(parser.getOperationType(parser.EXACT_OUTPUT_SELECTOR()), 1, "ExactOutput should be SWAP (1)");
-        assertEq(parser.getOperationType(bytes4(0xdeadbeef)), 0, "Unknown should return 0");
+        // Helper to create minimal calldata from selector
+        bytes memory exactInputSingleData = abi.encodeWithSelector(parser.EXACT_INPUT_SINGLE_SELECTOR());
+        bytes memory exactInputData = abi.encodeWithSelector(parser.EXACT_INPUT_SELECTOR());
+        bytes memory exactOutputSingleData = abi.encodeWithSelector(parser.EXACT_OUTPUT_SINGLE_SELECTOR());
+        bytes memory exactOutputData = abi.encodeWithSelector(parser.EXACT_OUTPUT_SELECTOR());
+        bytes memory unknownData = abi.encodeWithSelector(bytes4(0xdeadbeef));
+
+        assertEq(parser.getOperationType(exactInputSingleData), 1, "ExactInputSingle should be SWAP (1)");
+        assertEq(parser.getOperationType(exactInputData), 1, "ExactInput should be SWAP (1)");
+        assertEq(parser.getOperationType(exactOutputSingleData), 1, "ExactOutputSingle should be SWAP (1)");
+        assertEq(parser.getOperationType(exactOutputData), 1, "ExactOutput should be SWAP (1)");
+        assertEq(parser.getOperationType(unknownData), 0, "Unknown should return 0");
     }
 
     // ============ Revert Tests ============

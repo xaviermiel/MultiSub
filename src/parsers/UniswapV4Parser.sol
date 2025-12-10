@@ -199,7 +199,7 @@ contract UniswapV4Parser is ICalldataParser {
      * @param data The full calldata
      * @return opType 1=SWAP, 2=DEPOSIT, 3=WITHDRAW, 4=CLAIM, 5=APPROVE
      */
-    function getOperationType(bytes calldata data) external pure returns (uint8 opType) {
+    function getOperationType(bytes calldata data) external pure override returns (uint8 opType) {
         bytes4 selector = bytes4(data[:4]);
         if (selector != MODIFY_LIQUIDITIES_SELECTOR) return 0;
 

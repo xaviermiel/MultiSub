@@ -162,8 +162,11 @@ contract MerklParserTest is Test {
     }
 
     function testGetOperationType() public view {
-        assertEq(parser.getOperationType(parser.CLAIM_SELECTOR()), 4, "Claim should be operation type 4");
-        assertEq(parser.getOperationType(bytes4(0xdeadbeef)), 0, "Unknown selector should return 0");
+        bytes memory claimData = abi.encodeWithSelector(parser.CLAIM_SELECTOR());
+        bytes memory unknownData = abi.encodeWithSelector(bytes4(0xdeadbeef));
+
+        assertEq(parser.getOperationType(claimData), 4, "Claim should be operation type 4");
+        assertEq(parser.getOperationType(unknownData), 0, "Unknown selector should return 0");
     }
 
     function testUnsupportedSelectorReverts() public {

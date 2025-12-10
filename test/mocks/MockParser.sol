@@ -36,4 +36,14 @@ contract MockParser {
     function supportsSelector(bytes4 selector) external pure returns (bool) {
         return selector == DEPOSIT_SELECTOR || selector == WITHDRAW_SELECTOR;
     }
+
+    function getOperationType(bytes calldata data) external pure returns (uint8) {
+        bytes4 selector = bytes4(data[:4]);
+        if (selector == DEPOSIT_SELECTOR) {
+            return 2; // DEPOSIT
+        } else if (selector == WITHDRAW_SELECTOR) {
+            return 3; // WITHDRAW
+        }
+        return 0; // UNKNOWN
+    }
 }

@@ -134,16 +134,23 @@ contract MorphoParserTest is Test {
     // ============ Operation Type Tests ============
 
     function testGetOperationType() public view {
+        // Helper to create minimal calldata from selector
+        bytes memory depositData = abi.encodeWithSelector(parser.DEPOSIT_SELECTOR());
+        bytes memory mintData = abi.encodeWithSelector(parser.MINT_SELECTOR());
+        bytes memory withdrawData = abi.encodeWithSelector(parser.WITHDRAW_SELECTOR());
+        bytes memory redeemData = abi.encodeWithSelector(parser.REDEEM_SELECTOR());
+        bytes memory unknownData = abi.encodeWithSelector(bytes4(0xdeadbeef));
+
         // DEPOSIT operations
-        assertEq(parser.getOperationType(parser.DEPOSIT_SELECTOR()), 2, "Deposit should be DEPOSIT (2)");
-        assertEq(parser.getOperationType(parser.MINT_SELECTOR()), 2, "Mint should be DEPOSIT (2)");
+        assertEq(parser.getOperationType(depositData), 2, "Deposit should be DEPOSIT (2)");
+        assertEq(parser.getOperationType(mintData), 2, "Mint should be DEPOSIT (2)");
 
         // WITHDRAW operations
-        assertEq(parser.getOperationType(parser.WITHDRAW_SELECTOR()), 3, "Withdraw should be WITHDRAW (3)");
-        assertEq(parser.getOperationType(parser.REDEEM_SELECTOR()), 3, "Redeem should be WITHDRAW (3)");
+        assertEq(parser.getOperationType(withdrawData), 3, "Withdraw should be WITHDRAW (3)");
+        assertEq(parser.getOperationType(redeemData), 3, "Redeem should be WITHDRAW (3)");
 
         // Unknown
-        assertEq(parser.getOperationType(bytes4(0xdeadbeef)), 0, "Unknown should return 0");
+        assertEq(parser.getOperationType(unknownData), 0, "Unknown should return 0");
     }
 
     // ============ Revert Tests ============

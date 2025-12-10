@@ -238,9 +238,10 @@ contract UniversalRouterParser is ICalldataParser {
 
     /**
      * @notice Get the operation type - always SWAP for Universal Router
+     * @param data The calldata (unused - Universal Router is always SWAP)
      * @return opType 1=SWAP
      */
-    function getOperationType(bytes calldata) external pure returns (uint8 opType) {
+    function getOperationType(bytes calldata data) external pure override returns (uint8 opType) {
         return 1; // SWAP
     }
 }

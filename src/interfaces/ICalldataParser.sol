@@ -50,4 +50,13 @@ interface ICalldataParser {
      * @return supported Whether the selector is supported
      */
     function supportsSelector(bytes4 selector) external pure returns (bool supported);
+
+    /**
+     * @notice Get the operation type for the given calldata
+     * @param data The calldata to analyze
+     * @return opType The operation type: 1=SWAP, 2=DEPOSIT, 3=WITHDRAW, 4=CLAIM, 5=APPROVE
+     * @dev This allows parsers to determine operation type from calldata content,
+     *      which is essential for protocols with single entry points (e.g., Uniswap V4's modifyLiquidities)
+     */
+    function getOperationType(bytes calldata data) external pure returns (uint8 opType);
 }

@@ -247,22 +247,33 @@ contract AaveV3ParserTest is Test {
     // ============ Operation Type Tests ============
 
     function testGetOperationType() public view {
+        // Helper to create minimal calldata from selector
+        bytes memory supplyData = abi.encodeWithSelector(parser.SUPPLY_SELECTOR());
+        bytes memory repayData = abi.encodeWithSelector(parser.REPAY_SELECTOR());
+        bytes memory withdrawData = abi.encodeWithSelector(parser.WITHDRAW_SELECTOR());
+        bytes memory borrowData = abi.encodeWithSelector(parser.BORROW_SELECTOR());
+        bytes memory claimRewardsData = abi.encodeWithSelector(parser.CLAIM_REWARDS_SELECTOR());
+        bytes memory claimOnBehalfData = abi.encodeWithSelector(parser.CLAIM_REWARDS_ON_BEHALF_SELECTOR());
+        bytes memory claimAllData = abi.encodeWithSelector(parser.CLAIM_ALL_REWARDS_SELECTOR());
+        bytes memory claimAllOnBehalfData = abi.encodeWithSelector(parser.CLAIM_ALL_ON_BEHALF_SELECTOR());
+        bytes memory unknownData = abi.encodeWithSelector(bytes4(0xdeadbeef));
+
         // DEPOSIT operations
-        assertEq(parser.getOperationType(parser.SUPPLY_SELECTOR()), 2, "Supply should be DEPOSIT (2)");
-        assertEq(parser.getOperationType(parser.REPAY_SELECTOR()), 2, "Repay should be DEPOSIT (2)");
+        assertEq(parser.getOperationType(supplyData), 2, "Supply should be DEPOSIT (2)");
+        assertEq(parser.getOperationType(repayData), 2, "Repay should be DEPOSIT (2)");
 
         // WITHDRAW operations
-        assertEq(parser.getOperationType(parser.WITHDRAW_SELECTOR()), 3, "Withdraw should be WITHDRAW (3)");
-        assertEq(parser.getOperationType(parser.BORROW_SELECTOR()), 3, "Borrow should be WITHDRAW (3)");
+        assertEq(parser.getOperationType(withdrawData), 3, "Withdraw should be WITHDRAW (3)");
+        assertEq(parser.getOperationType(borrowData), 3, "Borrow should be WITHDRAW (3)");
 
         // CLAIM operations
-        assertEq(parser.getOperationType(parser.CLAIM_REWARDS_SELECTOR()), 4, "ClaimRewards should be CLAIM (4)");
-        assertEq(parser.getOperationType(parser.CLAIM_REWARDS_ON_BEHALF_SELECTOR()), 4, "ClaimRewardsOnBehalf should be CLAIM (4)");
-        assertEq(parser.getOperationType(parser.CLAIM_ALL_REWARDS_SELECTOR()), 4, "ClaimAllRewards should be CLAIM (4)");
-        assertEq(parser.getOperationType(parser.CLAIM_ALL_ON_BEHALF_SELECTOR()), 4, "ClaimAllOnBehalf should be CLAIM (4)");
+        assertEq(parser.getOperationType(claimRewardsData), 4, "ClaimRewards should be CLAIM (4)");
+        assertEq(parser.getOperationType(claimOnBehalfData), 4, "ClaimRewardsOnBehalf should be CLAIM (4)");
+        assertEq(parser.getOperationType(claimAllData), 4, "ClaimAllRewards should be CLAIM (4)");
+        assertEq(parser.getOperationType(claimAllOnBehalfData), 4, "ClaimAllOnBehalf should be CLAIM (4)");
 
         // Unknown
-        assertEq(parser.getOperationType(bytes4(0xdeadbeef)), 0, "Unknown should return 0");
+        assertEq(parser.getOperationType(unknownData), 0, "Unknown should return 0");
     }
 
     // ============ Revert Tests ============

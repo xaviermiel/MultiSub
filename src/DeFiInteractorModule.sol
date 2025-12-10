@@ -371,15 +371,14 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         if (!hasRole(msg.sender, DEFI_EXECUTE_ROLE)) revert Unauthorized();
         _requireFreshOracle(msg.sender);
 
-        // 2. Classify operation from selector
-        bytes4 selector = bytes4(data[:4]);
-        OperationType opType = selectorType[selector];
+        // 2. Classify operation - prefer parser-based classification for accuracy
+        OperationType opType = _classifyOperation(target, data);
 
         // 3. Route based on type
         // Note: APPROVE skips allowedAddresses check on target (the token) since
         // _executeApproveWithCap validates the spender is whitelisted
         if (opType == OperationType.UNKNOWN) {
-            revert UnknownSelector(selector);
+            revert UnknownSelector(bytes4(data[:4]));
         } else if (opType == OperationType.APPROVE) {
             return _executeApproveWithCap(msg.sender, target, data);
         }
@@ -393,7 +392,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             return _executeWithSpendingCheck(msg.sender, target, data, opType);
         }
 
-        revert UnknownSelector(selector);
+        revert UnknownSelector(bytes4(data[:4]));
     }
 
     /**
@@ -410,13 +409,12 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         if (!hasRole(msg.sender, DEFI_EXECUTE_ROLE)) revert Unauthorized();
         _requireFreshOracle(msg.sender);
 
-        // 2. Classify operation from selector
-        bytes4 selector = bytes4(data[:4]);
-        OperationType opType = selectorType[selector];
+        // 2. Classify operation - prefer parser-based classification for accuracy
+        OperationType opType = _classifyOperation(target, data);
 
         // 3. Route based on type
         if (opType == OperationType.UNKNOWN) {
-            revert UnknownSelector(selector);
+            revert UnknownSelector(bytes4(data[:4]));
         } else if (opType == OperationType.APPROVE) {
             // APPROVE doesn't use ETH value
             return _executeApproveWithCap(msg.sender, target, data);
@@ -431,7 +429,33 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             return _executeWithSpendingCheckWithValue(msg.sender, target, data, opType, msg.value);
         }
 
-        revert UnknownSelector(selector);
+        revert UnknownSelector(bytes4(data[:4]));
+    }
+
+    // ============ Operation Classification ============
+
+    /**
+     * @notice Classify the operation type from calldata
+     * @param target The protocol address being called
+     * @param data The calldata to analyze
+     * @return opType The operation type
+     * @dev Prefers parser-based classification for protocols with dynamic operations (e.g., Uniswap V4).
+     *      Falls back to selector-based classification if no parser is registered.
+     */
+    function _classifyOperation(address target, bytes calldata data) internal view returns (OperationType) {
+        ICalldataParser parser = protocolParsers[target];
+
+        // If parser exists, use it for classification (handles dynamic operations like V4)
+        if (address(parser) != address(0)) {
+            uint8 parserOpType = parser.getOperationType(data);
+            if (parserOpType > 0 && parserOpType <= uint8(OperationType.APPROVE)) {
+                return OperationType(parserOpType);
+            }
+        }
+
+        // Fallback to selector-based classification
+        bytes4 selector = bytes4(data[:4]);
+        return selectorType[selector];
     }
 
     // ============ Spending Check Logic ============
