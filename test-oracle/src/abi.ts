@@ -102,6 +102,7 @@ export const DeFiInteractorModuleABI = [
     stateMutability: 'view',
   },
   // ============ Events ============
+  // Note: Events no longer include timestamp - contract uses block.timestamp internally
   {
     type: 'event',
     name: 'ProtocolExecution',
@@ -114,7 +115,6 @@ export const DeFiInteractorModuleABI = [
       { name: 'tokenOut', type: 'address', indexed: false, internalType: 'address' },
       { name: 'amountOut', type: 'uint256', indexed: false, internalType: 'uint256' },
       { name: 'spendingCost', type: 'uint256', indexed: false, internalType: 'uint256' },
-      { name: 'timestamp', type: 'uint256', indexed: false, internalType: 'uint256' },
     ],
     anonymous: false,
   },
@@ -127,7 +127,6 @@ export const DeFiInteractorModuleABI = [
       { name: 'recipient', type: 'address', indexed: true, internalType: 'address' },
       { name: 'amount', type: 'uint256', indexed: false, internalType: 'uint256' },
       { name: 'spendingCost', type: 'uint256', indexed: false, internalType: 'uint256' },
-      { name: 'timestamp', type: 'uint256', indexed: false, internalType: 'uint256' },
     ],
     anonymous: false,
   },
@@ -136,7 +135,6 @@ export const DeFiInteractorModuleABI = [
     name: 'SafeValueUpdated',
     inputs: [
       { name: 'totalValueUSD', type: 'uint256', indexed: false, internalType: 'uint256' },
-      { name: 'timestamp', type: 'uint256', indexed: false, internalType: 'uint256' },
       { name: 'updateCount', type: 'uint256', indexed: false, internalType: 'uint256' },
     ],
     anonymous: false,

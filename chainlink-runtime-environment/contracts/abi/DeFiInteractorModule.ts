@@ -144,6 +144,7 @@ export const DeFiInteractorModule = [
 		stateMutability: 'view',
 	},
 	// ============ Events ============
+	// Note: Events no longer include timestamp - contract uses block.timestamp internally
 	{
 		type: 'event',
 		name: 'ProtocolExecution',
@@ -156,7 +157,6 @@ export const DeFiInteractorModule = [
 			{ name: 'tokenOut', type: 'address', indexed: false, internalType: 'address' },
 			{ name: 'amountOut', type: 'uint256', indexed: false, internalType: 'uint256' },
 			{ name: 'spendingCost', type: 'uint256', indexed: false, internalType: 'uint256' },
-			{ name: 'timestamp', type: 'uint256', indexed: false, internalType: 'uint256' },
 		],
 		anonymous: false,
 	},
@@ -169,7 +169,6 @@ export const DeFiInteractorModule = [
 			{ name: 'recipient', type: 'address', indexed: true, internalType: 'address' },
 			{ name: 'amount', type: 'uint256', indexed: false, internalType: 'uint256' },
 			{ name: 'spendingCost', type: 'uint256', indexed: false, internalType: 'uint256' },
-			{ name: 'timestamp', type: 'uint256', indexed: false, internalType: 'uint256' },
 		],
 		anonymous: false,
 	},
@@ -178,7 +177,6 @@ export const DeFiInteractorModule = [
 		name: 'SafeValueUpdated',
 		inputs: [
 			{ name: 'totalValueUSD', type: 'uint256', indexed: false, internalType: 'uint256' },
-			{ name: 'timestamp', type: 'uint256', indexed: false, internalType: 'uint256' },
 			{ name: 'updateCount', type: 'uint256', indexed: false, internalType: 'uint256' },
 		],
 		anonymous: false,
@@ -217,8 +215,9 @@ export enum OperationType {
 }
 
 // Event signature hashes for log filtering
+// Note: These are raw signatures, not keccak256 hashed - hash them before use
 export const EVENT_SIGNATURES = {
-	ProtocolExecution: '0x' + 'ProtocolExecution(address,address,uint8,address,uint256,address,uint256,uint256,uint256)',
-	TransferExecuted: '0x' + 'TransferExecuted(address,address,address,uint256,uint256,uint256)',
-	SafeValueUpdated: '0x' + 'SafeValueUpdated(uint256,uint256,uint256)',
+	ProtocolExecution: 'ProtocolExecution(address,address,uint8,address,uint256,address,uint256,uint256)',
+	TransferExecuted: 'TransferExecuted(address,address,address,uint256,uint256)',
+	SafeValueUpdated: 'SafeValueUpdated(uint256,uint256)',
 }

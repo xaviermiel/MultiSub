@@ -745,6 +745,59 @@ const calculateSafeValue = (runtime: Runtime<Config>): SafeValueData => {
 }
 
 /**
+ * Get current on-chain safe value
+ */
+const getOnChainSafeValue = (runtime: Runtime<Config>): bigint => {
+	const network = getNetwork({
+		chainFamily: 'evm',
+		chainSelectorName: runtime.config.chainSelectorName,
+		isTestnet: true,
+	})
+
+	if (!network) {
+		throw new Error(`Network not found for chain selector name: ${runtime.config.chainSelectorName}`)
+	}
+
+	const evmClient = new cre.capabilities.EVMClient(network.chainSelector.selector)
+
+	const callData = encodeFunctionData({
+		abi: DeFiInteractorModule,
+		functionName: 'getSafeValue',
+	})
+
+	try {
+		const result = evmClient
+			.callContract(runtime, {
+				call: encodeCallMsg({
+					from: zeroAddress,
+					to: runtime.config.moduleAddress as Address,
+					data: callData,
+				}),
+				blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
+			})
+			.result()
+
+		if (!result.data || result.data.length === 0) {
+			return 0n
+		}
+
+		const [totalValueUSD] = decodeFunctionResult({
+			abi: DeFiInteractorModule,
+			functionName: 'getSafeValue',
+			data: bytesToHex(result.data),
+		})
+
+		return totalValueUSD
+	} catch (error) {
+		runtime.log(`Error reading on-chain safe value: ${error}`)
+		return 0n
+	}
+}
+
+// Threshold for considering values "equal" (0.1% tolerance to avoid tx for tiny changes)
+const VALUE_CHANGE_THRESHOLD_BPS = 10n // 0.1%
+
+/**
  * Write the Safe value to the on-chain storage contract
  */
 const writeSafeValueToChain = (runtime: Runtime<Config>, safeValueData: SafeValueData): string => {
@@ -807,7 +860,7 @@ const writeSafeValueToChain = (runtime: Runtime<Config>, safeValueData: SafeValu
 }
 
 /**
- * Main cron handler - runs every 30 seconds
+ * Main cron handler - runs every 30 minutes
  */
 const onCronTrigger = (runtime: Runtime<Config>, payload: CronPayload): string => {
 	if (!payload.scheduledExecutionTime) {
@@ -821,9 +874,30 @@ const onCronTrigger = (runtime: Runtime<Config>, payload: CronPayload): string =
 	// Calculate Safe value
 	const safeValueData = calculateSafeValue(runtime)
 
+	// Get current on-chain value
+	const onChainValue = getOnChainSafeValue(runtime)
+
 	runtime.log('=== Safe Value Calculation ===')
 	runtime.log(safeJsonStringify(safeValueData))
-	runtime.log(`Total USD Value: $${(Number(safeValueData.totalValueUSD) / 1e18).toFixed(2)}`)
+	runtime.log(`Total USD Value: $${(Number(safeValueData.totalValueUSD) / 1e18).toFixed(2)} (on-chain: $${(Number(onChainValue) / 1e18).toFixed(2)})`)
+
+	if (safeValueData.totalValueUSD === 0n) {
+		runtime.log('Skipping write - total value is 0')
+		runtime.log('=== Safe Value Monitor: Complete ===')
+		return 'Skipped - value is 0'
+	}
+
+	// Check if change is significant (more than 0.1% difference)
+	const diff = safeValueData.totalValueUSD > onChainValue
+		? safeValueData.totalValueUSD - onChainValue
+		: onChainValue - safeValueData.totalValueUSD
+	const threshold = (onChainValue * VALUE_CHANGE_THRESHOLD_BPS) / 10000n
+
+	if (diff <= threshold) {
+		runtime.log(`Skipping write - value change below threshold`)
+		runtime.log('=== Safe Value Monitor: Complete ===')
+		return 'Skipped - no significant change'
+	}
 
 	// Write to chain
 	const txHash = writeSafeValueToChain(runtime, safeValueData)

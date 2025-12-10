@@ -100,6 +100,7 @@ interface DepositRecord {
 	target: Address
 	tokenIn: Address
 	amountIn: bigint
+	remainingAmount: bigint  // Tracks how much of the deposit hasn't been withdrawn yet
 	timestamp: bigint
 }
 
@@ -119,13 +120,14 @@ interface SubAccountState {
 }
 
 // ============ Event Signatures ============
+// Note: Events no longer include timestamp parameter - contract uses block.timestamp
 
 const PROTOCOL_EXECUTION_EVENT_SIG = keccak256(
-	toHex('ProtocolExecution(address,address,uint8,address,uint256,address,uint256,uint256,uint256)')
+	toHex('ProtocolExecution(address,address,uint8,address,uint256,address,uint256,uint256)')
 )
 
 const TRANSFER_EXECUTED_EVENT_SIG = keccak256(
-	toHex('TransferExecuted(address,address,address,uint256,uint256,uint256)')
+	toHex('TransferExecuted(address,address,address,uint256,uint256)')
 )
 
 // ============ Helper Functions ============
@@ -482,7 +484,6 @@ const parseProtocolExecutionEvent = (log: any): ProtocolExecutionEvent => {
 			{ name: 'tokenOut', type: 'address' },
 			{ name: 'amountOut', type: 'uint256' },
 			{ name: 'spendingCost', type: 'uint256' },
-			{ name: 'timestamp', type: 'uint256' },
 		],
 		data,
 	)
@@ -518,7 +519,8 @@ const parseProtocolExecutionEvent = (log: any): ProtocolExecutionEvent => {
 		tokenOut: decoded[3] as Address,
 		amountOut: decoded[4],
 		spendingCost: decoded[5],
-		timestamp: decoded[6],
+		// Use current timestamp as proxy since event doesn't include it
+		timestamp: BigInt(Math.floor(Date.now() / 1000)),
 		blockNumber,
 		logIndex,
 	}
@@ -526,7 +528,7 @@ const parseProtocolExecutionEvent = (log: any): ProtocolExecutionEvent => {
 
 /**
  * Parse TransferExecuted event from log data
- * Event: TransferExecuted(address indexed subAccount, address indexed token, address indexed recipient, uint256 amount, uint256 spendingCost, uint256 timestamp)
+ * Event: TransferExecuted(address indexed subAccount, address indexed token, address indexed recipient, uint256 amount, uint256 spendingCost)
  */
 const parseTransferExecutedEvent = (log: any): TransferExecutedEvent => {
 	// All 3 parameters are indexed (topics[1], topics[2], topics[3])
@@ -537,7 +539,7 @@ const parseTransferExecutedEvent = (log: any): TransferExecutedEvent => {
 	const token = topicToAddress(topic2)
 	const recipient = topicToAddress(topic3)
 
-	// Handle data - contains amount, spendingCost, timestamp
+	// Handle data - contains amount, spendingCost (no timestamp)
 	const data = typeof log.data === 'string'
 		? log.data as `0x${string}`
 		: uint8ArrayToHex(log.data)
@@ -546,7 +548,6 @@ const parseTransferExecutedEvent = (log: any): TransferExecutedEvent => {
 		[
 			{ name: 'amount', type: 'uint256' },
 			{ name: 'spendingCost', type: 'uint256' },
-			{ name: 'timestamp', type: 'uint256' },
 		],
 		data,
 	)
@@ -579,7 +580,8 @@ const parseTransferExecutedEvent = (log: any): TransferExecutedEvent => {
 		recipient,
 		amount: decoded[0],
 		spendingCost: decoded[1],
-		timestamp: decoded[2],
+		// Use current timestamp as proxy since event doesn't include it
+		timestamp: BigInt(Math.floor(Date.now() / 1000)),
 		blockNumber,
 		logIndex,
 	}
@@ -736,6 +738,7 @@ const buildSubAccountState = (
 				target: event.target,
 				tokenIn: event.tokenIn,
 				amountIn: event.amountIn,
+				remainingAmount: event.amountIn,  // Initially, full amount is available for withdrawal
 				timestamp: event.timestamp,
 			})
 		}
@@ -750,36 +753,41 @@ const buildSubAccountState = (
 				acquiredToken = tokenOutLower
 				acquiredAmount = event.amountOut
 			}
-		} else if (event.opType === OperationType.WITHDRAW) {
-			// WITHDRAW: Only acquired if matched to deposit by same subaccount
+		} else if (event.opType === OperationType.WITHDRAW || event.opType === OperationType.CLAIM) {
+			// WITHDRAW/CLAIM: Only acquired if matched to deposit by same subaccount
+			// Find matching deposits with remaining balance and consume from them
 			if (event.tokenOut !== zeroAddress && event.amountOut > 0n) {
-				const hasMatchingDeposit = state.depositRecords.some(
-					d => d.target.toLowerCase() === event.target.toLowerCase() &&
-						d.subAccount.toLowerCase() === event.subAccount.toLowerCase()
-				)
+				let remainingToMatch = event.amountOut
 
-				if (hasMatchingDeposit) {
-					acquiredToken = tokenOutLower
-					acquiredAmount = event.amountOut
-					runtime.log(`  Withdrawal matched to deposit: ${event.amountOut} of ${event.tokenOut}`)
-				} else {
-					runtime.log(`  Withdrawal NOT matched: ${event.amountOut} of ${event.tokenOut}`)
+				for (const deposit of state.depositRecords) {
+					if (remainingToMatch <= 0n) break
+
+					// Check if this deposit matches (same target and subAccount)
+					if (deposit.target.toLowerCase() === event.target.toLowerCase() &&
+						deposit.subAccount.toLowerCase() === event.subAccount.toLowerCase() &&
+						deposit.remainingAmount > 0n) {
+
+						// Calculate how much we can consume from this deposit
+						const consumeAmount = remainingToMatch > deposit.remainingAmount
+							? deposit.remainingAmount
+							: remainingToMatch
+
+						// Consume from the deposit
+						deposit.remainingAmount -= consumeAmount
+						remainingToMatch -= consumeAmount
+
+						runtime.log(`  ${OperationType[event.opType]} consuming ${consumeAmount} from deposit (remaining in deposit: ${deposit.remainingAmount})`)
+					}
 				}
-			}
-		} else if (event.opType === OperationType.CLAIM) {
-			// CLAIM: Only acquired if matched to deposit by same subaccount in window
-			if (event.tokenOut !== zeroAddress && event.amountOut > 0n) {
-				const hasMatchingDeposit = state.depositRecords.some(
-					d => d.target.toLowerCase() === event.target.toLowerCase() &&
-						d.subAccount.toLowerCase() === event.subAccount.toLowerCase()
-				)
 
-				if (hasMatchingDeposit) {
+				// Only the matched portion becomes acquired
+				const matchedAmount = event.amountOut - remainingToMatch
+				if (matchedAmount > 0n) {
 					acquiredToken = tokenOutLower
-					acquiredAmount = event.amountOut
-					runtime.log(`  Claim matched to deposit: ${event.amountOut} of ${event.tokenOut}`)
+					acquiredAmount = matchedAmount
+					runtime.log(`  ${OperationType[event.opType]} matched to deposit: ${matchedAmount} of ${event.tokenOut} (unmatched: ${remainingToMatch})`)
 				} else {
-					runtime.log(`  Claim NOT matched: ${event.amountOut} of ${event.tokenOut}`)
+					runtime.log(`  ${OperationType[event.opType]} NOT matched to any deposit: ${event.amountOut} of ${event.tokenOut}`)
 				}
 			}
 		}
@@ -891,25 +899,92 @@ const calculateSpendingAllowance = (
 }
 
 /**
- * Push batch update to contract
+ * Get current on-chain spending allowance
+ */
+const getOnChainSpendingAllowance = (
+	runtime: Runtime<Config>,
+	subAccount: Address,
+): bigint => {
+	const evmClient = createEvmClient(runtime)
+
+	const callData = encodeFunctionData({
+		abi: DeFiInteractorModule,
+		functionName: 'getSpendingAllowance',
+		args: [subAccount],
+	})
+
+	try {
+		const result = evmClient
+			.callContract(runtime, {
+				call: encodeCallMsg({
+					from: zeroAddress,
+					to: runtime.config.moduleAddress as Address,
+					data: callData,
+				}),
+				blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
+			})
+			.result()
+
+		if (!result.data || result.data.length === 0) {
+			return 0n
+		}
+
+		return decodeFunctionResult({
+			abi: DeFiInteractorModule,
+			functionName: 'getSpendingAllowance',
+			data: bytesToHex(result.data),
+		})
+	} catch (error) {
+		runtime.log(`Error getting on-chain spending allowance: ${error}`)
+		return 0n
+	}
+}
+
+// Threshold for considering allowance values "equal" (0% tolerance for allowances)
+const ALLOWANCE_CHANGE_THRESHOLD_BPS = 0n // 0%
+
+/**
+ * Push batch update to contract (skips if no changes)
  */
 const pushBatchUpdate = (
 	runtime: Runtime<Config>,
 	subAccount: Address,
 	newAllowance: bigint,
 	acquiredBalances: Map<Address, bigint>,
-): string => {
+): string | null => {
 	const evmClient = createEvmClient(runtime)
 
+	// Get current on-chain allowance
+	const onChainAllowance = getOnChainSpendingAllowance(runtime, subAccount)
+
+	// Check if allowance change is significant
+	const allowanceDiff = newAllowance > onChainAllowance
+		? newAllowance - onChainAllowance
+		: onChainAllowance - newAllowance
+	const allowanceThreshold = (onChainAllowance * ALLOWANCE_CHANGE_THRESHOLD_BPS) / 10000n
+	const allowanceChanged = allowanceDiff > allowanceThreshold
+
+	// Check if any acquired balances changed
 	const tokens: Address[] = []
 	const balances: bigint[] = []
+	let acquiredChanged = false
 
-	for (const [token, balance] of acquiredBalances) {
+	for (const [token, newBalance] of acquiredBalances) {
+		const onChainBalance = getContractAcquiredBalance(runtime, subAccount, token)
+		if (newBalance !== onChainBalance) {
+			acquiredChanged = true
+		}
 		tokens.push(token)
-		balances.push(balance)
+		balances.push(newBalance)
 	}
 
-	runtime.log(`Pushing batch update: subAccount=${subAccount}, allowance=${newAllowance}, tokens=${tokens.length}`)
+	// Skip if no changes
+	if (!allowanceChanged && !acquiredChanged) {
+		runtime.log(`Skipping batch update - no changes (allowance: ${onChainAllowance} -> ${newAllowance}, tokens: ${tokens.length})`)
+		return null
+	}
+
+	runtime.log(`Pushing batch update: subAccount=${subAccount}, allowance=${newAllowance} (was ${onChainAllowance}), tokens=${tokens.length}`)
 
 	const callData = encodeFunctionData({
 		abi: DeFiInteractorModule,
@@ -996,7 +1071,7 @@ const onProtocolExecution = (runtime: Runtime<Config>, payload: any): string => 
 		const txHash = pushBatchUpdate(runtime, newEvent.subAccount, newAllowance, state.acquiredBalances)
 
 		runtime.log(`=== Event Processing Complete ===`)
-		return txHash
+		return txHash || 'Skipped - no changes'
 	} catch (error) {
 		runtime.log(`Error processing event: ${error}`)
 		return `Error: ${error}`
@@ -1046,7 +1121,7 @@ const onCronRefresh = (runtime: Runtime<Config>, _payload: CronPayload): string 
 
 				// Push update to contract
 				const txHash = pushBatchUpdate(runtime, subAccount, newAllowance, state.acquiredBalances)
-				results.push(`${subAccount}: ${txHash}`)
+				results.push(`${subAccount}: ${txHash || 'Skipped'}`)
 			} catch (error) {
 				runtime.log(`Error processing ${subAccount}: ${error}`)
 				results.push(`${subAccount}: Error - ${error}`)
@@ -1110,7 +1185,7 @@ const onTransferExecuted = (runtime: Runtime<Config>, payload: any): string => {
 		const txHash = pushBatchUpdate(runtime, newTransfer.subAccount, newAllowance, state.acquiredBalances)
 
 		runtime.log(`=== Transfer Event Processing Complete ===`)
-		return txHash
+		return txHash || 'Skipped - no changes'
 	} catch (error) {
 		runtime.log(`Error processing transfer event: ${error}`)
 		return `Error: ${error}`
