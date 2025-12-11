@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import {ICalldataParser} from "../interfaces/ICalldataParser.sol";
+import {IAavePool} from "../interfaces/IAavePool.sol";
 
 /**
  * @title AaveV3Parser
@@ -55,10 +56,18 @@ contract AaveV3Parser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractOutputToken(address, bytes calldata data) external pure override returns (address token) {
+    function extractOutputToken(address target, bytes calldata data) external view override returns (address token) {
         bytes4 selector = bytes4(data[:4]);
 
-        if (selector == WITHDRAW_SELECTOR) {
+        if (selector == SUPPLY_SELECTOR) {
+            // supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode)
+            // Output is the aToken for the supplied asset
+            address asset = abi.decode(data[4:], (address));
+            return IAavePool(target).getReserveData(asset).aTokenAddress;
+        } else if (selector == REPAY_SELECTOR) {
+            // repay doesn't produce output tokens (it burns debt tokens internally)
+            return address(0);
+        } else if (selector == WITHDRAW_SELECTOR) {
             // withdraw(address asset, uint256 amount, address to)
             return abi.decode(data[4:], (address));
         } else if (selector == BORROW_SELECTOR) {

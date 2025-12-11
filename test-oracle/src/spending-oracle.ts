@@ -594,10 +594,10 @@ function buildSubAccountState(
       }
 
       // Handle output token (add to acquired queue)
-      // For SWAPs: proportionally split output between acquired (inherited timestamp) and new (current timestamp)
+      // For SWAPs and DEPOSITs: proportionally split output between acquired (inherited timestamp) and new (current timestamp)
       // For WITHDRAW/CLAIM: output matched to deposits inherits their original acquisition timestamp
 
-      if (event.opType === OperationType.SWAP) {
+      if (event.opType === OperationType.SWAP || event.opType === OperationType.DEPOSIT) {
         if (event.amountOut > 0n) {
           tokensWithAcquiredHistory.add(tokenOutLower)
           const outputQueue = getQueue(tokenOutLower)
@@ -619,7 +619,8 @@ function buildSubAccountState(
               consumedEntries[0].originalTimestamp
             )
 
-            log(`  SWAP: mixed input - ${totalConsumed} acquired + ${fromNonAcquired} non-acquired`)
+            const opName = OperationType[event.opType]
+            log(`  ${opName}: mixed input - ${totalConsumed} acquired + ${fromNonAcquired} non-acquired`)
             log(`    ${outputFromAcquired} ${event.tokenOut} inherits timestamp ${oldestTimestamp}`)
             log(`    ${outputFromNonAcquired} ${event.tokenOut} newly acquired at ${event.timestamp}`)
 
@@ -631,11 +632,13 @@ function buildSubAccountState(
               (oldest, entry) => entry.originalTimestamp < oldest ? entry.originalTimestamp : oldest,
               consumedEntries[0].originalTimestamp
             )
-            log(`  SWAP: ${event.amountOut} ${event.tokenOut} inherits timestamp ${oldestTimestamp} from consumed acquired tokens`)
+            const opName = OperationType[event.opType]
+            log(`  ${opName}: ${event.amountOut} ${event.tokenOut} inherits timestamp ${oldestTimestamp} from consumed acquired tokens`)
             addToQueue(outputQueue, event.amountOut, oldestTimestamp)
           } else {
             // No acquired input - output is newly acquired
-            log(`  SWAP: ${event.amountOut} ${event.tokenOut} is newly acquired at ${event.timestamp}`)
+            const opName = OperationType[event.opType]
+            log(`  ${opName}: ${event.amountOut} ${event.tokenOut} is newly acquired at ${event.timestamp}`)
             addToQueue(outputQueue, event.amountOut, event.timestamp)
           }
         }
