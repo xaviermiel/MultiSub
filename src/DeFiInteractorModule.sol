@@ -499,17 +499,19 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
         // 7. Capture balance before for output tracking
         address tokenOut = _getOutputToken(target, data, parser);
-        uint256 balanceBefore = tokenOut != address(0) ? IERC20(tokenOut).balanceOf(avatar) : 0;
+        uint256 balanceBefore = tokenOut != address(0)
+            ? IERC20(tokenOut).balanceOf(avatar)
+            : avatar.balance;
 
         // 8. Execute
         bool success = exec(target, 0, data, ISafe.Operation.Call);
         if (!success) revert TransactionFailed();
 
-        // 9. Calculate output amount
-        uint256 amountOut = 0;
-        if (tokenOut != address(0)) {
-            amountOut = IERC20(tokenOut).balanceOf(avatar) - balanceBefore;
-        }
+        // 9. Calculate output amount (works for both ERC20 and native ETH)
+        uint256 balanceAfter = tokenOut != address(0)
+            ? IERC20(tokenOut).balanceOf(avatar)
+            : avatar.balance;
+        uint256 amountOut = balanceAfter - balanceBefore;
 
         // 10. Emit event for oracle
         emit ProtocolExecution(
@@ -571,17 +573,19 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
         // 8. Capture balance before for output tracking
         address tokenOut = _getOutputToken(target, data, parser);
-        uint256 balanceBefore = tokenOut != address(0) ? IERC20(tokenOut).balanceOf(avatar) : 0;
+        uint256 balanceBefore = tokenOut != address(0)
+            ? IERC20(tokenOut).balanceOf(avatar)
+            : avatar.balance;
 
         // 9. Execute with value
         bool success = exec(target, value, data, ISafe.Operation.Call);
         if (!success) revert TransactionFailed();
 
-        // 10. Calculate output amount
-        uint256 amountOut = 0;
-        if (tokenOut != address(0)) {
-            amountOut = IERC20(tokenOut).balanceOf(avatar) - balanceBefore;
-        }
+        // 10. Calculate output amount (works for both ERC20 and native ETH)
+        uint256 balanceAfter = tokenOut != address(0)
+            ? IERC20(tokenOut).balanceOf(avatar)
+            : avatar.balance;
+        uint256 amountOut = balanceAfter - balanceBefore;
 
         // 11. Emit event for oracle
         emit ProtocolExecution(
@@ -620,17 +624,19 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
         // 3. Get output token from parser (parser may query vault for ERC4626)
         address tokenOut = parser.extractOutputToken(target, data);
-        uint256 balanceBefore = tokenOut != address(0) ? IERC20(tokenOut).balanceOf(avatar) : 0;
+        uint256 balanceBefore = tokenOut != address(0)
+            ? IERC20(tokenOut).balanceOf(avatar)
+            : avatar.balance;
 
         // 4. Execute (NO spending check - withdrawals and claims are free)
         bool success = exec(target, 0, data, ISafe.Operation.Call);
         if (!success) revert TransactionFailed();
 
-        // 5. Calculate received amount
-        uint256 amountOut = 0;
-        if (tokenOut != address(0)) {
-            amountOut = IERC20(tokenOut).balanceOf(avatar) - balanceBefore;
-        }
+        // 5. Calculate received amount (works for both ERC20 and native ETH)
+        uint256 balanceAfter = tokenOut != address(0)
+            ? IERC20(tokenOut).balanceOf(avatar)
+            : avatar.balance;
+        uint256 amountOut = balanceAfter - balanceBefore;
 
         // 6. Emit event for oracle to:
         //    - Mark received as acquired if matched to deposit (both WITHDRAW and CLAIM)
@@ -669,17 +675,19 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
         // 3. Get output token from parser (parser may query vault for ERC4626)
         address tokenOut = parser.extractOutputToken(target, data);
-        uint256 balanceBefore = tokenOut != address(0) ? IERC20(tokenOut).balanceOf(avatar) : 0;
+        uint256 balanceBefore = tokenOut != address(0)
+            ? IERC20(tokenOut).balanceOf(avatar)
+            : avatar.balance;
 
         // 4. Execute with value (NO spending check - withdrawals and claims are free)
         bool success = exec(target, value, data, ISafe.Operation.Call);
         if (!success) revert TransactionFailed();
 
-        // 5. Calculate received amount
-        uint256 amountOut = 0;
-        if (tokenOut != address(0)) {
-            amountOut = IERC20(tokenOut).balanceOf(avatar) - balanceBefore;
-        }
+        // 5. Calculate received amount (works for both ERC20 and native ETH)
+        uint256 balanceAfter = tokenOut != address(0)
+            ? IERC20(tokenOut).balanceOf(avatar)
+            : avatar.balance;
+        uint256 amountOut = balanceAfter - balanceBefore;
 
         // 6. Emit event for oracle to:
         //    - Mark received as acquired if matched to deposit (both WITHDRAW and CLAIM)
@@ -933,7 +941,8 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         uint8 priceDecimals = priceFeed.decimals();
         uint256 price = uint256(answer);
 
-        uint8 tokenDecimals = IERC20Metadata(token).decimals();
+        // Native ETH has 18 decimals, otherwise query the token
+        uint8 tokenDecimals = token == address(0) ? 18 : IERC20Metadata(token).decimals();
 
         // Calculate USD value with 18 decimals
         valueUSD = Math.mulDiv(

@@ -523,7 +523,6 @@ function buildSubAccountState(
       // Use event timestamp to determine expiry - tokens must be valid at the time of the event
       let consumedEntries: AcquiredBalanceEntry[] = []
       if ((event.opType === OperationType.SWAP || event.opType === OperationType.DEPOSIT) &&
-          event.tokenIn !== '0x0000000000000000000000000000000000000000' &&
           event.amountIn > 0n) {
         const inputQueue = getQueue(tokenInLower)
         const result = consumeFromQueue(inputQueue, event.amountIn, event.timestamp, windowDuration)
@@ -561,7 +560,7 @@ function buildSubAccountState(
       let outputTimestamp = event.timestamp // Default: new acquisition
 
       if (event.opType === OperationType.SWAP) {
-        if (event.tokenOut !== '0x0000000000000000000000000000000000000000' && event.amountOut > 0n) {
+        if (event.amountOut > 0n) {
           outputAmount = event.amountOut
           tokensWithAcquiredHistory.add(tokenOutLower)
 
@@ -579,7 +578,7 @@ function buildSubAccountState(
           }
         }
       } else if (event.opType === OperationType.WITHDRAW || event.opType === OperationType.CLAIM) {
-        if (event.tokenOut !== '0x0000000000000000000000000000000000000000' && event.amountOut > 0n) {
+        if (event.amountOut > 0n) {
           // Find matching deposits
           let remainingToMatch = event.amountOut
           let matchedOriginalTimestamp: bigint | null = null
