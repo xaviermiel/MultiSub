@@ -358,18 +358,40 @@ function buildSubAccountState(
     acquiredBalances: new Map(),
   }
 
-  // Filter events for this subaccount within the window
-  const relevantEvents = events
+  // Filter events for this subaccount (process all events for token discovery,
+  // but only count spending/acquired from events within the window)
+  const allEvents = events
     .filter(e => e.subAccount.toLowerCase() === subAccount.toLowerCase())
-    .filter(e => e.timestamp >= windowStart)
     .sort((a, b) => Number(a.timestamp - b.timestamp))
 
-  const relevantTransfers = transferEvents
+  const allTransfers = transferEvents
     .filter(e => e.subAccount.toLowerCase() === subAccount.toLowerCase())
-    .filter(e => e.timestamp >= windowStart)
     .sort((a, b) => Number(a.timestamp - b.timestamp))
 
-  log(`Processing ${relevantEvents.length} events for ${subAccount} in window`)
+  const relevantEvents = allEvents.filter(e => e.timestamp >= windowStart)
+  const relevantTransfers = allTransfers.filter(e => e.timestamp >= windowStart)
+
+  log(`Processing ${relevantEvents.length} events for ${subAccount} in window (${allEvents.length} total for token discovery)`)
+
+  // First pass: Discover all tokens that ever had acquired balance (from all events)
+  // This ensures we can clear stale on-chain balances when acquisitions age out
+  const tokensWithAcquiredHistory = new Set<Address>()
+  for (const event of allEvents) {
+    const tokenOutLower = event.tokenOut.toLowerCase() as Address
+    // Track tokens that received output from swaps, withdrawals, or claims
+    if (event.tokenOut !== '0x0000000000000000000000000000000000000000' && event.amountOut > 0n) {
+      if (event.opType === OperationType.SWAP ||
+          event.opType === OperationType.WITHDRAW ||
+          event.opType === OperationType.CLAIM) {
+        tokensWithAcquiredHistory.add(tokenOutLower)
+      }
+    }
+  }
+  for (const transfer of allTransfers) {
+    // Transfers consume acquired balance, so the token must have had acquired status
+    const tokenLower = transfer.token.toLowerCase() as Address
+    tokensWithAcquiredHistory.add(tokenLower)
+  }
 
   // Track running acquired balance per token
   const runningAcquired: Map<Address, bigint> = new Map()
@@ -518,6 +540,8 @@ function buildSubAccountState(
   }
 
   // Calculate final acquired balances
+  // Important: Include ALL tokens that ever had acquired history, even if current balance is 0
+  // This ensures we clear on-chain acquired balances when they age out of the window
   for (const [token, movements] of state.tokenMovements) {
     const validMovements = movements.filter(m => m.timestamp >= windowStart)
 
@@ -535,6 +559,14 @@ function buildSubAccountState(
     }
 
     state.acquiredBalances.set(token, netAcquired)
+  }
+
+  // Ensure all tokens with acquired history are in the map (set to 0 if not already present)
+  // This handles the case where a token's acquisition aged out and had no in-window activity
+  for (const token of tokensWithAcquiredHistory) {
+    if (!state.acquiredBalances.has(token)) {
+      state.acquiredBalances.set(token, 0n)
+    }
   }
 
   log(`State built: spending=${state.totalSpendingInWindow}, acquired tokens=${state.acquiredBalances.size}`)
@@ -688,13 +720,17 @@ async function pollForNewEvents() {
 async function processSubaccount(subAccount: Address, currentBlock?: bigint) {
   const currentTimestamp = BigInt(Math.floor(Date.now() / 1000))
   const blockNumber = currentBlock ?? await publicClient.getBlockNumber()
+
+  // Query from 2x the lookback range to discover tokens that may have acquired balance
+  // even if the original acquisition is outside the current window
+  const extendedFromBlock = blockNumber - BigInt(config.blocksToLookBack * 2)
   const fromBlock = blockNumber - BigInt(config.blocksToLookBack)
 
-  // Query limits and events in parallel
+  // Query limits and events in parallel (extended range for token discovery)
   const [{ windowDuration }, protocolEvents, transferEvents] = await Promise.all([
     getSubAccountLimits(subAccount),
-    queryProtocolExecutionEvents(fromBlock, blockNumber, subAccount),
-    queryTransferEvents(fromBlock, blockNumber, subAccount),
+    queryProtocolExecutionEvents(extendedFromBlock, blockNumber, subAccount),
+    queryTransferEvents(extendedFromBlock, blockNumber, subAccount),
   ])
 
   // Build state
