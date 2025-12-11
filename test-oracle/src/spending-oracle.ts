@@ -355,16 +355,27 @@ async function queryTransferEvents(fromBlock: bigint, toBlock: bigint, subAccoun
 /**
  * Consume tokens from a FIFO queue (oldest first)
  * Returns the entries consumed with their original timestamps
+ * Only consumes non-expired entries based on the event timestamp
  */
 function consumeFromQueue(
   queue: AcquiredBalanceQueue,
-  amount: bigint
+  amount: bigint,
+  eventTimestamp: bigint,
+  windowDuration: bigint
 ): { consumed: AcquiredBalanceEntry[]; remaining: bigint } {
   const consumed: AcquiredBalanceEntry[] = []
   let remaining = amount
+  const expiryThreshold = eventTimestamp - windowDuration
 
   while (remaining > 0n && queue.length > 0) {
     const entry = queue[0]
+
+    // Skip expired entries (they shouldn't be consumed as acquired)
+    if (entry.originalTimestamp < expiryThreshold) {
+      queue.shift()
+      continue
+    }
+
     if (entry.amount <= remaining) {
       // Consume entire entry
       consumed.push({ ...entry })
@@ -500,12 +511,13 @@ function buildSubAccountState(
     }
 
     // Handle input token consumption (FIFO)
+    // Use event timestamp to determine expiry - tokens must be valid at the time of the event
     let consumedEntries: AcquiredBalanceEntry[] = []
     if ((event.opType === OperationType.SWAP || event.opType === OperationType.DEPOSIT) &&
         event.tokenIn !== '0x0000000000000000000000000000000000000000' &&
         event.amountIn > 0n) {
       const inputQueue = getQueue(tokenInLower)
-      const result = consumeFromQueue(inputQueue, event.amountIn)
+      const result = consumeFromQueue(inputQueue, event.amountIn, event.timestamp, windowDuration)
       consumedEntries = result.consumed
       tokensWithAcquiredHistory.add(tokenInLower)
     }
@@ -596,7 +608,7 @@ function buildSubAccountState(
 
     if (transfer.amount > 0n) {
       const queue = getQueue(tokenLower)
-      consumeFromQueue(queue, transfer.amount)
+      consumeFromQueue(queue, transfer.amount, transfer.timestamp, windowDuration)
       tokensWithAcquiredHistory.add(tokenLower)
     }
   }
