@@ -764,7 +764,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     // ============ Transfer Function ============
 
     /**
-     * @notice Transfer tokens from Safe - always costs full spending amount
+     * @notice Transfer tokens from Safe - acquired tokens are free, non-acquired cost spending
      */
     function transferToken(
         address token,
@@ -775,20 +775,19 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         if (token == address(0) || recipient == address(0)) revert InvalidAddress();
         _requireFreshOracle(msg.sender);
 
-        // Transfers always cost full spending (value leaves Safe)
-        uint256 spendingCost = _estimateTokenValueUSD(token, amount);
+        // Calculate spending cost only for non-acquired tokens
+        uint256 acquired = acquiredBalance[msg.sender][token];
+        uint256 usedFromAcquired = amount > acquired ? acquired : amount;
+        uint256 fromOriginal = amount - usedFromAcquired;
+        uint256 spendingCost = _estimateTokenValueUSD(token, fromOriginal);
+
         if (spendingCost > spendingAllowance[msg.sender]) {
             revert ExceedsSpendingLimit();
         }
 
+        // Deduct spending allowance and acquired balance
         spendingAllowance[msg.sender] -= spendingCost;
-
-        // Also deduct from acquired if available
-        uint256 acquired = acquiredBalance[msg.sender][token];
-        if (acquired > 0) {
-            uint256 deductFromAcquired = amount > acquired ? acquired : amount;
-            acquiredBalance[msg.sender][token] -= deductFromAcquired;
-        }
+        acquiredBalance[msg.sender][token] -= usedFromAcquired;
 
         // Execute transfer
         bytes memory transferData = abi.encodeWithSelector(
