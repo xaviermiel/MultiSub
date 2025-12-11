@@ -556,25 +556,49 @@ function buildSubAccountState(
       }
 
       // Handle output token (add to acquired queue)
-      let outputAmount = 0n
-      let outputTimestamp = event.timestamp // Default: new acquisition
+      // For SWAPs: proportionally split output between acquired (inherited timestamp) and new (current timestamp)
+      // For WITHDRAW/CLAIM: output matched to deposits inherits their original acquisition timestamp
 
       if (event.opType === OperationType.SWAP) {
         if (event.amountOut > 0n) {
-          outputAmount = event.amountOut
           tokensWithAcquiredHistory.add(tokenOutLower)
+          const outputQueue = getQueue(tokenOutLower)
 
-          // If we consumed acquired tokens, output inherits the oldest timestamp
-          // This prevents "refreshing" acquired status by swapping
-          if (consumedEntries.length > 0) {
-            // Find the oldest timestamp from consumed entries
-            outputTimestamp = consumedEntries.reduce(
+          // Calculate how much of the input was acquired vs non-acquired
+          const totalConsumed = consumedEntries.reduce((sum, e) => sum + e.amount, 0n)
+          const fromNonAcquired = event.amountIn - totalConsumed // Remaining came from original funds
+
+          if (totalConsumed > 0n && fromNonAcquired > 0n) {
+            // Mixed case: proportionally split the output
+            // Acquired portion inherits oldest timestamp, non-acquired portion is newly acquired
+            const acquiredRatio = (totalConsumed * 10000n) / event.amountIn // basis points
+            const outputFromAcquired = (event.amountOut * acquiredRatio) / 10000n
+            const outputFromNonAcquired = event.amountOut - outputFromAcquired
+
+            // Find oldest timestamp from consumed entries
+            const oldestTimestamp = consumedEntries.reduce(
               (oldest, entry) => entry.originalTimestamp < oldest ? entry.originalTimestamp : oldest,
               consumedEntries[0].originalTimestamp
             )
-            log(`  SWAP: ${event.amountOut} ${event.tokenOut} inherits timestamp ${outputTimestamp} from consumed acquired tokens`)
+
+            log(`  SWAP: mixed input - ${totalConsumed} acquired + ${fromNonAcquired} non-acquired`)
+            log(`    ${outputFromAcquired} ${event.tokenOut} inherits timestamp ${oldestTimestamp}`)
+            log(`    ${outputFromNonAcquired} ${event.tokenOut} newly acquired at ${event.timestamp}`)
+
+            addToQueue(outputQueue, outputFromAcquired, oldestTimestamp)
+            addToQueue(outputQueue, outputFromNonAcquired, event.timestamp)
+          } else if (totalConsumed > 0n) {
+            // Entire input was acquired - output inherits oldest timestamp
+            const oldestTimestamp = consumedEntries.reduce(
+              (oldest, entry) => entry.originalTimestamp < oldest ? entry.originalTimestamp : oldest,
+              consumedEntries[0].originalTimestamp
+            )
+            log(`  SWAP: ${event.amountOut} ${event.tokenOut} inherits timestamp ${oldestTimestamp} from consumed acquired tokens`)
+            addToQueue(outputQueue, event.amountOut, oldestTimestamp)
           } else {
+            // No acquired input - output is newly acquired
             log(`  SWAP: ${event.amountOut} ${event.tokenOut} is newly acquired at ${event.timestamp}`)
+            addToQueue(outputQueue, event.amountOut, event.timestamp)
           }
         }
       } else if (event.opType === OperationType.WITHDRAW || event.opType === OperationType.CLAIM) {
@@ -611,20 +635,15 @@ function buildSubAccountState(
 
           const matchedAmount = event.amountOut - remainingToMatch
           if (matchedAmount > 0n) {
-            outputAmount = matchedAmount
             tokensWithAcquiredHistory.add(tokenOutLower)
+            const outputQueue = getQueue(tokenOutLower)
 
             // Withdrawal inherits the original acquisition timestamp (not deposit timestamp)
-            outputTimestamp = matchedOriginalTimestamp || event.timestamp
+            const outputTimestamp = matchedOriginalTimestamp || event.timestamp
             log(`  ${OperationType[event.opType]} matched: ${matchedAmount} inherits original timestamp ${outputTimestamp}`)
+            addToQueue(outputQueue, matchedAmount, outputTimestamp)
           }
         }
-      }
-
-      // Add output to queue with appropriate timestamp
-      if (outputAmount > 0n) {
-        const outputQueue = getQueue(tokenOutLower)
-        addToQueue(outputQueue, outputAmount, outputTimestamp)
       }
     } else {
       // Transfer event
@@ -822,7 +841,6 @@ async function processSubaccount(subAccount: Address, currentBlock?: bigint) {
   // Query from 2x the lookback range to discover tokens that may have acquired balance
   // even if the original acquisition is outside the current window
   const extendedFromBlock = blockNumber - BigInt(config.blocksToLookBack * 2)
-  const fromBlock = blockNumber - BigInt(config.blocksToLookBack)
 
   // Query limits and events in parallel (extended range for token discovery)
   const [{ windowDuration }, protocolEvents, transferEvents] = await Promise.all([
