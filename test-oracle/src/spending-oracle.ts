@@ -102,8 +102,9 @@ let account: ReturnType<typeof privateKeyToAccount>
 // Track last processed block for event polling
 let lastProcessedBlock = 0n
 
-// Prevent overlapping polls
+// Prevent overlapping operations
 let isPolling = false
+let isRefreshing = false
 
 function initWalletClient() {
   account = privateKeyToAccount(config.privateKey)
@@ -663,6 +664,13 @@ async function processSubaccount(subAccount: Address, currentBlock?: bigint) {
 // ============ Cron Handler ============
 
 async function onCronRefresh() {
+  // Prevent overlapping refreshes
+  if (isRefreshing) {
+    log('Skipping cron refresh - previous refresh still running')
+    return
+  }
+  isRefreshing = true
+
   log('=== Spending Oracle: Periodic Refresh ===')
 
   try {
@@ -696,6 +704,8 @@ async function onCronRefresh() {
     log('=== Periodic Refresh Complete ===')
   } catch (error) {
     log(`Error in periodic refresh: ${error}`)
+  } finally {
+    isRefreshing = false
   }
 }
 
