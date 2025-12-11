@@ -64,18 +64,29 @@ interface DepositRecord {
   timestamp: bigint
 }
 
-interface TokenMovement {
-  token: Address
+/**
+ * FIFO queue entry for acquired balances
+ * Tracks the original acquisition timestamp so tokens expire together
+ * when swapped (output inherits input's original timestamp)
+ */
+interface AcquiredBalanceEntry {
   amount: bigint
-  timestamp: bigint
-  isOutput: boolean
+  originalTimestamp: bigint  // When the tokens were ORIGINALLY acquired (for expiry calculation)
 }
+
+/**
+ * FIFO queue for each token's acquired balance
+ * Oldest entries are consumed first when spending
+ */
+type AcquiredBalanceQueue = AcquiredBalanceEntry[]
 
 interface SubAccountState {
   spendingRecords: { amount: bigint; timestamp: bigint }[]
   depositRecords: DepositRecord[]
-  tokenMovements: Map<Address, TokenMovement[]>
   totalSpendingInWindow: bigint
+  // FIFO queues for acquired balances per token
+  acquiredQueues: Map<Address, AcquiredBalanceQueue>
+  // Final calculated acquired balances (sum of non-expired entries)
   acquiredBalances: Map<Address, bigint>
 }
 
@@ -339,6 +350,81 @@ async function queryTransferEvents(fromBlock: bigint, toBlock: bigint, subAccoun
   }
 }
 
+// ============ FIFO Queue Helpers ============
+
+/**
+ * Consume tokens from a FIFO queue (oldest first)
+ * Returns the entries consumed with their original timestamps
+ */
+function consumeFromQueue(
+  queue: AcquiredBalanceQueue,
+  amount: bigint
+): { consumed: AcquiredBalanceEntry[]; remaining: bigint } {
+  const consumed: AcquiredBalanceEntry[] = []
+  let remaining = amount
+
+  while (remaining > 0n && queue.length > 0) {
+    const entry = queue[0]
+    if (entry.amount <= remaining) {
+      // Consume entire entry
+      consumed.push({ ...entry })
+      remaining -= entry.amount
+      queue.shift()
+    } else {
+      // Partial consumption
+      consumed.push({ amount: remaining, originalTimestamp: entry.originalTimestamp })
+      entry.amount -= remaining
+      remaining = 0n
+    }
+  }
+
+  return { consumed, remaining }
+}
+
+/**
+ * Add tokens to a FIFO queue with the given original timestamp
+ */
+function addToQueue(
+  queue: AcquiredBalanceQueue,
+  amount: bigint,
+  originalTimestamp: bigint
+): void {
+  if (amount <= 0n) return
+  queue.push({ amount, originalTimestamp })
+}
+
+/**
+ * Get total amount in queue that hasn't expired
+ */
+function getValidQueueBalance(
+  queue: AcquiredBalanceQueue,
+  currentTimestamp: bigint,
+  windowDuration: bigint
+): bigint {
+  const expiryThreshold = currentTimestamp - windowDuration
+  let total = 0n
+  for (const entry of queue) {
+    if (entry.originalTimestamp >= expiryThreshold) {
+      total += entry.amount
+    }
+  }
+  return total
+}
+
+/**
+ * Remove expired entries from queue
+ */
+function pruneExpiredEntries(
+  queue: AcquiredBalanceQueue,
+  currentTimestamp: bigint,
+  windowDuration: bigint
+): void {
+  const expiryThreshold = currentTimestamp - windowDuration
+  while (queue.length > 0 && queue[0].originalTimestamp < expiryThreshold) {
+    queue.shift()
+  }
+}
+
 // ============ State Building ============
 
 function buildSubAccountState(
@@ -353,13 +439,12 @@ function buildSubAccountState(
   const state: SubAccountState = {
     spendingRecords: [],
     depositRecords: [],
-    tokenMovements: new Map(),
     totalSpendingInWindow: 0n,
+    acquiredQueues: new Map(),
     acquiredBalances: new Map(),
   }
 
-  // Filter events for this subaccount (process all events for token discovery,
-  // but only count spending/acquired from events within the window)
+  // Filter and sort ALL events chronologically (we need full history for FIFO)
   const allEvents = events
     .filter(e => e.subAccount.toLowerCase() === subAccount.toLowerCase())
     .sort((a, b) => Number(a.timestamp - b.timestamp))
@@ -368,66 +453,37 @@ function buildSubAccountState(
     .filter(e => e.subAccount.toLowerCase() === subAccount.toLowerCase())
     .sort((a, b) => Number(a.timestamp - b.timestamp))
 
-  const relevantEvents = allEvents.filter(e => e.timestamp >= windowStart)
-  const relevantTransfers = allTransfers.filter(e => e.timestamp >= windowStart)
+  log(`Processing ${allEvents.length} events for ${subAccount} (FIFO mode)`)
 
-  log(`Processing ${relevantEvents.length} events for ${subAccount} in window (${allEvents.length} total for token discovery)`)
-
-  // First pass: Discover all tokens that ever had acquired balance (from all events)
-  // This ensures we can clear stale on-chain balances when acquisitions age out
+  // Track all tokens that ever had acquired balance (for cleanup)
   const tokensWithAcquiredHistory = new Set<Address>()
-  for (const event of allEvents) {
-    const tokenOutLower = event.tokenOut.toLowerCase() as Address
-    // Track tokens that received output from swaps, withdrawals, or claims
-    if (event.tokenOut !== '0x0000000000000000000000000000000000000000' && event.amountOut > 0n) {
-      if (event.opType === OperationType.SWAP ||
-          event.opType === OperationType.WITHDRAW ||
-          event.opType === OperationType.CLAIM) {
-        tokensWithAcquiredHistory.add(tokenOutLower)
-      }
+
+  // FIFO queues per token - tracks (amount, originalTimestamp)
+  const acquiredQueues: Map<Address, AcquiredBalanceQueue> = new Map()
+
+  // Helper to get or create queue
+  const getQueue = (token: Address): AcquiredBalanceQueue => {
+    const lower = token.toLowerCase() as Address
+    if (!acquiredQueues.has(lower)) {
+      acquiredQueues.set(lower, [])
     }
-  }
-  for (const transfer of allTransfers) {
-    // Transfers consume acquired balance, so the token must have had acquired status
-    const tokenLower = transfer.token.toLowerCase() as Address
-    tokensWithAcquiredHistory.add(tokenLower)
+    return acquiredQueues.get(lower)!
   }
 
-  // Track running acquired balance per token
-  const runningAcquired: Map<Address, bigint> = new Map()
-
-  for (const event of relevantEvents) {
+  // Process ALL events chronologically to build accurate FIFO state
+  for (const event of allEvents) {
     const tokenInLower = event.tokenIn.toLowerCase() as Address
     const tokenOutLower = event.tokenOut.toLowerCase() as Address
+    const isInWindow = event.timestamp >= windowStart
 
-    // Track spending
+    // Track spending (only count if in window)
     if (event.opType === OperationType.SWAP || event.opType === OperationType.DEPOSIT) {
-      if (event.spendingCost > 0n) {
+      if (isInWindow && event.spendingCost > 0n) {
         state.spendingRecords.push({
           amount: event.spendingCost,
           timestamp: event.timestamp,
         })
         state.totalSpendingInWindow += event.spendingCost
-      }
-
-      // Track how much of the input came from acquired
-      if (event.tokenIn !== '0x0000000000000000000000000000000000000000' && event.amountIn > 0n) {
-        const currentAcquired = runningAcquired.get(tokenInLower) || 0n
-        const usedFromAcquired = event.amountIn > currentAcquired ? currentAcquired : event.amountIn
-
-        if (usedFromAcquired > 0n) {
-          runningAcquired.set(tokenInLower, currentAcquired - usedFromAcquired)
-
-          if (!state.tokenMovements.has(tokenInLower)) {
-            state.tokenMovements.set(tokenInLower, [])
-          }
-          state.tokenMovements.get(tokenInLower)!.push({
-            token: event.tokenIn,
-            amount: usedFromAcquired,
-            timestamp: event.timestamp,
-            isOutput: false,
-          })
-        }
       }
     }
 
@@ -438,79 +494,99 @@ function buildSubAccountState(
         target: event.target,
         tokenIn: event.tokenIn,
         amountIn: event.amountIn,
-        remainingAmount: event.amountIn,  // Initially, full amount is available for withdrawal
+        remainingAmount: event.amountIn,
         timestamp: event.timestamp,
       })
     }
 
-    // Track outputs (add to acquired)
-    let acquiredAmount = 0n
-    let acquiredToken: Address | null = null
+    // Handle input token consumption (FIFO)
+    let consumedEntries: AcquiredBalanceEntry[] = []
+    if ((event.opType === OperationType.SWAP || event.opType === OperationType.DEPOSIT) &&
+        event.tokenIn !== '0x0000000000000000000000000000000000000000' &&
+        event.amountIn > 0n) {
+      const inputQueue = getQueue(tokenInLower)
+      const result = consumeFromQueue(inputQueue, event.amountIn)
+      consumedEntries = result.consumed
+      tokensWithAcquiredHistory.add(tokenInLower)
+    }
+
+    // Handle output token (add to acquired queue)
+    let outputAmount = 0n
+    let outputTimestamp = event.timestamp // Default: new acquisition
 
     if (event.opType === OperationType.SWAP) {
       if (event.tokenOut !== '0x0000000000000000000000000000000000000000' && event.amountOut > 0n) {
-        acquiredToken = tokenOutLower
-        acquiredAmount = event.amountOut
+        outputAmount = event.amountOut
+        tokensWithAcquiredHistory.add(tokenOutLower)
+
+        // If we consumed acquired tokens, output inherits the OLDEST timestamp
+        // This prevents "refreshing" acquired status by swapping
+        if (consumedEntries.length > 0) {
+          // Find the oldest timestamp from consumed entries
+          outputTimestamp = consumedEntries.reduce(
+            (oldest, entry) => entry.originalTimestamp < oldest ? entry.originalTimestamp : oldest,
+            consumedEntries[0].originalTimestamp
+          )
+          log(`  SWAP: ${event.amountOut} ${event.tokenOut} inherits timestamp ${outputTimestamp} from consumed acquired tokens`)
+        } else {
+          log(`  SWAP: ${event.amountOut} ${event.tokenOut} is newly acquired at ${event.timestamp}`)
+        }
       }
     } else if (event.opType === OperationType.WITHDRAW || event.opType === OperationType.CLAIM) {
       if (event.tokenOut !== '0x0000000000000000000000000000000000000000' && event.amountOut > 0n) {
-        // Find matching deposits with remaining balance and consume from them
+        // Find matching deposits
         let remainingToMatch = event.amountOut
+        let matchedDepositTimestamp: bigint | null = null
 
         for (const deposit of state.depositRecords) {
           if (remainingToMatch <= 0n) break
 
-          // Check if this deposit matches (same target, subAccount, and token)
           if (deposit.target.toLowerCase() === event.target.toLowerCase() &&
               deposit.subAccount.toLowerCase() === event.subAccount.toLowerCase() &&
               deposit.tokenIn.toLowerCase() === event.tokenOut.toLowerCase() &&
               deposit.remainingAmount > 0n) {
 
-            // Calculate how much we can consume from this deposit
             const consumeAmount = remainingToMatch > deposit.remainingAmount
               ? deposit.remainingAmount
               : remainingToMatch
 
-            // Consume from the deposit
             deposit.remainingAmount -= consumeAmount
             remainingToMatch -= consumeAmount
 
-            log(`  ${OperationType[event.opType]} consuming ${consumeAmount} from deposit (remaining in deposit: ${deposit.remainingAmount})`)
+            // Track the deposit timestamp for inheritance
+            if (matchedDepositTimestamp === null || deposit.timestamp < matchedDepositTimestamp) {
+              matchedDepositTimestamp = deposit.timestamp
+            }
+
+            log(`  ${OperationType[event.opType]} consuming ${consumeAmount} from deposit at ${deposit.timestamp}`)
           }
         }
 
-        // Only the matched portion becomes acquired
         const matchedAmount = event.amountOut - remainingToMatch
         if (matchedAmount > 0n) {
-          acquiredToken = tokenOutLower
-          acquiredAmount = matchedAmount
-          log(`  ${OperationType[event.opType]} matched to deposit: ${matchedAmount} of ${event.tokenOut} (unmatched: ${remainingToMatch})`)
-        } else {
-          log(`  ${OperationType[event.opType]} NOT matched to any deposit: ${event.amountOut} of ${event.tokenOut}`)
+          outputAmount = matchedAmount
+          tokensWithAcquiredHistory.add(tokenOutLower)
+
+          // Withdrawal inherits the deposit timestamp (when the original spending happened)
+          outputTimestamp = matchedDepositTimestamp || event.timestamp
+          log(`  ${OperationType[event.opType]} matched: ${matchedAmount} inherits timestamp ${outputTimestamp}`)
         }
       }
     }
 
-    // Add output to running acquired
-    if (acquiredToken && acquiredAmount > 0n) {
-      const current = runningAcquired.get(acquiredToken) || 0n
-      runningAcquired.set(acquiredToken, current + acquiredAmount)
-
-      if (!state.tokenMovements.has(acquiredToken)) {
-        state.tokenMovements.set(acquiredToken, [])
-      }
-      state.tokenMovements.get(acquiredToken)!.push({
-        token: acquiredToken,
-        amount: acquiredAmount,
-        timestamp: event.timestamp,
-        isOutput: true,
-      })
+    // Add output to queue with appropriate timestamp
+    if (outputAmount > 0n) {
+      const outputQueue = getQueue(tokenOutLower)
+      addToQueue(outputQueue, outputAmount, outputTimestamp)
     }
   }
 
-  // Process transfer events
-  for (const transfer of relevantTransfers) {
-    if (transfer.spendingCost > 0n) {
+  // Process transfer events (also consume from FIFO queues)
+  for (const transfer of allTransfers) {
+    const isInWindow = transfer.timestamp >= windowStart
+    const tokenLower = transfer.token.toLowerCase() as Address
+
+    if (isInWindow && transfer.spendingCost > 0n) {
       state.spendingRecords.push({
         amount: transfer.spendingCost,
         timestamp: transfer.timestamp,
@@ -518,56 +594,31 @@ function buildSubAccountState(
       state.totalSpendingInWindow += transfer.spendingCost
     }
 
-    const tokenLower = transfer.token.toLowerCase() as Address
     if (transfer.amount > 0n) {
-      const currentAcquired = runningAcquired.get(tokenLower) || 0n
-      const usedFromAcquired = transfer.amount > currentAcquired ? currentAcquired : transfer.amount
-
-      if (usedFromAcquired > 0n) {
-        runningAcquired.set(tokenLower, currentAcquired - usedFromAcquired)
-
-        if (!state.tokenMovements.has(tokenLower)) {
-          state.tokenMovements.set(tokenLower, [])
-        }
-        state.tokenMovements.get(tokenLower)!.push({
-          token: transfer.token,
-          amount: usedFromAcquired,
-          timestamp: transfer.timestamp,
-          isOutput: false,
-        })
-      }
+      const queue = getQueue(tokenLower)
+      consumeFromQueue(queue, transfer.amount)
+      tokensWithAcquiredHistory.add(tokenLower)
     }
   }
 
-  // Calculate final acquired balances
-  // Important: Include ALL tokens that ever had acquired history, even if current balance is 0
-  // This ensures we clear on-chain acquired balances when they age out of the window
-  for (const [token, movements] of state.tokenMovements) {
-    const validMovements = movements.filter(m => m.timestamp >= windowStart)
-
-    let netAcquired = 0n
-    for (const m of validMovements) {
-      if (m.isOutput) {
-        netAcquired += m.amount
-      } else {
-        netAcquired -= m.amount
-      }
-    }
-
-    if (netAcquired < 0n) {
-      netAcquired = 0n
-    }
-
-    state.acquiredBalances.set(token, netAcquired)
-  }
-
-  // Ensure all tokens with acquired history are in the map (set to 0 if not already present)
-  // This handles the case where a token's acquisition aged out and had no in-window activity
+  // Calculate final acquired balances (only non-expired entries count)
   for (const token of tokensWithAcquiredHistory) {
-    if (!state.acquiredBalances.has(token)) {
-      state.acquiredBalances.set(token, 0n)
+    const queue = acquiredQueues.get(token) || []
+
+    // Prune expired entries
+    pruneExpiredEntries(queue, currentTimestamp, windowDuration)
+
+    // Sum remaining valid balance
+    const validBalance = getValidQueueBalance(queue, currentTimestamp, windowDuration)
+    state.acquiredBalances.set(token, validBalance)
+
+    if (validBalance > 0n) {
+      log(`  Token ${token}: acquired balance = ${validBalance}`)
     }
   }
+
+  // Store queues in state for potential debugging
+  state.acquiredQueues = acquiredQueues
 
   log(`State built: spending=${state.totalSpendingInWindow}, acquired tokens=${state.acquiredBalances.size}`)
 
