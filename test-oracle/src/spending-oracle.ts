@@ -438,6 +438,11 @@ function pruneExpiredEntries(
 
 // ============ State Building ============
 
+// Unified event type for chronological processing
+type UnifiedEvent =
+  | { type: 'protocol'; event: ProtocolExecutionEvent }
+  | { type: 'transfer'; event: TransferExecutedEvent }
+
 function buildSubAccountState(
   events: ProtocolExecutionEvent[],
   transferEvents: TransferExecutedEvent[],
@@ -455,16 +460,28 @@ function buildSubAccountState(
     acquiredBalances: new Map(),
   }
 
-  // Filter and sort ALL events chronologically (we need full history for FIFO)
-  const allEvents = events
+  // Filter events for this subaccount
+  const filteredProtocol = events
     .filter(e => e.subAccount.toLowerCase() === subAccount.toLowerCase())
-    .sort((a, b) => Number(a.timestamp - b.timestamp))
 
-  const allTransfers = transferEvents
+  const filteredTransfers = transferEvents
     .filter(e => e.subAccount.toLowerCase() === subAccount.toLowerCase())
-    .sort((a, b) => Number(a.timestamp - b.timestamp))
 
-  log(`Processing ${allEvents.length} events for ${subAccount} (FIFO mode)`)
+  // Merge into unified event list and sort chronologically
+  // This ensures transfers are processed in correct order relative to protocol events
+  const unifiedEvents: UnifiedEvent[] = [
+    ...filteredProtocol.map(e => ({ type: 'protocol' as const, event: e })),
+    ...filteredTransfers.map(e => ({ type: 'transfer' as const, event: e })),
+  ].sort((a, b) => {
+    const timestampDiff = Number(a.event.timestamp - b.event.timestamp)
+    if (timestampDiff !== 0) return timestampDiff
+    // Same timestamp: sort by block number, then log index
+    const blockDiff = Number(a.event.blockNumber - b.event.blockNumber)
+    if (blockDiff !== 0) return blockDiff
+    return a.event.logIndex - b.event.logIndex
+  })
+
+  log(`Processing ${unifiedEvents.length} events for ${subAccount} (FIFO mode, ${filteredProtocol.length} protocol + ${filteredTransfers.length} transfers)`)
 
   // Track all tokens that ever had acquired balance (for cleanup)
   const tokensWithAcquiredHistory = new Set<Address>()
@@ -481,135 +498,137 @@ function buildSubAccountState(
     return acquiredQueues.get(lower)!
   }
 
-  // Process ALL events chronologically to build accurate FIFO state
-  for (const event of allEvents) {
-    const tokenInLower = event.tokenIn.toLowerCase() as Address
-    const tokenOutLower = event.tokenOut.toLowerCase() as Address
-    const isInWindow = event.timestamp >= windowStart
+  // Process ALL events chronologically (unified protocol + transfer events)
+  for (const unified of unifiedEvents) {
+    if (unified.type === 'protocol') {
+      const event = unified.event
+      const tokenInLower = event.tokenIn.toLowerCase() as Address
+      const tokenOutLower = event.tokenOut.toLowerCase() as Address
+      const isInWindow = event.timestamp >= windowStart
 
-    // Track spending (only count if in window)
-    if (event.opType === OperationType.SWAP || event.opType === OperationType.DEPOSIT) {
-      if (isInWindow && event.spendingCost > 0n) {
-        state.spendingRecords.push({
-          amount: event.spendingCost,
+      // Track spending (only count if in window)
+      if (event.opType === OperationType.SWAP || event.opType === OperationType.DEPOSIT) {
+        if (isInWindow && event.spendingCost > 0n) {
+          state.spendingRecords.push({
+            amount: event.spendingCost,
+            timestamp: event.timestamp,
+          })
+          state.totalSpendingInWindow += event.spendingCost
+        }
+      }
+
+      // Track deposits for withdrawal matching
+      if (event.opType === OperationType.DEPOSIT) {
+        state.depositRecords.push({
+          subAccount: event.subAccount,
+          target: event.target,
+          tokenIn: event.tokenIn,
+          amountIn: event.amountIn,
+          remainingAmount: event.amountIn,
           timestamp: event.timestamp,
         })
-        state.totalSpendingInWindow += event.spendingCost
       }
-    }
 
-    // Track deposits for withdrawal matching
-    if (event.opType === OperationType.DEPOSIT) {
-      state.depositRecords.push({
-        subAccount: event.subAccount,
-        target: event.target,
-        tokenIn: event.tokenIn,
-        amountIn: event.amountIn,
-        remainingAmount: event.amountIn,
-        timestamp: event.timestamp,
-      })
-    }
-
-    // Handle input token consumption (FIFO)
-    // Use event timestamp to determine expiry - tokens must be valid at the time of the event
-    let consumedEntries: AcquiredBalanceEntry[] = []
-    if ((event.opType === OperationType.SWAP || event.opType === OperationType.DEPOSIT) &&
-        event.tokenIn !== '0x0000000000000000000000000000000000000000' &&
-        event.amountIn > 0n) {
-      const inputQueue = getQueue(tokenInLower)
-      const result = consumeFromQueue(inputQueue, event.amountIn, event.timestamp, windowDuration)
-      consumedEntries = result.consumed
-      tokensWithAcquiredHistory.add(tokenInLower)
-    }
-
-    // Handle output token (add to acquired queue)
-    let outputAmount = 0n
-    let outputTimestamp = event.timestamp // Default: new acquisition
-
-    if (event.opType === OperationType.SWAP) {
-      if (event.tokenOut !== '0x0000000000000000000000000000000000000000' && event.amountOut > 0n) {
-        outputAmount = event.amountOut
-        tokensWithAcquiredHistory.add(tokenOutLower)
-
-        // If we consumed acquired tokens, output inherits the OLDEST timestamp
-        // This prevents "refreshing" acquired status by swapping
-        if (consumedEntries.length > 0) {
-          // Find the oldest timestamp from consumed entries
-          outputTimestamp = consumedEntries.reduce(
-            (oldest, entry) => entry.originalTimestamp < oldest ? entry.originalTimestamp : oldest,
-            consumedEntries[0].originalTimestamp
-          )
-          log(`  SWAP: ${event.amountOut} ${event.tokenOut} inherits timestamp ${outputTimestamp} from consumed acquired tokens`)
-        } else {
-          log(`  SWAP: ${event.amountOut} ${event.tokenOut} is newly acquired at ${event.timestamp}`)
-        }
+      // Handle input token consumption (FIFO)
+      // Use event timestamp to determine expiry - tokens must be valid at the time of the event
+      let consumedEntries: AcquiredBalanceEntry[] = []
+      if ((event.opType === OperationType.SWAP || event.opType === OperationType.DEPOSIT) &&
+          event.tokenIn !== '0x0000000000000000000000000000000000000000' &&
+          event.amountIn > 0n) {
+        const inputQueue = getQueue(tokenInLower)
+        const result = consumeFromQueue(inputQueue, event.amountIn, event.timestamp, windowDuration)
+        consumedEntries = result.consumed
+        tokensWithAcquiredHistory.add(tokenInLower)
       }
-    } else if (event.opType === OperationType.WITHDRAW || event.opType === OperationType.CLAIM) {
-      if (event.tokenOut !== '0x0000000000000000000000000000000000000000' && event.amountOut > 0n) {
-        // Find matching deposits
-        let remainingToMatch = event.amountOut
-        let matchedDepositTimestamp: bigint | null = null
 
-        for (const deposit of state.depositRecords) {
-          if (remainingToMatch <= 0n) break
+      // Handle output token (add to acquired queue)
+      let outputAmount = 0n
+      let outputTimestamp = event.timestamp // Default: new acquisition
 
-          if (deposit.target.toLowerCase() === event.target.toLowerCase() &&
-              deposit.subAccount.toLowerCase() === event.subAccount.toLowerCase() &&
-              deposit.tokenIn.toLowerCase() === event.tokenOut.toLowerCase() &&
-              deposit.remainingAmount > 0n) {
-
-            const consumeAmount = remainingToMatch > deposit.remainingAmount
-              ? deposit.remainingAmount
-              : remainingToMatch
-
-            deposit.remainingAmount -= consumeAmount
-            remainingToMatch -= consumeAmount
-
-            // Track the deposit timestamp for inheritance
-            if (matchedDepositTimestamp === null || deposit.timestamp < matchedDepositTimestamp) {
-              matchedDepositTimestamp = deposit.timestamp
-            }
-
-            log(`  ${OperationType[event.opType]} consuming ${consumeAmount} from deposit at ${deposit.timestamp}`)
-          }
-        }
-
-        const matchedAmount = event.amountOut - remainingToMatch
-        if (matchedAmount > 0n) {
-          outputAmount = matchedAmount
+      if (event.opType === OperationType.SWAP) {
+        if (event.tokenOut !== '0x0000000000000000000000000000000000000000' && event.amountOut > 0n) {
+          outputAmount = event.amountOut
           tokensWithAcquiredHistory.add(tokenOutLower)
 
-          // Withdrawal inherits the deposit timestamp (when the original spending happened)
-          outputTimestamp = matchedDepositTimestamp || event.timestamp
-          log(`  ${OperationType[event.opType]} matched: ${matchedAmount} inherits timestamp ${outputTimestamp}`)
+          // If we consumed acquired tokens, output inherits the OLDEST timestamp
+          // This prevents "refreshing" acquired status by swapping
+          if (consumedEntries.length > 0) {
+            // Find the oldest timestamp from consumed entries
+            outputTimestamp = consumedEntries.reduce(
+              (oldest, entry) => entry.originalTimestamp < oldest ? entry.originalTimestamp : oldest,
+              consumedEntries[0].originalTimestamp
+            )
+            log(`  SWAP: ${event.amountOut} ${event.tokenOut} inherits timestamp ${outputTimestamp} from consumed acquired tokens`)
+          } else {
+            log(`  SWAP: ${event.amountOut} ${event.tokenOut} is newly acquired at ${event.timestamp}`)
+          }
+        }
+      } else if (event.opType === OperationType.WITHDRAW || event.opType === OperationType.CLAIM) {
+        if (event.tokenOut !== '0x0000000000000000000000000000000000000000' && event.amountOut > 0n) {
+          // Find matching deposits
+          let remainingToMatch = event.amountOut
+          let matchedDepositTimestamp: bigint | null = null
+
+          for (const deposit of state.depositRecords) {
+            if (remainingToMatch <= 0n) break
+
+            if (deposit.target.toLowerCase() === event.target.toLowerCase() &&
+                deposit.subAccount.toLowerCase() === event.subAccount.toLowerCase() &&
+                deposit.tokenIn.toLowerCase() === event.tokenOut.toLowerCase() &&
+                deposit.remainingAmount > 0n) {
+
+              const consumeAmount = remainingToMatch > deposit.remainingAmount
+                ? deposit.remainingAmount
+                : remainingToMatch
+
+              deposit.remainingAmount -= consumeAmount
+              remainingToMatch -= consumeAmount
+
+              // Track the deposit timestamp for inheritance
+              if (matchedDepositTimestamp === null || deposit.timestamp < matchedDepositTimestamp) {
+                matchedDepositTimestamp = deposit.timestamp
+              }
+
+              log(`  ${OperationType[event.opType]} consuming ${consumeAmount} from deposit at ${deposit.timestamp}`)
+            }
+          }
+
+          const matchedAmount = event.amountOut - remainingToMatch
+          if (matchedAmount > 0n) {
+            outputAmount = matchedAmount
+            tokensWithAcquiredHistory.add(tokenOutLower)
+
+            // Withdrawal inherits the deposit timestamp (when the original spending happened)
+            outputTimestamp = matchedDepositTimestamp || event.timestamp
+            log(`  ${OperationType[event.opType]} matched: ${matchedAmount} inherits timestamp ${outputTimestamp}`)
+          }
         }
       }
-    }
 
-    // Add output to queue with appropriate timestamp
-    if (outputAmount > 0n) {
-      const outputQueue = getQueue(tokenOutLower)
-      addToQueue(outputQueue, outputAmount, outputTimestamp)
-    }
-  }
+      // Add output to queue with appropriate timestamp
+      if (outputAmount > 0n) {
+        const outputQueue = getQueue(tokenOutLower)
+        addToQueue(outputQueue, outputAmount, outputTimestamp)
+      }
+    } else {
+      // Transfer event
+      const transfer = unified.event
+      const isInWindow = transfer.timestamp >= windowStart
+      const tokenLower = transfer.token.toLowerCase() as Address
 
-  // Process transfer events (also consume from FIFO queues)
-  for (const transfer of allTransfers) {
-    const isInWindow = transfer.timestamp >= windowStart
-    const tokenLower = transfer.token.toLowerCase() as Address
+      if (isInWindow && transfer.spendingCost > 0n) {
+        state.spendingRecords.push({
+          amount: transfer.spendingCost,
+          timestamp: transfer.timestamp,
+        })
+        state.totalSpendingInWindow += transfer.spendingCost
+      }
 
-    if (isInWindow && transfer.spendingCost > 0n) {
-      state.spendingRecords.push({
-        amount: transfer.spendingCost,
-        timestamp: transfer.timestamp,
-      })
-      state.totalSpendingInWindow += transfer.spendingCost
-    }
-
-    if (transfer.amount > 0n) {
-      const queue = getQueue(tokenLower)
-      consumeFromQueue(queue, transfer.amount, transfer.timestamp, windowDuration)
-      tokensWithAcquiredHistory.add(tokenLower)
+      if (transfer.amount > 0n) {
+        const queue = getQueue(tokenLower)
+        consumeFromQueue(queue, transfer.amount, transfer.timestamp, windowDuration)
+        tokensWithAcquiredHistory.add(tokenLower)
+      }
     }
   }
 
