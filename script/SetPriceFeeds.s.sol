@@ -38,6 +38,16 @@ contract SetPriceFeeds is Script, SafeTxHelper {
     address constant AAVE = 0x88541670E55cC00bEEFD87eB59EDd1b7C511AC9a;
     address constant EURS = 0x6d906e526a4e2Ca02097BA9d0caA3c382F52278E;
 
+    // Aave V3 Sepolia aTokens (1:1 with underlying, use same price feeds)
+    address constant aDAI = 0x29598b72eb5CeBd806C5dCD549490FdA35B13cD8;
+    address constant aUSDC = 0x16dA4541aD1807f4443d92D26044C1147406EB80;
+    address constant aUSDT = 0xAF0F6e8b0Dc5c913bbF4d14c22B4E78Dd14310B6;
+    address constant aWETH = 0x5b071b590a59395fE4025A0Ccc1FcC931AAc1830;
+    address constant aWBTC = 0x1804Bf30507dc2EB3bDEbbbdd859991EAeF6EefF;
+    address constant aLINK = 0x3FfAf50D4F4E96eB78f2407c090b72e86eCaed24;
+    address constant aAAVE = 0x6b8558764d3b7572136F17174Cb9aB1DDc7E1259;
+    address constant aEURS = 0xB20691021F9AcED8631eDaa3c0Cd2949EB45662D;
+
     // Other tokens
     address constant USDC_CIRCLE = 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238;
     address constant EURC = 0x08210F9170F89Ab7658F0B5E3fF39b0E03C594D4;
@@ -51,20 +61,33 @@ contract SetPriceFeeds is Script, SafeTxHelper {
         console.log("Safe:", safe);
         console.log("Module:", module);
 
-        // Build arrays
-        address[] memory tokens = new address[](10);
-        address[] memory feeds = new address[](10);
+        // Build arrays for all tokens from config.ts (18 tokens total)
+        address[] memory tokens = new address[](18);
+        address[] memory feeds = new address[](18);
 
-        tokens[0] = DAI;       feeds[0] = DAI_USD;
-        tokens[1] = USDC;      feeds[1] = USDC_USD;
-        tokens[2] = USDT;      feeds[2] = USDC_USD;  // Use USDC feed
-        tokens[3] = WETH;      feeds[3] = ETH_USD;
-        tokens[4] = WBTC;      feeds[4] = BTC_USD;
+        // Underlying tokens (8)
+        tokens[0] = WETH;      feeds[0] = ETH_USD;
+        tokens[1] = WBTC;      feeds[1] = BTC_USD;
+        tokens[2] = USDC;      feeds[2] = USDC_USD;
+        tokens[3] = DAI;       feeds[3] = DAI_USD;
+        tokens[4] = USDT;      feeds[4] = USDC_USD;  // Use USDC feed as proxy
         tokens[5] = LINK;      feeds[5] = LINK_USD;
-        tokens[6] = AAVE;      feeds[6] = LINK_USD;  // Use LINK as proxy
+        tokens[6] = AAVE;      feeds[6] = LINK_USD;  // Use LINK as proxy (similar price range on testnet)
         tokens[7] = EURS;      feeds[7] = EUR_USD;
-        tokens[8] = USDC_CIRCLE; feeds[8] = USDC_USD;
-        tokens[9] = EURC;      feeds[9] = EUR_USD;
+
+        // aTokens (8) - 1:1 with underlying, use same price feeds
+        tokens[8] = aWETH;     feeds[8] = ETH_USD;
+        tokens[9] = aWBTC;     feeds[9] = BTC_USD;
+        tokens[10] = aUSDC;    feeds[10] = USDC_USD;
+        tokens[11] = aDAI;     feeds[11] = DAI_USD;
+        tokens[12] = aUSDT;    feeds[12] = USDC_USD;
+        tokens[13] = aLINK;    feeds[13] = LINK_USD;
+        tokens[14] = aAAVE;    feeds[14] = LINK_USD;
+        tokens[15] = aEURS;    feeds[15] = EUR_USD;
+
+        // Other tokens (2)
+        tokens[16] = USDC_CIRCLE; feeds[16] = USDC_USD;
+        tokens[17] = EURC;        feeds[17] = EUR_USD;
 
         vm.startBroadcast(deployerPrivateKey);
 
