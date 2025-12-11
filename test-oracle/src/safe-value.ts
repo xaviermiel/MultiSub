@@ -359,8 +359,8 @@ async function getOnChainSafeValue(): Promise<bigint> {
   }
 }
 
-// Threshold for considering values "equal" (0.1% tolerance to avoid tx for tiny changes)
-const VALUE_CHANGE_THRESHOLD_BPS = 10n // 0.1%
+// // Threshold for considering values "equal" (0.1% tolerance to avoid tx for tiny changes)
+// const VALUE_CHANGE_THRESHOLD_BPS = 10n // 0.1%
 
 /**
  * Main cron job handler
@@ -381,18 +381,17 @@ async function onCronTrigger() {
       return
     }
 
-    // Check if change is significant (more than 0.1% difference)
-    const diff = totalValueUSD > onChainValue
-      ? totalValueUSD - onChainValue
-      : onChainValue - totalValueUSD
-    const threshold = (onChainValue * VALUE_CHANGE_THRESHOLD_BPS) / 10000n
+    // // Check if change is significant (more than 0.1% difference)
+    // const diff = totalValueUSD > onChainValue
+    //   ? totalValueUSD - onChainValue
+    //   : onChainValue - totalValueUSD
+    // const threshold = (onChainValue * VALUE_CHANGE_THRESHOLD_BPS) / 10000n
 
-    if (diff <= threshold) {
-      log(`Skipping write - value change (${formatUnits(diff, 18)}) below threshold (${formatUnits(threshold, 18)})`)
-      log('=== Safe Value Monitor: Complete ===')
-      return
-    }
+    // if (diff <= threshold) {
+    //   log(`Value change (${formatUnits(diff, 18)}) below threshold (${formatUnits(threshold, 18)}) - updating timestamp only`)
+    // }
 
+    // Always write to keep the timestamp fresh (required for tx)
     await writeSafeValueToChain(totalValueUSD)
     log('=== Safe Value Monitor: Complete ===')
   } catch (error) {
