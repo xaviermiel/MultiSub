@@ -32,7 +32,7 @@ contract MorphoParser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractInputAmount(address, bytes calldata data) external pure override returns (uint256 amount) {
+    function extractInputAmount(address target, bytes calldata data) external view override returns (uint256 amount) {
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == DEPOSIT_SELECTOR) {
@@ -40,8 +40,9 @@ contract MorphoParser is ICalldataParser {
             (amount,) = abi.decode(data[4:], (uint256, address));
         } else if (selector == MINT_SELECTOR) {
             // mint(uint256 shares, address receiver)
-            // Note: This is shares, not assets - may need conversion
-            (amount,) = abi.decode(data[4:], (uint256, address));
+            // Convert shares to assets using previewMint
+            (uint256 shares,) = abi.decode(data[4:], (uint256, address));
+            amount = IMorphoVault(target).previewMint(shares);
         } else {
             revert UnsupportedSelector();
         }
