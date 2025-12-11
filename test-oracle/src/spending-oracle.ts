@@ -224,8 +224,8 @@ function parseProtocolExecutionLog(log: Log): ProtocolExecutionEvent {
     tokenOut: decoded[3] as Address,
     amountOut: decoded[4],
     spendingCost: decoded[5],
-    // Use block timestamp from the log instead
-    timestamp: BigInt(Math.floor(Date.now() / 1000)), // Will be refined when processing
+    // Timestamp will be set from block data when processing
+    timestamp: 0n,
     blockNumber: log.blockNumber || 0n,
     logIndex: log.logIndex || 0,
   }
@@ -250,8 +250,8 @@ function parseTransferExecutedLog(log: Log): TransferExecutedEvent {
     recipient,
     amount: decoded[0],
     spendingCost: decoded[1],
-    // Use current timestamp as proxy
-    timestamp: BigInt(Math.floor(Date.now() / 1000)),
+    // Timestamp will be set from block data when processing
+    timestamp: 0n,
     blockNumber: log.blockNumber || 0n,
     logIndex: log.logIndex || 0,
   }
@@ -269,7 +269,30 @@ async function queryProtocolExecutionEvents(fromBlock: bigint, toBlock: bigint, 
       args: subAccount ? { subAccount } : undefined,
     })
 
-    return logs.map(parseProtocolExecutionLog)
+    const events = logs.map(parseProtocolExecutionLog)
+
+    // Fetch block timestamps for accurate window calculations
+    const uniqueBlocks = [...new Set(events.map(e => e.blockNumber))]
+    const blockTimestamps = new Map<bigint, bigint>()
+
+    await Promise.all(
+      uniqueBlocks.map(async (blockNum) => {
+        try {
+          const block = await publicClient.getBlock({ blockNumber: blockNum })
+          blockTimestamps.set(blockNum, block.timestamp)
+        } catch (err) {
+          // Fallback to current time if block fetch fails
+          blockTimestamps.set(blockNum, BigInt(Math.floor(Date.now() / 1000)))
+        }
+      })
+    )
+
+    // Update event timestamps
+    for (const event of events) {
+      event.timestamp = blockTimestamps.get(event.blockNumber) || BigInt(Math.floor(Date.now() / 1000))
+    }
+
+    return events
   } catch (error) {
     log(`Error querying protocol execution events: ${error}`)
     return []
@@ -286,7 +309,30 @@ async function queryTransferEvents(fromBlock: bigint, toBlock: bigint, subAccoun
       args: subAccount ? { subAccount } : undefined,
     })
 
-    return logs.map(parseTransferExecutedLog)
+    const events = logs.map(parseTransferExecutedLog)
+
+    // Fetch block timestamps for accurate window calculations
+    const uniqueBlocks = [...new Set(events.map(e => e.blockNumber))]
+    const blockTimestamps = new Map<bigint, bigint>()
+
+    await Promise.all(
+      uniqueBlocks.map(async (blockNum) => {
+        try {
+          const block = await publicClient.getBlock({ blockNumber: blockNum })
+          blockTimestamps.set(blockNum, block.timestamp)
+        } catch (err) {
+          // Fallback to current time if block fetch fails
+          blockTimestamps.set(blockNum, BigInt(Math.floor(Date.now() / 1000)))
+        }
+      })
+    )
+
+    // Update event timestamps
+    for (const event of events) {
+      event.timestamp = blockTimestamps.get(event.blockNumber) || BigInt(Math.floor(Date.now() / 1000))
+    }
+
+    return events
   } catch (error) {
     log(`Error querying transfer events: ${error}`)
     return []
