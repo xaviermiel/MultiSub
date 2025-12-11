@@ -139,6 +139,16 @@ export const DeFiInteractorModuleABI = [
     ],
     anonymous: false,
   },
+  {
+    type: 'event',
+    name: 'AcquiredBalanceUpdated',
+    inputs: [
+      { name: 'subAccount', type: 'address', indexed: true, internalType: 'address' },
+      { name: 'token', type: 'address', indexed: true, internalType: 'address' },
+      { name: 'newBalance', type: 'uint256', indexed: false, internalType: 'uint256' },
+    ],
+    anonymous: false,
+  },
 ] as const
 
 // ERC20 ABI

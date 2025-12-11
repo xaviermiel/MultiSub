@@ -101,6 +101,10 @@ const TRANSFER_EXECUTED_EVENT = parseAbiItem(
   'event TransferExecuted(address indexed subAccount, address indexed token, address indexed recipient, uint256 amount, uint256 spendingCost)'
 )
 
+const ACQUIRED_BALANCE_UPDATED_EVENT = parseAbiItem(
+  'event AcquiredBalanceUpdated(address indexed subAccount, address indexed token, uint256 newBalance)'
+)
+
 // ============ Initialize Clients ============
 
 const publicClient = createPublicClient({
@@ -349,6 +353,40 @@ async function queryTransferEvents(fromBlock: bigint, toBlock: bigint, subAccoun
     log(`Error querying transfer events: ${error}`)
     return []
   }
+}
+
+/**
+ * Query historical AcquiredBalanceUpdated events to find all tokens
+ * that have ever had acquired balance set for a subaccount.
+ * This is used to detect and clear stale on-chain balances.
+ */
+async function queryHistoricalAcquiredTokens(subAccount: Address): Promise<Set<Address>> {
+  const tokens = new Set<Address>()
+
+  try {
+    // Query from a reasonable lookback - use extended range to catch all historical tokens
+    const currentBlock = await publicClient.getBlockNumber()
+    const fromBlock = currentBlock - BigInt(config.blocksToLookBack * 2)
+
+    const logs = await publicClient.getLogs({
+      address: config.moduleAddress,
+      event: ACQUIRED_BALANCE_UPDATED_EVENT,
+      fromBlock,
+      toBlock: currentBlock,
+      args: { subAccount },
+    })
+
+    for (const log of logs) {
+      const token = log.args.token as Address
+      if (token) {
+        tokens.add(token.toLowerCase() as Address)
+      }
+    }
+  } catch (error) {
+    log(`Error querying historical acquired tokens: ${error}`)
+  }
+
+  return tokens
 }
 
 // ============ FIFO Queue Helpers ============
@@ -735,6 +773,7 @@ async function pushBatchUpdate(
   const balances: bigint[] = []
   let acquiredChanged = false
 
+  // First, add all tokens from calculated acquired balances
   for (const [token, newBalance] of acquiredBalances) {
     const onChainBalance = await getOnChainAcquiredBalance(subAccount, token)
     if (newBalance !== onChainBalance) {
@@ -742,6 +781,21 @@ async function pushBatchUpdate(
     }
     tokens.push(token)
     balances.push(newBalance)
+  }
+
+  // Also check for tokens that have on-chain balance but aren't in calculated map
+  // These need to be cleared to 0 (e.g., tokens that aged out or had incorrect matching)
+  const historicalTokens = await queryHistoricalAcquiredTokens(subAccount)
+  for (const token of historicalTokens) {
+    if (!acquiredBalances.has(token)) {
+      const onChainBalance = await getOnChainAcquiredBalance(subAccount, token)
+      if (onChainBalance > 0n) {
+        log(`  Clearing stale acquired balance for ${token}: ${onChainBalance} -> 0`)
+        acquiredChanged = true
+        tokens.push(token)
+        balances.push(0n)
+      }
+    }
   }
 
   // Skip if no changes
