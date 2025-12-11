@@ -391,9 +391,10 @@ function buildSubAccountState(
         for (const deposit of state.depositRecords) {
           if (remainingToMatch <= 0n) break
 
-          // Check if this deposit matches (same target and subAccount)
+          // Check if this deposit matches (same target, subAccount, and token)
           if (deposit.target.toLowerCase() === event.target.toLowerCase() &&
               deposit.subAccount.toLowerCase() === event.subAccount.toLowerCase() &&
+              deposit.tokenIn.toLowerCase() === event.tokenOut.toLowerCase() &&
               deposit.remainingAmount > 0n) {
 
             // Calculate how much we can consume from this deposit
