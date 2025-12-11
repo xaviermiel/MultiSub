@@ -878,7 +878,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     ) external onlyOwner {
         if (tokens.length != priceFeeds.length) revert LengthMismatch();
         for (uint256 i = 0; i < tokens.length; i++) {
-            if (tokens[i] == address(0)) revert InvalidAddress();
+            // Note: address(0) is valid as it represents native ETH for swaps
             if (priceFeeds[i] == address(0)) revert InvalidPriceFeed();
             tokenPriceFeeds[tokens[i]] = AggregatorV3Interface(priceFeeds[i]);
         }

@@ -61,33 +61,37 @@ contract SetPriceFeeds is Script, SafeTxHelper {
         console.log("Safe:", safe);
         console.log("Module:", module);
 
-        // Build arrays for all tokens from config.ts (18 tokens total)
-        address[] memory tokens = new address[](18);
-        address[] memory feeds = new address[](18);
+        // Build arrays for all tokens from config.ts (19 tokens total)
+        // Includes native ETH (address(0)) for swaps via Universal Router
+        address[] memory tokens = new address[](19);
+        address[] memory feeds = new address[](19);
+
+        // Native ETH (for swaps with value)
+        tokens[0] = address(0); feeds[0] = ETH_USD;
 
         // Underlying tokens (8)
-        tokens[0] = WETH;      feeds[0] = ETH_USD;
-        tokens[1] = WBTC;      feeds[1] = BTC_USD;
-        tokens[2] = USDC;      feeds[2] = USDC_USD;
-        tokens[3] = DAI;       feeds[3] = DAI_USD;
-        tokens[4] = USDT;      feeds[4] = USDC_USD;  // Use USDC feed as proxy
-        tokens[5] = LINK;      feeds[5] = LINK_USD;
-        tokens[6] = AAVE;      feeds[6] = LINK_USD;  // Use LINK as proxy (similar price range on testnet)
-        tokens[7] = EURS;      feeds[7] = EUR_USD;
+        tokens[1] = WETH;      feeds[1] = ETH_USD;
+        tokens[2] = WBTC;      feeds[2] = BTC_USD;
+        tokens[3] = USDC;      feeds[3] = USDC_USD;
+        tokens[4] = DAI;       feeds[4] = DAI_USD;
+        tokens[5] = USDT;      feeds[5] = USDC_USD;  // Use USDC feed as proxy
+        tokens[6] = LINK;      feeds[6] = LINK_USD;
+        tokens[7] = AAVE;      feeds[7] = LINK_USD;  // Use LINK as proxy (similar price range on testnet)
+        tokens[8] = EURS;      feeds[8] = EUR_USD;
 
         // aTokens (8) - 1:1 with underlying, use same price feeds
-        tokens[8] = aWETH;     feeds[8] = ETH_USD;
-        tokens[9] = aWBTC;     feeds[9] = BTC_USD;
-        tokens[10] = aUSDC;    feeds[10] = USDC_USD;
-        tokens[11] = aDAI;     feeds[11] = DAI_USD;
-        tokens[12] = aUSDT;    feeds[12] = USDC_USD;
-        tokens[13] = aLINK;    feeds[13] = LINK_USD;
-        tokens[14] = aAAVE;    feeds[14] = LINK_USD;
-        tokens[15] = aEURS;    feeds[15] = EUR_USD;
+        tokens[9] = aWETH;     feeds[9] = ETH_USD;
+        tokens[10] = aWBTC;    feeds[10] = BTC_USD;
+        tokens[11] = aUSDC;    feeds[11] = USDC_USD;
+        tokens[12] = aDAI;     feeds[12] = DAI_USD;
+        tokens[13] = aUSDT;    feeds[13] = USDC_USD;
+        tokens[14] = aLINK;    feeds[14] = LINK_USD;
+        tokens[15] = aAAVE;    feeds[15] = LINK_USD;
+        tokens[16] = aEURS;    feeds[16] = EUR_USD;
 
         // Other tokens (2)
-        tokens[16] = USDC_CIRCLE; feeds[16] = USDC_USD;
-        tokens[17] = EURC;        feeds[17] = EUR_USD;
+        tokens[17] = USDC_CIRCLE; feeds[17] = USDC_USD;
+        tokens[18] = EURC;        feeds[18] = EUR_USD;
 
         vm.startBroadcast(deployerPrivateKey);
 
