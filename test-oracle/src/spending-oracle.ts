@@ -61,7 +61,8 @@ interface DepositRecord {
   tokenIn: Address
   amountIn: bigint
   remainingAmount: bigint  // Tracks how much of the deposit hasn't been withdrawn yet
-  timestamp: bigint
+  timestamp: bigint  // When the deposit happened
+  originalAcquisitionTimestamp: bigint  // When the tokens were originally acquired (for FIFO inheritance)
 }
 
 /**
@@ -71,7 +72,7 @@ interface DepositRecord {
  */
 interface AcquiredBalanceEntry {
   amount: bigint
-  originalTimestamp: bigint  // When the tokens were ORIGINALLY acquired (for expiry calculation)
+  originalTimestamp: bigint  // When the tokens were originally acquired (for expiry calculation)
 }
 
 /**
@@ -517,19 +518,8 @@ function buildSubAccountState(
         }
       }
 
-      // Track deposits for withdrawal matching
-      if (event.opType === OperationType.DEPOSIT) {
-        state.depositRecords.push({
-          subAccount: event.subAccount,
-          target: event.target,
-          tokenIn: event.tokenIn,
-          amountIn: event.amountIn,
-          remainingAmount: event.amountIn,
-          timestamp: event.timestamp,
-        })
-      }
-
-      // Handle input token consumption (FIFO)
+      // Handle input token consumption (FIFO) - do this before creating deposit record
+      // so we can capture the original acquisition timestamp for deposits
       // Use event timestamp to determine expiry - tokens must be valid at the time of the event
       let consumedEntries: AcquiredBalanceEntry[] = []
       if ((event.opType === OperationType.SWAP || event.opType === OperationType.DEPOSIT) &&
@@ -541,6 +531,31 @@ function buildSubAccountState(
         tokensWithAcquiredHistory.add(tokenInLower)
       }
 
+      // Track deposits for withdrawal matching
+      // Store the original acquisition timestamp so withdrawals inherit it correctly
+      if (event.opType === OperationType.DEPOSIT) {
+        // Find the oldest original timestamp from consumed acquired tokens
+        // If no acquired tokens were consumed, use the deposit timestamp (it's new spending)
+        let originalAcquisitionTimestamp = event.timestamp
+        if (consumedEntries.length > 0) {
+          originalAcquisitionTimestamp = consumedEntries.reduce(
+            (oldest, entry) => entry.originalTimestamp < oldest ? entry.originalTimestamp : oldest,
+            consumedEntries[0].originalTimestamp
+          )
+          log(`  DEPOSIT: storing original acquisition timestamp ${originalAcquisitionTimestamp} for future withdrawal`)
+        }
+
+        state.depositRecords.push({
+          subAccount: event.subAccount,
+          target: event.target,
+          tokenIn: event.tokenIn,
+          amountIn: event.amountIn,
+          remainingAmount: event.amountIn,
+          timestamp: event.timestamp,
+          originalAcquisitionTimestamp,
+        })
+      }
+
       // Handle output token (add to acquired queue)
       let outputAmount = 0n
       let outputTimestamp = event.timestamp // Default: new acquisition
@@ -550,7 +565,7 @@ function buildSubAccountState(
           outputAmount = event.amountOut
           tokensWithAcquiredHistory.add(tokenOutLower)
 
-          // If we consumed acquired tokens, output inherits the OLDEST timestamp
+          // If we consumed acquired tokens, output inherits the oldest timestamp
           // This prevents "refreshing" acquired status by swapping
           if (consumedEntries.length > 0) {
             // Find the oldest timestamp from consumed entries
@@ -567,7 +582,7 @@ function buildSubAccountState(
         if (event.tokenOut !== '0x0000000000000000000000000000000000000000' && event.amountOut > 0n) {
           // Find matching deposits
           let remainingToMatch = event.amountOut
-          let matchedDepositTimestamp: bigint | null = null
+          let matchedOriginalTimestamp: bigint | null = null
 
           for (const deposit of state.depositRecords) {
             if (remainingToMatch <= 0n) break
@@ -584,12 +599,14 @@ function buildSubAccountState(
               deposit.remainingAmount -= consumeAmount
               remainingToMatch -= consumeAmount
 
-              // Track the deposit timestamp for inheritance
-              if (matchedDepositTimestamp === null || deposit.timestamp < matchedDepositTimestamp) {
-                matchedDepositTimestamp = deposit.timestamp
+              // Track the original acquisition timestamp for inheritance (not the deposit timestamp)
+              // This ensures the full chain of acquired status is preserved:
+              // Original swap → deposit → withdrawal all share the same original timestamp
+              if (matchedOriginalTimestamp === null || deposit.originalAcquisitionTimestamp < matchedOriginalTimestamp) {
+                matchedOriginalTimestamp = deposit.originalAcquisitionTimestamp
               }
 
-              log(`  ${OperationType[event.opType]} consuming ${consumeAmount} from deposit at ${deposit.timestamp}`)
+              log(`  ${OperationType[event.opType]} consuming ${consumeAmount} from deposit (original acquisition: ${deposit.originalAcquisitionTimestamp})`)
             }
           }
 
@@ -598,9 +615,9 @@ function buildSubAccountState(
             outputAmount = matchedAmount
             tokensWithAcquiredHistory.add(tokenOutLower)
 
-            // Withdrawal inherits the deposit timestamp (when the original spending happened)
-            outputTimestamp = matchedDepositTimestamp || event.timestamp
-            log(`  ${OperationType[event.opType]} matched: ${matchedAmount} inherits timestamp ${outputTimestamp}`)
+            // Withdrawal inherits the original acquisition timestamp (not deposit timestamp)
+            outputTimestamp = matchedOriginalTimestamp || event.timestamp
+            log(`  ${OperationType[event.opType]} matched: ${matchedAmount} inherits original timestamp ${outputTimestamp}`)
           }
         }
       }
