@@ -102,6 +102,7 @@ contract UniswapV4Parser is ICalldataParser {
         (bytes memory actions, bytes[] memory params) = _decodeActionsAndParams(unlockData);
 
         // Find SETTLE or SETTLE_PAIR to get input amounts
+        // Array length must match extractInputTokens result
         for (uint256 i = 0; i < actions.length; i++) {
             uint8 action = uint8(actions[i]);
 
@@ -120,12 +121,27 @@ contract UniswapV4Parser is ICalldataParser {
                     return amounts;
                 }
             } else if (action == SETTLE_PAIR) {
-                // SETTLE_PAIR doesn't have amounts - tracked via balance changes
-                // Return empty array
-                return new uint256[](0);
-            } else if (action == MINT_POSITION || action == MINT_POSITION_FROM_DELTAS ||
-                       action == INCREASE_LIQUIDITY || action == INCREASE_LIQUIDITY_FROM_DELTAS) {
-                // Liquidity operations have amounts tracked via balance changes
+                // SETTLE_PAIR params: (Currency currency0, Currency currency1)
+                // No amounts in params - return zeros to match 2 tokens from extractInputTokens
+                // Actual amounts tracked via balance changes by the module
+                amounts = new uint256[](2);
+                amounts[0] = 0;
+                amounts[1] = 0;
+                return amounts;
+            } else if (action == MINT_POSITION || action == MINT_POSITION_FROM_DELTAS) {
+                // MINT_POSITION params: (PoolKey, tickLower, tickUpper, liquidity, amount0Max, amount1Max, owner, hookData)
+                // PoolKey is (currency0, currency1, fee, tickSpacing, hooks) = 5 slots = 160 bytes
+                // Then: int24 tickLower (32), int24 tickUpper (32), uint256 liquidity (32), uint128 amount0Max (32), uint128 amount1Max (32)
+                // amount0Max at offset 160 + 32 + 32 + 32 = 256, amount1Max at offset 288
+                // However, these are MAX amounts, actual spent may differ - return zeros for safety
+                // Module tracks balance changes for actual amounts
+                amounts = new uint256[](2);
+                amounts[0] = 0;
+                amounts[1] = 0;
+                return amounts;
+            } else if (action == INCREASE_LIQUIDITY || action == INCREASE_LIQUIDITY_FROM_DELTAS) {
+                // INCREASE_LIQUIDITY: amounts tracked via balance changes
+                // extractInputTokens returns empty for these, so return empty amounts
                 return new uint256[](0);
             } else if (action == DECREASE_LIQUIDITY || action == BURN_POSITION) {
                 // Withdraw/claim operations - no input amounts

@@ -174,7 +174,34 @@ contract UniswapV4ParserTest is Test {
         );
 
         address[] memory inputTokens = parser.extractInputTokens(V4_POSITION_MANAGER, data);
+        assertEq(inputTokens.length, 2, "SETTLE_PAIR should return 2 tokens");
         assertEq(inputTokens[0], USDC, "Input token should be first currency (USDC) from SETTLE_PAIR");
+        assertEq(inputTokens[1], WETH, "Input token should be second currency (WETH) from SETTLE_PAIR");
+    }
+
+    function testSettlePairArrayLengthsMatch() public view {
+        bytes memory actions = new bytes(1);
+        actions[0] = bytes1(parser.SETTLE_PAIR());
+
+        bytes[] memory params = new bytes[](1);
+        params[0] = abi.encode(USDC, WETH);
+
+        bytes memory unlockData = abi.encode(actions, params);
+
+        bytes memory data = abi.encodeWithSelector(
+            parser.MODIFY_LIQUIDITIES_SELECTOR(),
+            unlockData,
+            block.timestamp + 1
+        );
+
+        address[] memory inputTokens = parser.extractInputTokens(V4_POSITION_MANAGER, data);
+        uint256[] memory inputAmounts = parser.extractInputAmounts(V4_POSITION_MANAGER, data);
+
+        // Critical: array lengths must match for DeFiInteractorModule
+        assertEq(inputTokens.length, inputAmounts.length, "Token and amount arrays must have same length");
+        assertEq(inputTokens.length, 2, "Should have 2 tokens");
+        assertEq(inputAmounts[0], 0, "Amount0 should be 0 (tracked via balance changes)");
+        assertEq(inputAmounts[1], 0, "Amount1 should be 0 (tracked via balance changes)");
     }
 
     // ============ TAKE Action Tests ============
@@ -418,6 +445,38 @@ contract UniswapV4ParserTest is Test {
 
         uint8 opType = parser.getOperationType(data);
         assertEq(opType, 2, "MINT_POSITION should be DEPOSIT (2)");
+    }
+
+    function testMintPositionArrayLengthsMatch() public view {
+        bytes memory actions = new bytes(1);
+        actions[0] = bytes1(parser.MINT_POSITION());
+
+        bytes[] memory params = new bytes[](1);
+        params[0] = abi.encode(
+            USDC, WETH, uint24(3000), int24(60), address(0), // PoolKey
+            int24(-887220), int24(887220), // tick range
+            uint128(1000e6), // liquidity
+            uint256(1000e6), uint256(1e18), // max amounts
+            USER, // owner
+            "" // hookData
+        );
+
+        bytes memory unlockData = abi.encode(actions, params);
+
+        bytes memory data = abi.encodeWithSelector(
+            parser.MODIFY_LIQUIDITIES_SELECTOR(),
+            unlockData,
+            block.timestamp + 1
+        );
+
+        address[] memory inputTokens = parser.extractInputTokens(V4_POSITION_MANAGER, data);
+        uint256[] memory inputAmounts = parser.extractInputAmounts(V4_POSITION_MANAGER, data);
+
+        // Critical: array lengths must match for DeFiInteractorModule
+        assertEq(inputTokens.length, inputAmounts.length, "Token and amount arrays must have same length");
+        assertEq(inputTokens.length, 2, "Should have 2 tokens for MINT_POSITION");
+        assertEq(inputTokens[0], USDC, "Token0 should be USDC");
+        assertEq(inputTokens[1], WETH, "Token1 should be WETH");
     }
 
     // ============ INCREASE_LIQUIDITY Operation Type Tests ============
