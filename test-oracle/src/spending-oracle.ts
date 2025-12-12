@@ -683,6 +683,8 @@ function buildSubAccountState(
             const outputTimestamp = matchedOriginalTimestamp || event.timestamp
             log(`  ${OperationType[event.opType]} matched: ${matchedAmount} inherits original timestamp ${outputTimestamp}`)
             addToQueue(outputQueue, matchedAmount, outputTimestamp)
+          } else {
+            log(`  ${OperationType[event.opType]} NOT matched: no matching deposit found for token ${event.tokenOut}`)
           }
         }
       }
@@ -717,11 +719,11 @@ function buildSubAccountState(
 
     // Sum remaining valid balance
     const validBalance = getValidQueueBalance(queue, currentTimestamp, windowDuration)
-    state.acquiredBalances.set(token, validBalance)
-
     if (validBalance > 0n) {
-      log(`  Token ${token}: acquired balance = ${validBalance}`)
+      state.acquiredBalances.set(token, validBalance)
     }
+
+    log(`  Token ${token}: acquired balance = ${validBalance}`)
   }
 
   // Store queues in state for potential debugging
