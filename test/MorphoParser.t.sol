@@ -10,9 +10,25 @@ import {MorphoParser} from "../src/parsers/MorphoParser.sol";
  */
 contract MockMorphoVault {
     address public asset;
+    uint256 public exchangeRate; // assets per share (scaled by 1e18)
 
     constructor(address _asset) {
         asset = _asset;
+        exchangeRate = 1e18; // 1:1 by default
+    }
+
+    function setExchangeRate(uint256 _rate) external {
+        exchangeRate = _rate;
+    }
+
+    /// @notice Preview how many assets are needed to mint `shares`
+    function previewMint(uint256 shares) external view returns (uint256) {
+        return (shares * exchangeRate) / 1e18;
+    }
+
+    /// @notice Preview how many shares are received for `assets`
+    function previewDeposit(uint256 assets) external view returns (uint256) {
+        return (assets * 1e18) / exchangeRate;
     }
 }
 
@@ -97,8 +113,24 @@ contract MorphoParserTest is Test {
             USER
         );
 
+        // With 1:1 exchange rate, assets = shares
         uint256 amount = parser.extractInputAmount(address(vault), data);
-        assertEq(amount, 1000e18, "Input amount should be shares amount");
+        assertEq(amount, 1000e18, "Input amount should be assets (converted from shares)");
+    }
+
+    function testMintExtractInputAmountWithExchangeRate() public {
+        // Set exchange rate to 2:1 (2 assets per share)
+        vault.setExchangeRate(2e18);
+
+        bytes memory data = abi.encodeWithSelector(
+            parser.MINT_SELECTOR(),
+            1000e18, // shares
+            USER
+        );
+
+        // With 2:1 exchange rate, 1000 shares = 2000 assets
+        uint256 amount = parser.extractInputAmount(address(vault), data);
+        assertEq(amount, 2000e18, "Input amount should be 2x shares with 2:1 rate");
     }
 
     // ============ Withdraw Tests ============
@@ -189,16 +221,28 @@ contract MorphoParserTest is Test {
         parser.extractInputToken(address(vault), data);
     }
 
-    function testDepositRevertsOnOutputToken() public {
-        // Deposit is not a valid output operation
+    function testDepositExtractOutputToken() public view {
+        // Deposit output is vault shares (the vault token itself)
         bytes memory data = abi.encodeWithSelector(
             parser.DEPOSIT_SELECTOR(),
             1000e6,
             USER
         );
 
-        vm.expectRevert(MorphoParser.UnsupportedSelector.selector);
-        parser.extractOutputToken(address(vault), data);
+        address token = parser.extractOutputToken(address(vault), data);
+        assertEq(token, address(vault), "Output token should be vault shares (vault address)");
+    }
+
+    function testMintExtractOutputToken() public view {
+        // Mint output is vault shares (the vault token itself)
+        bytes memory data = abi.encodeWithSelector(
+            parser.MINT_SELECTOR(),
+            1000e18,
+            USER
+        );
+
+        address token = parser.extractOutputToken(address(vault), data);
+        assertEq(token, address(vault), "Output token should be vault shares (vault address)");
     }
 
     // ============ Different Asset Tests ============
@@ -231,13 +275,19 @@ contract MorphoParserTest is Test {
     }
 
     function testFuzzMintShares(uint256 shares) public view {
+        // Bound shares to avoid overflow in previewMint calculation (shares * exchangeRate / 1e18)
+        // With 1e18 exchange rate (1:1), max safe shares is type(uint256).max
+        // But with higher rates, need to bound. Max safe is ~type(uint256).max / 2e18
+        shares = bound(shares, 0, type(uint128).max);
+
         bytes memory data = abi.encodeWithSelector(
             parser.MINT_SELECTOR(),
             shares,
             USER
         );
 
+        // With 1:1 exchange rate, extracted amount equals shares
         uint256 extracted = parser.extractInputAmount(address(vault), data);
-        assertEq(extracted, shares, "Should extract any shares amount correctly");
+        assertEq(extracted, shares, "Should extract shares correctly with 1:1 rate");
     }
 }

@@ -3,6 +3,24 @@ pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
 import {AaveV3Parser} from "../src/parsers/AaveV3Parser.sol";
+import {IAavePool} from "../src/interfaces/IAavePool.sol";
+
+/**
+ * @title MockAavePool
+ * @notice Mock Aave V3 Pool for testing getReserveData
+ */
+contract MockAavePool {
+    mapping(address => address) public aTokens;
+
+    function setAToken(address asset, address aToken) external {
+        aTokens[asset] = aToken;
+    }
+
+    function getReserveData(address asset) external view returns (IAavePool.ReserveData memory data) {
+        data.aTokenAddress = aTokens[asset];
+        return data;
+    }
+}
 
 /**
  * @title AaveV3ParserTest
@@ -10,17 +28,23 @@ import {AaveV3Parser} from "../src/parsers/AaveV3Parser.sol";
  */
 contract AaveV3ParserTest is Test {
     AaveV3Parser public parser;
+    MockAavePool public mockPool;
 
     // Test addresses
     address constant AAVE_POOL = 0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2;
     address constant REWARDS_CONTROLLER = 0x8164Cc65827dcFe994AB23944CBC90e0aa80bFcb;
     address constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
     address constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
+    address constant aUSDC = 0x98C23E9d8f34FEFb1B7BD6a91B7FF122F4e16F5c; // Mock aToken
+    address constant aWETH = 0x4d5F47FA6A74757f35C14fD3a6Ef8E3C9BC514E8; // Mock aToken
     address constant USER = address(0x1234);
     address constant REWARD_TOKEN = address(0xAAAA);
 
     function setUp() public {
         parser = new AaveV3Parser();
+        mockPool = new MockAavePool();
+        mockPool.setAToken(USDC, aUSDC);
+        mockPool.setAToken(WETH, aWETH);
     }
 
     // ============ Selector Tests ============
@@ -82,6 +106,34 @@ contract AaveV3ParserTest is Test {
         assertEq(amount, 1000e6, "Input amount should be 1000e6");
     }
 
+    function testSupplyExtractOutputToken() public view {
+        // supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode)
+        bytes memory data = abi.encodeWithSelector(
+            parser.SUPPLY_SELECTOR(),
+            USDC,
+            1000e6,
+            USER,
+            uint16(0)
+        );
+
+        // Output should be the aToken for USDC
+        address token = parser.extractOutputToken(address(mockPool), data);
+        assertEq(token, aUSDC, "Output token should be aUSDC (aToken for USDC)");
+    }
+
+    function testSupplyExtractOutputTokenWETH() public view {
+        bytes memory data = abi.encodeWithSelector(
+            parser.SUPPLY_SELECTOR(),
+            WETH,
+            1e18,
+            USER,
+            uint16(0)
+        );
+
+        address token = parser.extractOutputToken(address(mockPool), data);
+        assertEq(token, aWETH, "Output token should be aWETH (aToken for WETH)");
+    }
+
     // ============ Withdraw Tests ============
 
     function testWithdrawExtractOutputToken() public view {
@@ -141,6 +193,20 @@ contract AaveV3ParserTest is Test {
 
         uint256 amount = parser.extractInputAmount(AAVE_POOL, data);
         assertEq(amount, 1e18, "Input amount should be 1e18");
+    }
+
+    function testRepayExtractOutputToken() public view {
+        // repay doesn't produce output tokens (it burns debt tokens internally)
+        bytes memory data = abi.encodeWithSelector(
+            parser.REPAY_SELECTOR(),
+            WETH,
+            1e18,
+            uint256(2),
+            USER
+        );
+
+        address token = parser.extractOutputToken(AAVE_POOL, data);
+        assertEq(token, address(0), "Repay should return zero address (no output token)");
     }
 
     // ============ Claim Rewards Tests ============
