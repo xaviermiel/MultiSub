@@ -80,8 +80,8 @@ interface ProtocolExecutionEvent {
 	opType: OperationType
 	tokenIn: Address
 	amountIn: bigint
-	tokenOut: Address
-	amountOut: bigint
+	tokensOut: Address[]    // Array of output tokens
+	amountsOut: bigint[]    // Array of output amounts
 	spendingCost: bigint
 	timestamp: bigint
 	blockNumber: bigint
@@ -139,7 +139,7 @@ interface SubAccountState {
 // Note: Events no longer include timestamp parameter - contract uses block.timestamp
 
 const PROTOCOL_EXECUTION_EVENT_SIG = keccak256(
-	toHex('ProtocolExecution(address,address,uint8,address,uint256,address,uint256,uint256)')
+	toHex('ProtocolExecution(address,address,uint8,address,uint256,address[],uint256[],uint256)')
 )
 
 const TRANSFER_EXECUTED_EVENT_SIG = keccak256(
@@ -545,6 +545,7 @@ const topicToAddress = (topic: Uint8Array | string): Address => {
 /**
  * Parse ProtocolExecution event from log data
  * Handles both SDK Log type (Uint8Array) and JSON format (string)
+ * Event format: ProtocolExecution(address indexed subAccount, address indexed target, uint8 opType, address tokenIn, uint256 amountIn, address[] tokensOut, uint256[] amountsOut, uint256 spendingCost)
  */
 const parseProtocolExecutionEvent = (log: any): ProtocolExecutionEvent => {
 	// Handle topics - SDK returns Uint8Array[], may also be string[]
@@ -558,13 +559,14 @@ const parseProtocolExecutionEvent = (log: any): ProtocolExecutionEvent => {
 		? log.data as `0x${string}`
 		: uint8ArrayToHex(log.data)
 
+	// Decode the non-indexed parameters including arrays
 	const decoded = decodeAbiParameters(
 		[
 			{ name: 'opType', type: 'uint8' },
 			{ name: 'tokenIn', type: 'address' },
 			{ name: 'amountIn', type: 'uint256' },
-			{ name: 'tokenOut', type: 'address' },
-			{ name: 'amountOut', type: 'uint256' },
+			{ name: 'tokensOut', type: 'address[]' },
+			{ name: 'amountsOut', type: 'uint256[]' },
 			{ name: 'spendingCost', type: 'uint256' },
 		],
 		data,
@@ -592,14 +594,18 @@ const parseProtocolExecutionEvent = (log: any): ProtocolExecutionEvent => {
 		}
 	}
 
+	// Convert decoded arrays to proper types
+	const tokensOut = (decoded[3] as readonly `0x${string}`[]).map(t => t as Address)
+	const amountsOut = decoded[4] as readonly bigint[]
+
 	return {
 		subAccount,
 		target,
 		opType: decoded[0] as OperationType,
 		tokenIn: decoded[1] as Address,
 		amountIn: decoded[2],
-		tokenOut: decoded[3] as Address,
-		amountOut: decoded[4],
+		tokensOut: [...tokensOut],
+		amountsOut: [...amountsOut],
 		spendingCost: decoded[5],
 		// Timestamp will be set from block header after parsing
 		// Initialize with 0 to indicate it needs to be fetched
@@ -963,7 +969,6 @@ const buildSubAccountState = (
 		if (unified.type === 'protocol') {
 			const event = unified.event
 			const tokenInLower = event.tokenIn.toLowerCase() as Address
-			const tokenOutLower = event.tokenOut.toLowerCase() as Address
 			const isInWindow = event.timestamp >= windowStart
 
 			// Track spending (only count if in window)
@@ -1014,12 +1019,19 @@ const buildSubAccountState = (
 				})
 			}
 
-			// Handle output token (add to acquired queue)
+			// Handle output tokens (add to acquired queue)
 			// For SWAPs and DEPOSITs: proportionally split output between acquired (inherited timestamp) and new (current timestamp)
 			// For WITHDRAW/CLAIM: output matched to deposits inherits their original acquisition timestamp
+			// NOTE: Now handles multiple output tokens (e.g., LP position withdrawals return 2 tokens)
 
 			if (event.opType === OperationType.SWAP || event.opType === OperationType.DEPOSIT) {
-				if (event.amountOut > 0n) {
+				// Process each output token
+				for (let i = 0; i < event.tokensOut.length; i++) {
+					const tokenOut = event.tokensOut[i]
+					const amountOut = event.amountsOut[i]
+					if (amountOut <= 0n) continue
+
+					const tokenOutLower = tokenOut.toLowerCase() as Address
 					tokensWithAcquiredHistory.add(tokenOutLower)
 					const outputQueue = getQueue(tokenOutLower)
 
@@ -1031,8 +1043,8 @@ const buildSubAccountState = (
 						// Mixed case: proportionally split the output
 						// Acquired portion inherits oldest timestamp, non-acquired portion is newly acquired
 						const acquiredRatio = (totalConsumed * 10000n) / event.amountIn // basis points
-						const outputFromAcquired = (event.amountOut * acquiredRatio) / 10000n
-						const outputFromNonAcquired = event.amountOut - outputFromAcquired
+						const outputFromAcquired = (amountOut * acquiredRatio) / 10000n
+						const outputFromNonAcquired = amountOut - outputFromAcquired
 
 						// Find oldest timestamp from consumed entries
 						const oldestTimestamp = consumedEntries.reduce(
@@ -1042,8 +1054,8 @@ const buildSubAccountState = (
 
 						const opName = OperationType[event.opType]
 						runtime.log(`  ${opName}: mixed input - ${totalConsumed} acquired + ${fromNonAcquired} non-acquired`)
-						runtime.log(`    ${outputFromAcquired} ${event.tokenOut} inherits timestamp ${oldestTimestamp}`)
-						runtime.log(`    ${outputFromNonAcquired} ${event.tokenOut} newly acquired at ${event.timestamp}`)
+						runtime.log(`    ${outputFromAcquired} ${tokenOut} inherits timestamp ${oldestTimestamp}`)
+						runtime.log(`    ${outputFromNonAcquired} ${tokenOut} newly acquired at ${event.timestamp}`)
 
 						addToQueue(outputQueue, outputFromAcquired, oldestTimestamp)
 						addToQueue(outputQueue, outputFromNonAcquired, event.timestamp)
@@ -1054,19 +1066,26 @@ const buildSubAccountState = (
 							consumedEntries[0].originalTimestamp
 						)
 						const opName = OperationType[event.opType]
-						runtime.log(`  ${opName}: ${event.amountOut} ${event.tokenOut} inherits timestamp ${oldestTimestamp} from consumed acquired tokens`)
-						addToQueue(outputQueue, event.amountOut, oldestTimestamp)
+						runtime.log(`  ${opName}: ${amountOut} ${tokenOut} inherits timestamp ${oldestTimestamp} from consumed acquired tokens`)
+						addToQueue(outputQueue, amountOut, oldestTimestamp)
 					} else {
 						// No acquired input - output is newly acquired
 						const opName = OperationType[event.opType]
-						runtime.log(`  ${opName}: ${event.amountOut} ${event.tokenOut} is newly acquired at ${event.timestamp}`)
-						addToQueue(outputQueue, event.amountOut, event.timestamp)
+						runtime.log(`  ${opName}: ${amountOut} ${tokenOut} is newly acquired at ${event.timestamp}`)
+						addToQueue(outputQueue, amountOut, event.timestamp)
 					}
 				}
 			} else if (event.opType === OperationType.WITHDRAW || event.opType === OperationType.CLAIM) {
-				if (event.amountOut > 0n) {
-					// Find matching deposits
-					let remainingToMatch = event.amountOut
+				// Process each output token for withdrawals/claims
+				for (let i = 0; i < event.tokensOut.length; i++) {
+					const tokenOut = event.tokensOut[i]
+					const amountOut = event.amountsOut[i]
+					if (amountOut <= 0n) continue
+
+					const tokenOutLower = tokenOut.toLowerCase() as Address
+
+					// Find matching deposits for this specific token
+					let remainingToMatch = amountOut
 					let matchedOriginalTimestamp: bigint | null = null
 
 					for (const deposit of state.depositRecords) {
@@ -1074,7 +1093,7 @@ const buildSubAccountState = (
 
 						if (deposit.target.toLowerCase() === event.target.toLowerCase() &&
 								deposit.subAccount.toLowerCase() === event.subAccount.toLowerCase() &&
-								deposit.tokenIn.toLowerCase() === event.tokenOut.toLowerCase() &&
+								deposit.tokenIn.toLowerCase() === tokenOutLower &&
 								deposit.remainingAmount > 0n) {
 
 							const consumeAmount = remainingToMatch > deposit.remainingAmount
@@ -1095,14 +1114,14 @@ const buildSubAccountState = (
 						}
 					}
 
-					const matchedAmount = event.amountOut - remainingToMatch
+					const matchedAmount = amountOut - remainingToMatch
 					if (matchedAmount > 0n) {
 						tokensWithAcquiredHistory.add(tokenOutLower)
 						const outputQueue = getQueue(tokenOutLower)
 
 						// Withdrawal inherits the original acquisition timestamp (not deposit timestamp)
 						const outputTimestamp = matchedOriginalTimestamp || event.timestamp
-						runtime.log(`  ${OperationType[event.opType]} matched: ${matchedAmount} inherits original timestamp ${outputTimestamp}`)
+						runtime.log(`  ${OperationType[event.opType]} matched: ${matchedAmount} ${tokenOut} inherits original timestamp ${outputTimestamp}`)
 						addToQueue(outputQueue, matchedAmount, outputTimestamp)
 					}
 				}
@@ -1342,7 +1361,8 @@ const onProtocolExecution = (runtime: Runtime<Config>, payload: any): string => 
 		runtime.log(`New event: ${OperationType[newEvent.opType]} by ${newEvent.subAccount}`)
 		runtime.log(`  Block: ${newEvent.blockNumber}, Timestamp: ${newEvent.timestamp}`)
 		runtime.log(`  TokenIn: ${newEvent.tokenIn}, AmountIn: ${newEvent.amountIn}`)
-		runtime.log(`  TokenOut: ${newEvent.tokenOut}, AmountOut: ${newEvent.amountOut}`)
+		runtime.log(`  TokensOut: [${newEvent.tokensOut.join(', ')}]`)
+		runtime.log(`  AmountsOut: [${newEvent.amountsOut.map(a => a.toString()).join(', ')}]`)
 		runtime.log(`  SpendingCost: ${newEvent.spendingCost}`)
 
 		// Query historical events (both protocol executions and transfers)
