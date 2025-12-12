@@ -162,6 +162,7 @@ const configSchema = z.object({
 	chainSelectorName: z.string(), // e.g., "ethereum-testnet-sepolia"
 	gasLimit: z.string(),
 	proxyAddress: z.string(), // Chainlink CRE proxy for signed reports
+	ethPriceFeedAddress: z.string().optional(), // Chainlink ETH/USD price feed for native ETH balance
 	tokens: z.array(
 		z.object({
 			address: z.string(), // Token contract address
@@ -667,6 +668,50 @@ const getBatchTokenBalances = (runtime: Runtime<Config>): Map<string, bigint> =>
 }
 
 /**
+ * Get native ETH balance for an address
+ */
+const getNativeEthBalance = (runtime: Runtime<Config>, address: string): bigint => {
+	const network = getNetwork({
+		chainFamily: 'evm',
+		chainSelectorName: runtime.config.chainSelectorName,
+		isTestnet: true,
+	})
+
+	if (!network) {
+		throw new Error(`Network not found for chain selector name: ${runtime.config.chainSelectorName}`)
+	}
+
+	const evmClient = new cre.capabilities.EVMClient(network.chainSelector.selector)
+
+	try {
+		const result = evmClient
+			.getBalance(runtime, {
+				address: address,
+				blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
+			})
+			.result()
+
+		if (result.balance) {
+			// Handle SDK BigInt type
+			if (typeof result.balance === 'bigint') {
+				return result.balance
+			} else if (result.balance.absVal) {
+				// SDK BigInt type with Uint8Array absVal
+				let balanceValue = 0n
+				for (const byte of result.balance.absVal) {
+					balanceValue = (balanceValue << 8n) | BigInt(byte)
+				}
+				return balanceValue
+			}
+		}
+		return 0n
+	} catch (error) {
+		runtime.log(`Error getting native ETH balance: ${error}`)
+		return 0n
+	}
+}
+
+/**
  * Calculate the total USD value of all tokens in the Safe
  */
 const calculateSafeValue = (runtime: Runtime<Config>): SafeValueData => {
@@ -677,6 +722,40 @@ const calculateSafeValue = (runtime: Runtime<Config>): SafeValueData => {
 	// Get the Safe address from the module
 	const safeAddress = getSafeAddress(runtime)
 	runtime.log(`Monitoring Safe: ${safeAddress}`)
+
+	// First, calculate native ETH value if price feed is configured
+	if (config.ethPriceFeedAddress) {
+		const ethBalance = getNativeEthBalance(runtime, safeAddress)
+		if (ethBalance > 0n) {
+			runtime.log(`Processing native ETH`)
+			const { price: ethPrice, decimals: priceDecimals } = getChainlinkPrice(
+				runtime,
+				config.ethPriceFeedAddress,
+				config.chainSelectorName
+			)
+			const ethValueUSD = (ethBalance * ethPrice * BigInt(10 ** 18)) / BigInt(10 ** 18) / BigInt(10 ** priceDecimals)
+			runtime.log(`  ETH: balance=${(Number(ethBalance) / 1e18).toFixed(6)}, price=${(Number(ethPrice) / 10 ** priceDecimals).toFixed(2)} USD`)
+			runtime.log(`  Value: $${(Number(ethValueUSD) / 1e18).toFixed(2)} USD`)
+			totalValueUSD += ethValueUSD
+
+			tokens.push({
+				tokenAddress: '0x0000000000000000000000000000000000000000',
+				symbol: 'ETH',
+				balance: ethBalance,
+				priceUSD: ethPrice,
+				decimals: 18,
+			})
+		}
+	}
+
+	if (config.tokens.length === 0) {
+		runtime.log('No ERC20 tokens configured for safe value calculation')
+		return {
+			totalValueUSD,
+			tokens,
+			timestamp: Date.now(),
+		}
+	}
 
 	// Batch fetch all token balances in a single call
 	runtime.log('Fetching all token balances in batch...')

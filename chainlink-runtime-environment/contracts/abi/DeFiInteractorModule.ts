@@ -220,4 +220,5 @@ export const EVENT_SIGNATURES = {
 	ProtocolExecution: 'ProtocolExecution(address,address,uint8,address,uint256,address,uint256,uint256)',
 	TransferExecuted: 'TransferExecuted(address,address,address,uint256,uint256)',
 	SafeValueUpdated: 'SafeValueUpdated(uint256,uint256)',
+	AcquiredBalanceUpdated: 'AcquiredBalanceUpdated(address,address,uint256,uint256)',
 }
