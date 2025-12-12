@@ -8,6 +8,11 @@ import {IAavePool} from "../interfaces/IAavePool.sol";
  * @title AaveV3Parser
  * @notice Calldata parser for Aave V3 Pool and RewardsController operations
  * @dev Extracts token/amount from Aave V3 function calldata
+ *
+ * SECURITY NOTE:
+ * - BORROW is intentionally not supported. Borrowing creates debt against Safe's collateral
+ *   and could be exploited to bypass spending limits. Only the multisig should borrow.
+ * - REPAY is classified as WITHDRAW (free operation) since repaying debt improves Safe's health.
  */
 contract AaveV3Parser is ICalldataParser {
     error UnsupportedSelector();
@@ -15,7 +20,7 @@ contract AaveV3Parser is ICalldataParser {
     // Aave V3 Pool function selectors
     bytes4 public constant SUPPLY_SELECTOR = 0x617ba037;      // supply(address,uint256,address,uint16)
     bytes4 public constant WITHDRAW_SELECTOR = 0x69328dec;    // withdraw(address,uint256,address)
-    bytes4 public constant BORROW_SELECTOR = 0xa415bcad;      // borrow(address,uint256,uint256,uint16,address)
+    // BORROW_SELECTOR intentionally not supported - only multisig can borrow
     bytes4 public constant REPAY_SELECTOR = 0x573ade81;       // repay(address,uint256,uint256,address)
 
     // Aave V3 RewardsController selectors (CLAIM operations)
@@ -70,9 +75,6 @@ contract AaveV3Parser is ICalldataParser {
         } else if (selector == WITHDRAW_SELECTOR) {
             // withdraw(address asset, uint256 amount, address to)
             return abi.decode(data[4:], (address));
-        } else if (selector == BORROW_SELECTOR) {
-            // borrow(address asset, uint256 amount, uint256 interestRateMode, uint16 referralCode, address onBehalfOf)
-            return abi.decode(data[4:], (address));
         } else if (selector == CLAIM_REWARDS_SELECTOR) {
             // claimRewards(address[] assets, uint256 amount, address to, address reward)
             // reward token is the 4th parameter
@@ -103,11 +105,6 @@ contract AaveV3Parser is ICalldataParser {
             // withdraw(address asset, uint256 amount, address to)
             // 'to' is where withdrawn tokens go
             (,, recipient) = abi.decode(data[4:], (address, uint256, address));
-        } else if (selector == BORROW_SELECTOR) {
-            // borrow(address asset, uint256 amount, uint256 interestRateMode, uint16 referralCode, address onBehalfOf)
-            // onBehalfOf incurs the debt, but borrowed tokens go to msg.sender
-            // For safety, return defaultRecipient (Safe) as borrowed funds should stay in Safe
-            return defaultRecipient;
         } else if (selector == REPAY_SELECTOR) {
             // repay(address asset, uint256 amount, uint256 interestRateMode, address onBehalfOf)
             // onBehalfOf is whose debt is repaid - must be Safe
@@ -137,25 +134,32 @@ contract AaveV3Parser is ICalldataParser {
     function supportsSelector(bytes4 selector) external pure override returns (bool) {
         return selector == SUPPLY_SELECTOR ||
                selector == WITHDRAW_SELECTOR ||
-               selector == BORROW_SELECTOR ||
                selector == REPAY_SELECTOR ||
                _isClaimSelector(selector);
+        // NOTE: BORROW is intentionally NOT supported - only multisig can borrow
     }
 
     /**
      * @notice Get the operation type for the given calldata
      * @param data The calldata to analyze
      * @return opType 1=SWAP, 2=DEPOSIT, 3=WITHDRAW, 4=CLAIM, 5=APPROVE
+     *
+     * @dev REPAY is classified as WITHDRAW (free operation) because:
+     *      - It improves the Safe's health factor by reducing debt
+     *      - It doesn't increase risk exposure
+     *      - Subaccounts should be free to repay debt without spending checks
      */
     function getOperationType(bytes calldata data) external pure override returns (uint8 opType) {
         bytes4 selector = bytes4(data[:4]);
-        if (selector == SUPPLY_SELECTOR || selector == REPAY_SELECTOR) {
-            return 2; // DEPOSIT
-        } else if (selector == WITHDRAW_SELECTOR || selector == BORROW_SELECTOR) {
+        if (selector == SUPPLY_SELECTOR) {
+            return 2; // DEPOSIT - costs spending for original tokens
+        } else if (selector == WITHDRAW_SELECTOR || selector == REPAY_SELECTOR) {
+            // REPAY is free (classified as WITHDRAW) - improves Safe health
             return 3; // WITHDRAW
         } else if (_isClaimSelector(selector)) {
             return 4; // CLAIM
         }
+        // NOTE: BORROW is not supported - will revert with UnsupportedSelector
         return 0; // UNKNOWN
     }
 

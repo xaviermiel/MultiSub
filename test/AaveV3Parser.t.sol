@@ -52,7 +52,7 @@ contract AaveV3ParserTest is Test {
     function testSelectors() public view {
         assertEq(parser.SUPPLY_SELECTOR(), bytes4(0x617ba037), "Supply selector mismatch");
         assertEq(parser.WITHDRAW_SELECTOR(), bytes4(0x69328dec), "Withdraw selector mismatch");
-        assertEq(parser.BORROW_SELECTOR(), bytes4(0xa415bcad), "Borrow selector mismatch");
+        // BORROW is intentionally NOT supported - only multisig can borrow
         assertEq(parser.REPAY_SELECTOR(), bytes4(0x573ade81), "Repay selector mismatch");
         assertEq(parser.CLAIM_REWARDS_SELECTOR(), bytes4(0x236300dc), "ClaimRewards selector mismatch");
         assertEq(parser.CLAIM_REWARDS_ON_BEHALF_SELECTOR(), bytes4(0x33028b99), "ClaimRewardsOnBehalf selector mismatch");
@@ -64,8 +64,10 @@ contract AaveV3ParserTest is Test {
         // Pool operations
         assertTrue(parser.supportsSelector(parser.SUPPLY_SELECTOR()), "Should support supply");
         assertTrue(parser.supportsSelector(parser.WITHDRAW_SELECTOR()), "Should support withdraw");
-        assertTrue(parser.supportsSelector(parser.BORROW_SELECTOR()), "Should support borrow");
         assertTrue(parser.supportsSelector(parser.REPAY_SELECTOR()), "Should support repay");
+
+        // BORROW is intentionally NOT supported - only multisig can borrow
+        assertFalse(parser.supportsSelector(bytes4(0xa415bcad)), "Should NOT support borrow");
 
         // Rewards operations
         assertTrue(parser.supportsSelector(parser.CLAIM_REWARDS_SELECTOR()), "Should support claimRewards");
@@ -150,21 +152,8 @@ contract AaveV3ParserTest is Test {
     }
 
     // ============ Borrow Tests ============
-
-    function testBorrowExtractOutputToken() public view {
-        // borrow(address asset, uint256 amount, uint256 interestRateMode, uint16 referralCode, address onBehalfOf)
-        bytes memory data = abi.encodeWithSelector(
-            parser.BORROW_SELECTOR(),
-            WETH,
-            1e18,
-            uint256(2), // variable rate
-            uint16(0),
-            USER
-        );
-
-        address token = parser.extractOutputToken(AAVE_POOL, data);
-        assertEq(token, WETH, "Output token should be WETH");
-    }
+    // NOTE: BORROW is intentionally NOT supported - only multisig can borrow
+    // Tests removed - subaccounts cannot use borrow function
 
     // ============ Repay Tests ============
 
@@ -317,7 +306,7 @@ contract AaveV3ParserTest is Test {
         bytes memory supplyData = abi.encodeWithSelector(parser.SUPPLY_SELECTOR());
         bytes memory repayData = abi.encodeWithSelector(parser.REPAY_SELECTOR());
         bytes memory withdrawData = abi.encodeWithSelector(parser.WITHDRAW_SELECTOR());
-        bytes memory borrowData = abi.encodeWithSelector(parser.BORROW_SELECTOR());
+        // BORROW is not supported - only multisig can borrow
         bytes memory claimRewardsData = abi.encodeWithSelector(parser.CLAIM_REWARDS_SELECTOR());
         bytes memory claimOnBehalfData = abi.encodeWithSelector(parser.CLAIM_REWARDS_ON_BEHALF_SELECTOR());
         bytes memory claimAllData = abi.encodeWithSelector(parser.CLAIM_ALL_REWARDS_SELECTOR());
@@ -326,11 +315,10 @@ contract AaveV3ParserTest is Test {
 
         // DEPOSIT operations
         assertEq(parser.getOperationType(supplyData), 2, "Supply should be DEPOSIT (2)");
-        assertEq(parser.getOperationType(repayData), 2, "Repay should be DEPOSIT (2)");
 
-        // WITHDRAW operations
+        // WITHDRAW operations (includes REPAY - repaying debt is FREE)
         assertEq(parser.getOperationType(withdrawData), 3, "Withdraw should be WITHDRAW (3)");
-        assertEq(parser.getOperationType(borrowData), 3, "Borrow should be WITHDRAW (3)");
+        assertEq(parser.getOperationType(repayData), 3, "Repay should be WITHDRAW (3) - FREE operation");
 
         // CLAIM operations
         assertEq(parser.getOperationType(claimRewardsData), 4, "ClaimRewards should be CLAIM (4)");
