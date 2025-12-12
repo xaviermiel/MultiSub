@@ -394,6 +394,53 @@ const addressToTopicBytes = (address: Address): string => {
 }
 
 /**
+ * Get block timestamp from block number
+ */
+const getBlockTimestamp = (
+	runtime: Runtime<Config>,
+	blockNumber: bigint,
+): bigint => {
+	const evmClient = createEvmClient(runtime)
+
+	try {
+		const headerResult = evmClient
+			.headerByNumber(runtime, {
+				blockNumber: { absVal: blockNumber.toString(), sign: '' },
+			})
+			.result()
+
+		if (headerResult.header?.timestamp) {
+			return sdkBigIntToBigInt(headerResult.header.timestamp)
+		}
+		// Fallback to current time if header fetch fails
+		runtime.log(`Warning: Could not get timestamp for block ${blockNumber}, using current time`)
+		return BigInt(Math.floor(Date.now() / 1000))
+	} catch (error) {
+		runtime.log(`Error getting block timestamp for ${blockNumber}: ${error}`)
+		return BigInt(Math.floor(Date.now() / 1000))
+	}
+}
+
+/**
+ * Batch fetch block timestamps for multiple blocks
+ * Returns a map of blockNumber -> timestamp
+ */
+const getBlockTimestamps = (
+	runtime: Runtime<Config>,
+	blockNumbers: bigint[],
+): Map<bigint, bigint> => {
+	const timestamps = new Map<bigint, bigint>()
+	const uniqueBlocks = [...new Set(blockNumbers)]
+
+	for (const blockNum of uniqueBlocks) {
+		const timestamp = getBlockTimestamp(runtime, blockNum)
+		timestamps.set(blockNum, timestamp)
+	}
+
+	return timestamps
+}
+
+/**
  * Query historical ProtocolExecution events from the past 24h
  */
 const queryHistoricalEvents = (
@@ -445,13 +492,28 @@ const queryHistoricalEvents = (
 
 		runtime.log(`Found ${logsResult.logs.length} historical events`)
 
+		// Parse events first to extract block numbers
+		const parsedEvents: Array<{ log: any; event: ProtocolExecutionEvent }> = []
 		for (const log of logsResult.logs) {
 			try {
 				const event = parseProtocolExecutionEvent(log)
-				events.push(event)
+				parsedEvents.push({ log, event })
 			} catch (error) {
 				runtime.log(`Error parsing event: ${error}`)
 			}
+		}
+
+		// Batch fetch block timestamps for accurate window calculations
+		const blockNumbers = parsedEvents.map(p => p.event.blockNumber)
+		const blockTimestamps = getBlockTimestamps(runtime, blockNumbers)
+
+		// Update events with actual block timestamps
+		for (const { event } of parsedEvents) {
+			const actualTimestamp = blockTimestamps.get(event.blockNumber)
+			if (actualTimestamp) {
+				event.timestamp = actualTimestamp
+			}
+			events.push(event)
 		}
 	} catch (error) {
 		runtime.log(`Error querying historical events: ${error}`)
@@ -539,8 +601,9 @@ const parseProtocolExecutionEvent = (log: any): ProtocolExecutionEvent => {
 		tokenOut: decoded[3] as Address,
 		amountOut: decoded[4],
 		spendingCost: decoded[5],
-		// Use current timestamp as proxy since event doesn't include it
-		timestamp: BigInt(Math.floor(Date.now() / 1000)),
+		// Timestamp will be set from block header after parsing
+		// Initialize with 0 to indicate it needs to be fetched
+		timestamp: 0n,
 		blockNumber,
 		logIndex,
 	}
@@ -600,8 +663,9 @@ const parseTransferExecutedEvent = (log: any): TransferExecutedEvent => {
 		recipient,
 		amount: decoded[0],
 		spendingCost: decoded[1],
-		// Use current timestamp as proxy since event doesn't include it
-		timestamp: BigInt(Math.floor(Date.now() / 1000)),
+		// Timestamp will be set from block header after parsing
+		// Initialize with 0 to indicate it needs to be fetched
+		timestamp: 0n,
 		blockNumber,
 		logIndex,
 	}
@@ -654,13 +718,28 @@ const queryTransferEvents = (
 
 		runtime.log(`Found ${logsResult.logs.length} transfer events`)
 
+		// Parse events first to extract block numbers
+		const parsedEvents: Array<{ log: any; event: TransferExecutedEvent }> = []
 		for (const log of logsResult.logs) {
 			try {
 				const event = parseTransferExecutedEvent(log)
-				events.push(event)
+				parsedEvents.push({ log, event })
 			} catch (error) {
 				runtime.log(`Error parsing transfer event: ${error}`)
 			}
+		}
+
+		// Batch fetch block timestamps for accurate window calculations
+		const blockNumbers = parsedEvents.map(p => p.event.blockNumber)
+		const blockTimestamps = getBlockTimestamps(runtime, blockNumbers)
+
+		// Update events with actual block timestamps
+		for (const { event } of parsedEvents) {
+			const actualTimestamp = blockTimestamps.get(event.blockNumber)
+			if (actualTimestamp) {
+				event.timestamp = actualTimestamp
+			}
+			events.push(event)
 		}
 	} catch (error) {
 		runtime.log(`Error querying transfer events: ${error}`)
@@ -1253,9 +1332,15 @@ const onProtocolExecution = (runtime: Runtime<Config>, payload: any): string => 
 		}
 
 		const newEvent = parseProtocolExecutionEvent(log)
+
+		// Fetch actual block timestamp for the new event
+		const actualTimestamp = getBlockTimestamp(runtime, newEvent.blockNumber)
+		newEvent.timestamp = actualTimestamp
+
 		const currentTimestamp = getCurrentBlockTimestamp()
 
 		runtime.log(`New event: ${OperationType[newEvent.opType]} by ${newEvent.subAccount}`)
+		runtime.log(`  Block: ${newEvent.blockNumber}, Timestamp: ${newEvent.timestamp}`)
 		runtime.log(`  TokenIn: ${newEvent.tokenIn}, AmountIn: ${newEvent.amountIn}`)
 		runtime.log(`  TokenOut: ${newEvent.tokenOut}, AmountOut: ${newEvent.amountOut}`)
 		runtime.log(`  SpendingCost: ${newEvent.spendingCost}`)
@@ -1369,9 +1454,15 @@ const onTransferExecuted = (runtime: Runtime<Config>, payload: any): string => {
 		}
 
 		const newTransfer = parseTransferExecutedEvent(log)
+
+		// Fetch actual block timestamp for the new event
+		const actualTimestamp = getBlockTimestamp(runtime, newTransfer.blockNumber)
+		newTransfer.timestamp = actualTimestamp
+
 		const currentTimestamp = getCurrentBlockTimestamp()
 
 		runtime.log(`New transfer: ${newTransfer.amount} of ${newTransfer.token} to ${newTransfer.recipient}`)
+		runtime.log(`  Block: ${newTransfer.blockNumber}, Timestamp: ${newTransfer.timestamp}`)
 		runtime.log(`  SpendingCost: ${newTransfer.spendingCost}`)
 
 		// Query historical events (both protocol executions and transfers)
