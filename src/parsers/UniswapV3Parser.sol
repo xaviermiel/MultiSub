@@ -4,6 +4,27 @@ pragma solidity ^0.8.20;
 import {ICalldataParser} from "../interfaces/ICalldataParser.sol";
 
 /**
+ * @title INonfungiblePositionManager
+ * @notice Interface for querying position details from Uniswap V3 NonfungiblePositionManager
+ */
+interface INonfungiblePositionManager {
+    function positions(uint256 tokenId) external view returns (
+        uint96 nonce,
+        address operator,
+        address token0,
+        address token1,
+        uint24 fee,
+        int24 tickLower,
+        int24 tickUpper,
+        uint128 liquidity,
+        uint256 feeGrowthInside0LastX128,
+        uint256 feeGrowthInside1LastX128,
+        uint128 tokensOwed0,
+        uint128 tokensOwed1
+    );
+}
+
+/**
  * @title UniswapV3Parser
  * @notice Calldata parser for Uniswap V3 SwapRouter and NonfungiblePositionManager operations
  * @dev Extracts token/amount from Uniswap V3 function calldata
@@ -12,6 +33,11 @@ import {ICalldataParser} from "../interfaces/ICalldataParser.sol";
  *      - SwapRouter (0xE592427A0AEce92De3Edee1F18E0157C05861564)
  *      - SwapRouter02 (0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45)
  *      - NonfungiblePositionManager (0xC36442b4a4522E871399CD717aBDD847Ab11FE88)
+ *
+ *      Note on INCREASE_LIQUIDITY:
+ *      - Queries the position's token0 on-chain via the NonfungiblePositionManager
+ *      - Both token0 and token1 are spent, but we track token0 for spending calculations
+ *      - Balance differences are tracked to capture actual amounts spent
  */
 contract UniswapV3Parser is ICalldataParser {
     error UnsupportedSelector();
@@ -43,7 +69,7 @@ contract UniswapV3Parser is ICalldataParser {
     bytes4 public constant COLLECT_SELECTOR = 0xfc6f7865;
 
     /// @inheritdoc ICalldataParser
-    function extractInputToken(address, bytes calldata data) external pure override returns (address token) {
+    function extractInputToken(address target, bytes calldata data) external view override returns (address token) {
         bytes4 selector = bytes4(data[:4]);
 
         // ============ SwapRouter Functions ============
@@ -95,8 +121,9 @@ contract UniswapV3Parser is ICalldataParser {
             (token,,,,,,,,,) = abi.decode(data[4:], (address, address, uint24, int24, int24, uint256, uint256, uint256, uint256, address));
         } else if (selector == INCREASE_LIQUIDITY_SELECTOR) {
             // IncreaseLiquidityParams: (tokenId, amount0Desired, amount1Desired, amount0Min, amount1Min, deadline)
-            // No token address in calldata - return address(0), tracked via balance change
-            return address(0);
+            // Query the position's token0 from the NonfungiblePositionManager
+            (uint256 tokenId,,,,,) = abi.decode(data[4:], (uint256, uint256, uint256, uint256, uint256, uint256));
+            (,, token,,,,,,,,,) = INonfungiblePositionManager(target).positions(tokenId);
         } else if (selector == DECREASE_LIQUIDITY_SELECTOR || selector == COLLECT_SELECTOR) {
             // These are withdraw/claim operations - no input token
             return address(0);
