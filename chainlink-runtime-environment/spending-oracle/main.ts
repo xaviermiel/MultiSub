@@ -78,8 +78,8 @@ interface ProtocolExecutionEvent {
 	subAccount: Address
 	target: Address
 	opType: OperationType
-	tokenIn: Address
-	amountIn: bigint
+	tokensIn: Address[]     // Array of input tokens
+	amountsIn: bigint[]     // Array of input amounts
 	tokensOut: Address[]    // Array of output tokens
 	amountsOut: bigint[]    // Array of output amounts
 	spendingCost: bigint
@@ -139,7 +139,7 @@ interface SubAccountState {
 // Note: Events no longer include timestamp parameter - contract uses block.timestamp
 
 const PROTOCOL_EXECUTION_EVENT_SIG = keccak256(
-	toHex('ProtocolExecution(address,address,uint8,address,uint256,address[],uint256[],uint256)')
+	toHex('ProtocolExecution(address,address,uint8,address[],uint256[],address[],uint256[],uint256)')
 )
 
 const TRANSFER_EXECUTED_EVENT_SIG = keccak256(
@@ -563,8 +563,8 @@ const parseProtocolExecutionEvent = (log: any): ProtocolExecutionEvent => {
 	const decoded = decodeAbiParameters(
 		[
 			{ name: 'opType', type: 'uint8' },
-			{ name: 'tokenIn', type: 'address' },
-			{ name: 'amountIn', type: 'uint256' },
+			{ name: 'tokensIn', type: 'address[]' },
+			{ name: 'amountsIn', type: 'uint256[]' },
 			{ name: 'tokensOut', type: 'address[]' },
 			{ name: 'amountsOut', type: 'uint256[]' },
 			{ name: 'spendingCost', type: 'uint256' },
@@ -595,6 +595,8 @@ const parseProtocolExecutionEvent = (log: any): ProtocolExecutionEvent => {
 	}
 
 	// Convert decoded arrays to proper types
+	const tokensIn = (decoded[1] as readonly `0x${string}`[]).map(t => t as Address)
+	const amountsIn = decoded[2] as readonly bigint[]
 	const tokensOut = (decoded[3] as readonly `0x${string}`[]).map(t => t as Address)
 	const amountsOut = decoded[4] as readonly bigint[]
 
@@ -602,8 +604,8 @@ const parseProtocolExecutionEvent = (log: any): ProtocolExecutionEvent => {
 		subAccount,
 		target,
 		opType: decoded[0] as OperationType,
-		tokenIn: decoded[1] as Address,
-		amountIn: decoded[2],
+		tokensIn: [...tokensIn],
+		amountsIn: [...amountsIn],
 		tokensOut: [...tokensOut],
 		amountsOut: [...amountsOut],
 		spendingCost: decoded[5],
@@ -968,7 +970,6 @@ const buildSubAccountState = (
 	for (const unified of unifiedEvents) {
 		if (unified.type === 'protocol') {
 			const event = unified.event
-			const tokenInLower = event.tokenIn.toLowerCase() as Address
 			const isInWindow = event.timestamp >= windowStart
 
 			// Track spending (only count if in window)
@@ -985,17 +986,28 @@ const buildSubAccountState = (
 			// Handle input token consumption (FIFO) - do this before creating deposit record
 			// so we can capture the original acquisition timestamp for deposits
 			// Use event timestamp to determine expiry - tokens must be valid at the time of the event
+			// NOTE: Now handles multiple input tokens (e.g., LP position minting uses 2 tokens)
 			let consumedEntries: AcquiredBalanceEntry[] = []
-			if ((event.opType === OperationType.SWAP || event.opType === OperationType.DEPOSIT) &&
-					event.amountIn > 0n) {
-				const inputQueue = getQueue(tokenInLower)
-				const result = consumeFromQueue(inputQueue, event.amountIn, event.timestamp, windowDuration)
-				consumedEntries = result.consumed
-				tokensWithAcquiredHistory.add(tokenInLower)
+			let totalAmountIn = 0n
+			if (event.opType === OperationType.SWAP || event.opType === OperationType.DEPOSIT) {
+				// Process each input token
+				for (let i = 0; i < event.tokensIn.length; i++) {
+					const tokenIn = event.tokensIn[i]
+					const amountIn = event.amountsIn[i]
+					if (amountIn <= 0n) continue
+
+					totalAmountIn += amountIn
+					const tokenInLower = tokenIn.toLowerCase() as Address
+					const inputQueue = getQueue(tokenInLower)
+					const result = consumeFromQueue(inputQueue, amountIn, event.timestamp, windowDuration)
+					consumedEntries.push(...result.consumed)
+					tokensWithAcquiredHistory.add(tokenInLower)
+				}
 			}
 
 			// Track deposits for withdrawal matching
 			// Store the original acquisition timestamp so withdrawals inherit it correctly
+			// For multi-token deposits (LP), create a record for each input token
 			if (event.opType === OperationType.DEPOSIT) {
 				// Find the oldest original timestamp from consumed acquired tokens
 				// If no acquired tokens were consumed, use the deposit timestamp (it's new spending)
@@ -1008,15 +1020,22 @@ const buildSubAccountState = (
 					runtime.log(`  DEPOSIT: storing original acquisition timestamp ${originalAcquisitionTimestamp} for future withdrawal`)
 				}
 
-				state.depositRecords.push({
-					subAccount: event.subAccount,
-					target: event.target,
-					tokenIn: event.tokenIn,
-					amountIn: event.amountIn,
-					remainingAmount: event.amountIn,
-					timestamp: event.timestamp,
-					originalAcquisitionTimestamp,
-				})
+				// Create a deposit record for each input token
+				for (let i = 0; i < event.tokensIn.length; i++) {
+					const tokenIn = event.tokensIn[i]
+					const amountIn = event.amountsIn[i]
+					if (amountIn <= 0n) continue
+
+					state.depositRecords.push({
+						subAccount: event.subAccount,
+						target: event.target,
+						tokenIn: tokenIn,
+						amountIn: amountIn,
+						remainingAmount: amountIn,
+						timestamp: event.timestamp,
+						originalAcquisitionTimestamp,
+					})
+				}
 			}
 
 			// Handle output tokens (add to acquired queue)
@@ -1037,12 +1056,12 @@ const buildSubAccountState = (
 
 					// Calculate how much of the input was acquired vs non-acquired
 					const totalConsumed = consumedEntries.reduce((sum, e) => sum + e.amount, 0n)
-					const fromNonAcquired = event.amountIn - totalConsumed // Remaining came from original funds
+					const fromNonAcquired = totalAmountIn - totalConsumed // Remaining came from original funds
 
 					if (totalConsumed > 0n && fromNonAcquired > 0n) {
 						// Mixed case: proportionally split the output
 						// Acquired portion inherits oldest timestamp, non-acquired portion is newly acquired
-						const acquiredRatio = (totalConsumed * 10000n) / event.amountIn // basis points
+						const acquiredRatio = (totalConsumed * 10000n) / totalAmountIn // basis points
 						const outputFromAcquired = (amountOut * acquiredRatio) / 10000n
 						const outputFromNonAcquired = amountOut - outputFromAcquired
 
@@ -1360,7 +1379,8 @@ const onProtocolExecution = (runtime: Runtime<Config>, payload: any): string => 
 
 		runtime.log(`New event: ${OperationType[newEvent.opType]} by ${newEvent.subAccount}`)
 		runtime.log(`  Block: ${newEvent.blockNumber}, Timestamp: ${newEvent.timestamp}`)
-		runtime.log(`  TokenIn: ${newEvent.tokenIn}, AmountIn: ${newEvent.amountIn}`)
+		runtime.log(`  TokensIn: [${newEvent.tokensIn.join(', ')}]`)
+		runtime.log(`  AmountsIn: [${newEvent.amountsIn.map(a => a.toString()).join(', ')}]`)
 		runtime.log(`  TokensOut: [${newEvent.tokensOut.join(', ')}]`)
 		runtime.log(`  AmountsOut: [${newEvent.amountsOut.map(a => a.toString()).join(', ')}]`)
 		runtime.log(`  SpendingCost: ${newEvent.spendingCost}`)
