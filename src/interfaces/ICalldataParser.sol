@@ -25,12 +25,15 @@ interface ICalldataParser {
     function extractInputAmount(address target, bytes calldata data) external view returns (uint256 amount);
 
     /**
-     * @notice Extract the output token from calldata (for swaps/withdrawals)
+     * @notice Extract the output tokens from calldata (for swaps/withdrawals)
      * @param target The protocol/vault address being called
      * @param data The calldata to parse
-     * @return token The output token address
+     * @return tokens Array of output token addresses (empty array if no output tokens)
+     * @dev For single-token outputs, returns array with 1 element.
+     *      For multi-token outputs (e.g., LP positions), returns all output tokens.
+     *      For operations with no output tokens, returns empty array.
      */
-    function extractOutputToken(address target, bytes calldata data) external view returns (address token);
+    function extractOutputTokens(address target, bytes calldata data) external view returns (address[] memory tokens);
 
     /**
      * @notice Extract the recipient address from calldata

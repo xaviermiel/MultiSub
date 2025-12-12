@@ -39,18 +39,14 @@ contract MerklParser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractOutputToken(address, bytes calldata data) external pure override returns (address token) {
+    function extractOutputTokens(address, bytes calldata data) external pure override returns (address[] memory tokens) {
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == CLAIM_SELECTOR) {
             // claim(address[] users, address[] tokens, uint256[] amounts, bytes32[][] proofs)
-            // Extract first token from tokens array as the output token
-            (, address[] memory tokens,,) = abi.decode(data[4:], (address[], address[], uint256[], bytes32[][]));
-
-            if (tokens.length > 0) {
-                return tokens[0];
-            }
-            return address(0);
+            // Return all tokens being claimed
+            (, tokens,,) = abi.decode(data[4:], (address[], address[], uint256[], bytes32[][]));
+            return tokens;
         }
         revert UnsupportedSelector();
     }

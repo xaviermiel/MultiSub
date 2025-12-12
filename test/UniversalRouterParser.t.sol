@@ -60,11 +60,11 @@ contract UniversalRouterParserTest is Test {
         parser.extractInputAmount(UNIVERSAL_ROUTER, badData);
     }
 
-    function testUnsupportedSelectorRevertsOnOutputToken() public {
+    function testUnsupportedSelectorRevertsOnOutputTokens() public {
         bytes memory badData = abi.encodeWithSelector(bytes4(0xdeadbeef), uint256(100));
 
         vm.expectRevert(UniversalRouterParser.UnsupportedSelector.selector);
-        parser.extractOutputToken(UNIVERSAL_ROUTER, badData);
+        parser.extractOutputTokens(UNIVERSAL_ROUTER, badData);
     }
 
     function testUnsupportedSelectorRevertsOnRecipient() public {
@@ -146,8 +146,9 @@ contract UniversalRouterParserTest is Test {
             block.timestamp + 1
         );
 
-        address token = parser.extractOutputToken(UNIVERSAL_ROUTER, data);
-        assertEq(token, WETH, "Output token should be WETH");
+        address[] memory tokens = parser.extractOutputTokens(UNIVERSAL_ROUTER, data);
+        assertEq(tokens.length, 1, "Should have 1 output token");
+        assertEq(tokens[0], WETH, "Output token should be WETH");
     }
 
     function testV3SwapExactInExtractRecipient() public view {
@@ -204,8 +205,9 @@ contract UniversalRouterParserTest is Test {
             block.timestamp + 1
         );
 
-        address token = parser.extractOutputToken(UNIVERSAL_ROUTER, data);
-        assertEq(token, WETH, "Output token should be WETH (first in reversed path)");
+        address[] memory tokens = parser.extractOutputTokens(UNIVERSAL_ROUTER, data);
+        assertEq(tokens.length, 1, "Should have 1 output token");
+        assertEq(tokens[0], WETH, "Output token should be WETH (first in reversed path)");
     }
 
     // ============ V2_SWAP_EXACT_IN Tests ============
@@ -272,8 +274,9 @@ contract UniversalRouterParserTest is Test {
             block.timestamp + 1
         );
 
-        address token = parser.extractOutputToken(UNIVERSAL_ROUTER, data);
-        assertEq(token, WETH, "Output token should be WETH");
+        address[] memory tokens = parser.extractOutputTokens(UNIVERSAL_ROUTER, data);
+        assertEq(tokens.length, 1, "Should have 1 output token");
+        assertEq(tokens[0], WETH, "Output token should be WETH");
     }
 
     // ============ V2_SWAP_EXACT_OUT Tests ============
@@ -319,8 +322,9 @@ contract UniversalRouterParserTest is Test {
             block.timestamp + 1
         );
 
-        address token = parser.extractOutputToken(UNIVERSAL_ROUTER, data);
-        assertEq(token, USDC, "Output token should be USDC (first in path)");
+        address[] memory tokens = parser.extractOutputTokens(UNIVERSAL_ROUTER, data);
+        assertEq(tokens.length, 1, "Should have 1 output token");
+        assertEq(tokens[0], USDC, "Output token should be USDC (first in path)");
     }
 
     // ============ WRAP_ETH Tests ============
@@ -395,8 +399,9 @@ contract UniversalRouterParserTest is Test {
             block.timestamp + 1
         );
 
-        address token = parser.extractOutputToken(UNIVERSAL_ROUTER, data);
-        assertEq(token, address(0), "Output token should be address(0) for native ETH");
+        address[] memory tokens = parser.extractOutputTokens(UNIVERSAL_ROUTER, data);
+        assertEq(tokens.length, 1, "Should have 1 output token");
+        assertEq(tokens[0], address(0), "Output token should be address(0) for native ETH");
     }
 
     function testUnwrapWethExtractRecipient() public view {
@@ -456,8 +461,9 @@ contract UniversalRouterParserTest is Test {
             block.timestamp + 1
         );
 
-        address token = parser.extractOutputToken(UNIVERSAL_ROUTER, data);
-        assertEq(token, WETH, "Output token should be WETH (last in multi-hop path)");
+        address[] memory tokens = parser.extractOutputTokens(UNIVERSAL_ROUTER, data);
+        assertEq(tokens.length, 1, "Should have 1 output token");
+        assertEq(tokens[0], WETH, "Output token should be WETH (last in multi-hop path)");
     }
 
     // ============ Default Recipient Tests ============

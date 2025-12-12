@@ -108,7 +108,7 @@ contract AaveV3ParserTest is Test {
         assertEq(amount, 1000e6, "Input amount should be 1000e6");
     }
 
-    function testSupplyExtractOutputToken() public view {
+    function testSupplyExtractOutputTokens() public view {
         // supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode)
         bytes memory data = abi.encodeWithSelector(
             parser.SUPPLY_SELECTOR(),
@@ -119,11 +119,12 @@ contract AaveV3ParserTest is Test {
         );
 
         // Output should be the aToken for USDC
-        address token = parser.extractOutputToken(address(mockPool), data);
-        assertEq(token, aUSDC, "Output token should be aUSDC (aToken for USDC)");
+        address[] memory tokens = parser.extractOutputTokens(address(mockPool), data);
+        assertEq(tokens.length, 1, "Should have 1 output token");
+        assertEq(tokens[0], aUSDC, "Output token should be aUSDC (aToken for USDC)");
     }
 
-    function testSupplyExtractOutputTokenWETH() public view {
+    function testSupplyExtractOutputTokensWETH() public view {
         bytes memory data = abi.encodeWithSelector(
             parser.SUPPLY_SELECTOR(),
             WETH,
@@ -132,13 +133,14 @@ contract AaveV3ParserTest is Test {
             uint16(0)
         );
 
-        address token = parser.extractOutputToken(address(mockPool), data);
-        assertEq(token, aWETH, "Output token should be aWETH (aToken for WETH)");
+        address[] memory tokens = parser.extractOutputTokens(address(mockPool), data);
+        assertEq(tokens.length, 1, "Should have 1 output token");
+        assertEq(tokens[0], aWETH, "Output token should be aWETH (aToken for WETH)");
     }
 
     // ============ Withdraw Tests ============
 
-    function testWithdrawExtractOutputToken() public view {
+    function testWithdrawExtractOutputTokens() public view {
         // withdraw(address asset, uint256 amount, address to)
         bytes memory data = abi.encodeWithSelector(
             parser.WITHDRAW_SELECTOR(),
@@ -147,8 +149,9 @@ contract AaveV3ParserTest is Test {
             USER
         );
 
-        address token = parser.extractOutputToken(AAVE_POOL, data);
-        assertEq(token, USDC, "Output token should be USDC");
+        address[] memory tokens = parser.extractOutputTokens(AAVE_POOL, data);
+        assertEq(tokens.length, 1, "Should have 1 output token");
+        assertEq(tokens[0], USDC, "Output token should be USDC");
     }
 
     // ============ Borrow Tests ============
@@ -184,7 +187,7 @@ contract AaveV3ParserTest is Test {
         assertEq(amount, 1e18, "Input amount should be 1e18");
     }
 
-    function testRepayExtractOutputToken() public view {
+    function testRepayExtractOutputTokens() public view {
         // repay doesn't produce output tokens (it burns debt tokens internally)
         bytes memory data = abi.encodeWithSelector(
             parser.REPAY_SELECTOR(),
@@ -194,8 +197,8 @@ contract AaveV3ParserTest is Test {
             USER
         );
 
-        address token = parser.extractOutputToken(AAVE_POOL, data);
-        assertEq(token, address(0), "Repay should return zero address (no output token)");
+        address[] memory tokens = parser.extractOutputTokens(AAVE_POOL, data);
+        assertEq(tokens.length, 0, "Repay should return empty array (no output tokens)");
     }
 
     // ============ Claim Rewards Tests ============
@@ -233,7 +236,7 @@ contract AaveV3ParserTest is Test {
         assertEq(amount, 0, "Claim should have no input amount");
     }
 
-    function testClaimRewardsExtractOutputToken() public view {
+    function testClaimRewardsExtractOutputTokens() public view {
         address[] memory assets = new address[](1);
         assets[0] = USDC;
 
@@ -245,11 +248,12 @@ contract AaveV3ParserTest is Test {
             REWARD_TOKEN
         );
 
-        address token = parser.extractOutputToken(REWARDS_CONTROLLER, data);
-        assertEq(token, REWARD_TOKEN, "Output token should be reward token");
+        address[] memory tokens = parser.extractOutputTokens(REWARDS_CONTROLLER, data);
+        assertEq(tokens.length, 1, "Should have 1 output token");
+        assertEq(tokens[0], REWARD_TOKEN, "Output token should be reward token");
     }
 
-    function testClaimRewardsOnBehalfExtractOutputToken() public view {
+    function testClaimRewardsOnBehalfExtractOutputTokens() public view {
         // claimRewardsOnBehalf(address[] assets, uint256 amount, address user, address to, address reward)
         address[] memory assets = new address[](1);
         assets[0] = USDC;
@@ -263,11 +267,12 @@ contract AaveV3ParserTest is Test {
             REWARD_TOKEN
         );
 
-        address token = parser.extractOutputToken(REWARDS_CONTROLLER, data);
-        assertEq(token, REWARD_TOKEN, "Output token should be reward token");
+        address[] memory tokens = parser.extractOutputTokens(REWARDS_CONTROLLER, data);
+        assertEq(tokens.length, 1, "Should have 1 output token");
+        assertEq(tokens[0], REWARD_TOKEN, "Output token should be reward token");
     }
 
-    function testClaimAllRewardsReturnsZeroAddress() public view {
+    function testClaimAllRewardsReturnsEmptyArray() public view {
         // claimAllRewards(address[] assets, address to)
         address[] memory assets = new address[](2);
         assets[0] = USDC;
@@ -279,11 +284,11 @@ contract AaveV3ParserTest is Test {
             USER
         );
 
-        address token = parser.extractOutputToken(REWARDS_CONTROLLER, data);
-        assertEq(token, address(0), "ClaimAllRewards should return zero (multiple tokens)");
+        address[] memory tokens = parser.extractOutputTokens(REWARDS_CONTROLLER, data);
+        assertEq(tokens.length, 0, "ClaimAllRewards should return empty array (unknown tokens)");
     }
 
-    function testClaimAllOnBehalfReturnsZeroAddress() public view {
+    function testClaimAllOnBehalfReturnsEmptyArray() public view {
         // claimAllRewardsOnBehalf(address[] assets, address user, address to)
         address[] memory assets = new address[](1);
         assets[0] = USDC;
@@ -295,8 +300,8 @@ contract AaveV3ParserTest is Test {
             USER
         );
 
-        address token = parser.extractOutputToken(REWARDS_CONTROLLER, data);
-        assertEq(token, address(0), "ClaimAllOnBehalf should return zero");
+        address[] memory tokens = parser.extractOutputTokens(REWARDS_CONTROLLER, data);
+        assertEq(tokens.length, 0, "ClaimAllOnBehalf should return empty array");
     }
 
     // ============ Operation Type Tests ============
@@ -342,6 +347,6 @@ contract AaveV3ParserTest is Test {
         parser.extractInputAmount(AAVE_POOL, badData);
 
         vm.expectRevert(AaveV3Parser.UnsupportedSelector.selector);
-        parser.extractOutputToken(AAVE_POOL, badData);
+        parser.extractOutputTokens(AAVE_POOL, badData);
     }
 }

@@ -62,11 +62,11 @@ contract UniswapV4ParserTest is Test {
         parser.extractInputAmount(V4_POSITION_MANAGER, badData);
     }
 
-    function testUnsupportedSelectorRevertsOnOutputToken() public {
+    function testUnsupportedSelectorRevertsOnOutputTokens() public {
         bytes memory badData = abi.encodeWithSelector(bytes4(0xdeadbeef), uint256(100));
 
         vm.expectRevert(UniswapV4Parser.UnsupportedSelector.selector);
-        parser.extractOutputToken(V4_POSITION_MANAGER, badData);
+        parser.extractOutputTokens(V4_POSITION_MANAGER, badData);
     }
 
     function testUnsupportedSelectorRevertsOnRecipient() public {
@@ -179,7 +179,7 @@ contract UniswapV4ParserTest is Test {
 
     // ============ TAKE Action Tests ============
 
-    function testExtractOutputTokenFromTake() public view {
+    function testExtractOutputTokensFromTake() public view {
         bytes memory actions = new bytes(1);
         actions[0] = bytes1(parser.TAKE());
 
@@ -195,8 +195,9 @@ contract UniswapV4ParserTest is Test {
             block.timestamp + 1
         );
 
-        address outputToken = parser.extractOutputToken(V4_POSITION_MANAGER, data);
-        assertEq(outputToken, WETH, "Output token should be WETH from TAKE");
+        address[] memory outputTokens = parser.extractOutputTokens(V4_POSITION_MANAGER, data);
+        assertEq(outputTokens.length, 1, "Should have 1 output token");
+        assertEq(outputTokens[0], WETH, "Output token should be WETH from TAKE");
     }
 
     function testExtractRecipientFromTake() public view {
@@ -220,7 +221,7 @@ contract UniswapV4ParserTest is Test {
 
     // ============ TAKE_PAIR Action Tests ============
 
-    function testExtractOutputTokenFromTakePair() public view {
+    function testExtractOutputTokensFromTakePair() public view {
         bytes memory actions = new bytes(1);
         actions[0] = bytes1(parser.TAKE_PAIR());
 
@@ -236,8 +237,10 @@ contract UniswapV4ParserTest is Test {
             block.timestamp + 1
         );
 
-        address outputToken = parser.extractOutputToken(V4_POSITION_MANAGER, data);
-        assertEq(outputToken, USDC, "Output token should be first currency (USDC) from TAKE_PAIR");
+        address[] memory outputTokens = parser.extractOutputTokens(V4_POSITION_MANAGER, data);
+        assertEq(outputTokens.length, 2, "Should have 2 output tokens from TAKE_PAIR");
+        assertEq(outputTokens[0], USDC, "First output token should be USDC");
+        assertEq(outputTokens[1], WETH, "Second output token should be WETH");
     }
 
     function testExtractRecipientFromTakePair() public view {
@@ -261,7 +264,7 @@ contract UniswapV4ParserTest is Test {
 
     // ============ SWEEP Action Tests ============
 
-    function testExtractOutputTokenFromSweep() public view {
+    function testExtractOutputTokensFromSweep() public view {
         bytes memory actions = new bytes(1);
         actions[0] = bytes1(parser.SWEEP());
 
@@ -277,8 +280,9 @@ contract UniswapV4ParserTest is Test {
             block.timestamp + 1
         );
 
-        address outputToken = parser.extractOutputToken(V4_POSITION_MANAGER, data);
-        assertEq(outputToken, WETH, "Output token should be WETH from SWEEP");
+        address[] memory outputTokens = parser.extractOutputTokens(V4_POSITION_MANAGER, data);
+        assertEq(outputTokens.length, 1, "Should have 1 output token");
+        assertEq(outputTokens[0], WETH, "Output token should be WETH from SWEEP");
     }
 
     function testExtractRecipientFromSweep() public view {

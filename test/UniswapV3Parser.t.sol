@@ -79,7 +79,7 @@ contract UniswapV3ParserTest is Test {
         assertEq(amount, 1000e6, "Input amount should be 1000e6");
     }
 
-    function testExactInputSingleExtractOutputToken() public view {
+    function testExactInputSingleExtractOutputTokens() public view {
         bytes memory data = abi.encodeWithSelector(
             parser.EXACT_INPUT_SINGLE_SELECTOR(),
             USDC,
@@ -92,8 +92,9 @@ contract UniswapV3ParserTest is Test {
             uint160(0)
         );
 
-        address token = parser.extractOutputToken(SWAP_ROUTER, data);
-        assertEq(token, WETH, "Output token should be WETH");
+        address[] memory tokens = parser.extractOutputTokens(SWAP_ROUTER, data);
+        assertEq(tokens.length, 1, "Should have 1 output token");
+        assertEq(tokens[0], WETH, "Output token should be WETH");
     }
 
     // ============ ExactInput (Multi-hop) Tests ============
@@ -132,7 +133,7 @@ contract UniswapV3ParserTest is Test {
         assertEq(amount, 1000e6, "Input amount should be 1000e6");
     }
 
-    function testExactInputExtractOutputToken() public view {
+    function testExactInputExtractOutputTokens() public view {
         bytes memory path = abi.encodePacked(USDC, FEE_MEDIUM, WETH);
 
         bytes memory data = abi.encodeWithSelector(
@@ -144,8 +145,9 @@ contract UniswapV3ParserTest is Test {
             0
         );
 
-        address token = parser.extractOutputToken(SWAP_ROUTER, data);
-        assertEq(token, WETH, "Output token should be WETH (last in path)");
+        address[] memory tokens = parser.extractOutputTokens(SWAP_ROUTER, data);
+        assertEq(tokens.length, 1, "Should have 1 output token");
+        assertEq(tokens[0], WETH, "Output token should be WETH (last in path)");
     }
 
     function testExactInputMultiHop() public view {
@@ -168,10 +170,11 @@ contract UniswapV3ParserTest is Test {
         );
 
         address inputToken = parser.extractInputToken(SWAP_ROUTER, data);
-        address outputToken = parser.extractOutputToken(SWAP_ROUTER, data);
+        address[] memory outputTokens = parser.extractOutputTokens(SWAP_ROUTER, data);
 
         assertEq(inputToken, USDC, "Input should be first token (USDC)");
-        assertEq(outputToken, DAI, "Output should be last token (DAI)");
+        assertEq(outputTokens.length, 1, "Should have 1 output token");
+        assertEq(outputTokens[0], DAI, "Output should be last token (DAI)");
     }
 
     // ============ ExactOutputSingle Tests ============
@@ -211,7 +214,7 @@ contract UniswapV3ParserTest is Test {
         assertEq(amount, 2000e6, "Input amount should be amountInMaximum");
     }
 
-    function testExactOutputSingleExtractOutputToken() public view {
+    function testExactOutputSingleExtractOutputTokens() public view {
         bytes memory data = abi.encodeWithSelector(
             parser.EXACT_OUTPUT_SINGLE_SELECTOR(),
             USDC,
@@ -224,8 +227,9 @@ contract UniswapV3ParserTest is Test {
             uint160(0)
         );
 
-        address token = parser.extractOutputToken(SWAP_ROUTER, data);
-        assertEq(token, WETH, "Output token should be WETH");
+        address[] memory tokens = parser.extractOutputTokens(SWAP_ROUTER, data);
+        assertEq(tokens.length, 1, "Should have 1 output token");
+        assertEq(tokens[0], WETH, "Output token should be WETH");
     }
 
     // ============ ExactOutput (Multi-hop) Tests ============
@@ -245,11 +249,12 @@ contract UniswapV3ParserTest is Test {
         );
 
         address inputToken = parser.extractInputToken(SWAP_ROUTER, data);
-        address outputToken = parser.extractOutputToken(SWAP_ROUTER, data);
+        address[] memory outputTokens = parser.extractOutputTokens(SWAP_ROUTER, data);
 
         // In reversed path: last token is input, first token is output
         assertEq(inputToken, USDC, "Input token should be USDC (last in reversed path)");
-        assertEq(outputToken, WETH, "Output token should be WETH (first in reversed path)");
+        assertEq(outputTokens.length, 1, "Should have 1 output token");
+        assertEq(outputTokens[0], WETH, "Output token should be WETH (first in reversed path)");
     }
 
     function testExactOutputExtractInputAmount() public view {
@@ -297,7 +302,7 @@ contract UniswapV3ParserTest is Test {
         parser.extractInputAmount(SWAP_ROUTER, badData);
 
         vm.expectRevert(UniswapV3Parser.UnsupportedSelector.selector);
-        parser.extractOutputToken(SWAP_ROUTER, badData);
+        parser.extractOutputTokens(SWAP_ROUTER, badData);
     }
 
     function testInvalidPathReverts() public {

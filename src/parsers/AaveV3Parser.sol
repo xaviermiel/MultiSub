@@ -61,34 +61,44 @@ contract AaveV3Parser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractOutputToken(address target, bytes calldata data) external view override returns (address token) {
+    function extractOutputTokens(address target, bytes calldata data) external view override returns (address[] memory tokens) {
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == SUPPLY_SELECTOR) {
             // supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode)
             // Output is the aToken for the supplied asset
             address asset = abi.decode(data[4:], (address));
-            return IAavePool(target).getReserveData(asset).aTokenAddress;
+            tokens = new address[](1);
+            tokens[0] = IAavePool(target).getReserveData(asset).aTokenAddress;
+            return tokens;
         } else if (selector == REPAY_SELECTOR) {
             // repay doesn't produce output tokens (it burns debt tokens internally)
-            return address(0);
+            return new address[](0);
         } else if (selector == WITHDRAW_SELECTOR) {
             // withdraw(address asset, uint256 amount, address to)
-            return abi.decode(data[4:], (address));
+            tokens = new address[](1);
+            tokens[0] = abi.decode(data[4:], (address));
+            return tokens;
         } else if (selector == CLAIM_REWARDS_SELECTOR) {
             // claimRewards(address[] assets, uint256 amount, address to, address reward)
             // reward token is the 4th parameter
+            address token;
             (, , , token) = abi.decode(data[4:], (address[], uint256, address, address));
-            return token;
+            tokens = new address[](1);
+            tokens[0] = token;
+            return tokens;
         } else if (selector == CLAIM_REWARDS_ON_BEHALF_SELECTOR) {
             // claimRewardsOnBehalf(address[] assets, uint256 amount, address user, address to, address reward)
             // reward token is the 5th parameter
+            address token;
             (, , , , token) = abi.decode(data[4:], (address[], uint256, address, address, address));
-            return token;
+            tokens = new address[](1);
+            tokens[0] = token;
+            return tokens;
         } else if (selector == CLAIM_ALL_REWARDS_SELECTOR || selector == CLAIM_ALL_ON_BEHALF_SELECTOR) {
-            // claimAllRewards doesn't specify reward token in calldata
-            // Returns address(0) - oracle tracks balance changes
-            return address(0);
+            // claimAllRewards claims multiple reward tokens - unknown from calldata
+            // Returns empty array - oracle tracks balance changes for all tokens
+            return new address[](0);
         }
         revert UnsupportedSelector();
     }

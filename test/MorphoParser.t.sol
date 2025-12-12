@@ -135,7 +135,7 @@ contract MorphoParserTest is Test {
 
     // ============ Withdraw Tests ============
 
-    function testWithdrawExtractOutputToken() public view {
+    function testWithdrawExtractOutputTokens() public view {
         // withdraw(uint256 assets, address receiver, address owner)
         bytes memory data = abi.encodeWithSelector(
             parser.WITHDRAW_SELECTOR(),
@@ -144,13 +144,14 @@ contract MorphoParserTest is Test {
             OWNER
         );
 
-        address token = parser.extractOutputToken(address(vault), data);
-        assertEq(token, USDC, "Output token should be vault's underlying asset");
+        address[] memory tokens = parser.extractOutputTokens(address(vault), data);
+        assertEq(tokens.length, 1, "Should have 1 output token");
+        assertEq(tokens[0], USDC, "Output token should be vault's underlying asset");
     }
 
     // ============ Redeem Tests ============
 
-    function testRedeemExtractOutputToken() public view {
+    function testRedeemExtractOutputTokens() public view {
         // redeem(uint256 shares, address receiver, address owner)
         bytes memory data = abi.encodeWithSelector(
             parser.REDEEM_SELECTOR(),
@@ -159,8 +160,9 @@ contract MorphoParserTest is Test {
             OWNER
         );
 
-        address token = parser.extractOutputToken(address(vault), data);
-        assertEq(token, USDC, "Output token should be vault's underlying asset");
+        address[] memory tokens = parser.extractOutputTokens(address(vault), data);
+        assertEq(tokens.length, 1, "Should have 1 output token");
+        assertEq(tokens[0], USDC, "Output token should be vault's underlying asset");
     }
 
     // ============ Operation Type Tests ============
@@ -201,11 +203,11 @@ contract MorphoParserTest is Test {
         parser.extractInputAmount(address(vault), badData);
     }
 
-    function testUnsupportedSelectorRevertsOnOutputToken() public {
+    function testUnsupportedSelectorRevertsOnOutputTokens() public {
         bytes memory badData = abi.encodeWithSelector(bytes4(0xdeadbeef), uint256(100));
 
         vm.expectRevert(MorphoParser.UnsupportedSelector.selector);
-        parser.extractOutputToken(address(vault), badData);
+        parser.extractOutputTokens(address(vault), badData);
     }
 
     function testWithdrawRevertsOnInputToken() public {
@@ -221,7 +223,7 @@ contract MorphoParserTest is Test {
         parser.extractInputToken(address(vault), data);
     }
 
-    function testDepositExtractOutputToken() public view {
+    function testDepositExtractOutputTokens() public view {
         // Deposit output is vault shares (the vault token itself)
         bytes memory data = abi.encodeWithSelector(
             parser.DEPOSIT_SELECTOR(),
@@ -229,11 +231,12 @@ contract MorphoParserTest is Test {
             USER
         );
 
-        address token = parser.extractOutputToken(address(vault), data);
-        assertEq(token, address(vault), "Output token should be vault shares (vault address)");
+        address[] memory tokens = parser.extractOutputTokens(address(vault), data);
+        assertEq(tokens.length, 1, "Should have 1 output token");
+        assertEq(tokens[0], address(vault), "Output token should be vault shares (vault address)");
     }
 
-    function testMintExtractOutputToken() public view {
+    function testMintExtractOutputTokens() public view {
         // Mint output is vault shares (the vault token itself)
         bytes memory data = abi.encodeWithSelector(
             parser.MINT_SELECTOR(),
@@ -241,8 +244,9 @@ contract MorphoParserTest is Test {
             USER
         );
 
-        address token = parser.extractOutputToken(address(vault), data);
-        assertEq(token, address(vault), "Output token should be vault shares (vault address)");
+        address[] memory tokens = parser.extractOutputTokens(address(vault), data);
+        assertEq(tokens.length, 1, "Should have 1 output token");
+        assertEq(tokens[0], address(vault), "Output token should be vault shares (vault address)");
     }
 
     // ============ Different Asset Tests ============

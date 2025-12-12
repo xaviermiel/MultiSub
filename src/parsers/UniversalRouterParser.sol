@@ -141,7 +141,7 @@ contract UniversalRouterParser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractOutputToken(address, bytes calldata data) external pure override returns (address token) {
+    function extractOutputTokens(address, bytes calldata data) external pure override returns (address[] memory tokens) {
         bytes4 selector = bytes4(data[:4]);
         if (selector != EXECUTE_SELECTOR) revert UnsupportedSelector();
 
@@ -150,10 +150,13 @@ contract UniversalRouterParser is ICalldataParser {
         // Find last swap/unwrap command to get output token
         for (uint256 i = commands.length; i > 0; i--) {
             uint8 command = uint8(commands[i-1]) & 0x3f;
+            address token;
 
             if (command == UNWRAP_WETH) {
                 // Output is native ETH
-                return address(0);
+                tokens = new address[](1);
+                tokens[0] = address(0);
+                return tokens;
             } else if (command == V3_SWAP_EXACT_IN || command == V3_SWAP_EXACT_OUT) {
                 bytes memory swapInput = inputs[i-1];
                 if (swapInput.length >= 128) {
@@ -170,7 +173,9 @@ contract UniversalRouterParser is ICalldataParser {
                                 token := shr(96, mload(add(path, 32)))
                             }
                         }
-                        return token;
+                        tokens = new address[](1);
+                        tokens[0] = token;
+                        return tokens;
                     }
                 }
             } else if (command == V2_SWAP_EXACT_IN || command == V2_SWAP_EXACT_OUT) {
@@ -178,17 +183,19 @@ contract UniversalRouterParser is ICalldataParser {
                 if (swapInput.length >= 128) {
                     (, , , address[] memory path, ) = abi.decode(swapInput, (address, uint256, uint256, address[], bool));
                     if (path.length > 0) {
+                        tokens = new address[](1);
                         if (command == V2_SWAP_EXACT_IN) {
-                            return path[path.length - 1];
+                            tokens[0] = path[path.length - 1];
                         } else {
-                            return path[0];
+                            tokens[0] = path[0];
                         }
+                        return tokens;
                     }
                 }
             }
         }
 
-        return address(0);
+        return new address[](0);
     }
 
     /// @inheritdoc ICalldataParser

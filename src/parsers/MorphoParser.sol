@@ -49,15 +49,19 @@ contract MorphoParser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractOutputToken(address target, bytes calldata data) external view override returns (address) {
+    function extractOutputTokens(address target, bytes calldata data) external view override returns (address[] memory tokens) {
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == DEPOSIT_SELECTOR || selector == MINT_SELECTOR) {
             // For ERC4626 deposits, output is vault shares (the vault token itself)
-            return target;
+            tokens = new address[](1);
+            tokens[0] = target;
+            return tokens;
         } else if (selector == WITHDRAW_SELECTOR || selector == REDEEM_SELECTOR) {
             // Query the vault for its underlying asset
-            return IMorphoVault(target).asset();
+            tokens = new address[](1);
+            tokens[0] = IMorphoVault(target).asset();
+            return tokens;
         }
         revert UnsupportedSelector();
     }

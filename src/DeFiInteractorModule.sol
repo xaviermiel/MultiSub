@@ -141,8 +141,8 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         OperationType opType,
         address tokenIn,
         uint256 amountIn,
-        address tokenOut,
-        uint256 amountOut,
+        address[] tokensOut,
+        uint256[] amountsOut,
         uint256 spendingCost
     );
 
@@ -497,21 +497,27 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         uint256 usedFromAcquired = amountIn > acquired ? acquired : amountIn;
         acquiredBalance[subAccount][tokenIn] -= usedFromAcquired;
 
-        // 7. Capture balance before for output tracking
-        address tokenOut = _getOutputToken(target, data, parser);
-        uint256 balanceBefore = tokenOut != address(0)
-            ? IERC20(tokenOut).balanceOf(avatar)
-            : avatar.balance;
+        // 7. Capture balances before for output tracking (multiple tokens)
+        address[] memory tokensOut = _getOutputTokens(target, data, parser);
+        uint256[] memory balancesBefore = new uint256[](tokensOut.length);
+        for (uint256 i = 0; i < tokensOut.length; i++) {
+            balancesBefore[i] = tokensOut[i] != address(0)
+                ? IERC20(tokensOut[i]).balanceOf(avatar)
+                : avatar.balance;
+        }
 
         // 8. Execute
         bool success = exec(target, 0, data, ISafe.Operation.Call);
         if (!success) revert TransactionFailed();
 
-        // 9. Calculate output amount (works for both ERC20 and native ETH)
-        uint256 balanceAfter = tokenOut != address(0)
-            ? IERC20(tokenOut).balanceOf(avatar)
-            : avatar.balance;
-        uint256 amountOut = balanceAfter - balanceBefore;
+        // 9. Calculate output amounts for all tokens
+        uint256[] memory amountsOut = new uint256[](tokensOut.length);
+        for (uint256 i = 0; i < tokensOut.length; i++) {
+            uint256 balanceAfter = tokensOut[i] != address(0)
+                ? IERC20(tokensOut[i]).balanceOf(avatar)
+                : avatar.balance;
+            amountsOut[i] = balanceAfter - balancesBefore[i];
+        }
 
         // 10. Emit event for oracle
         emit ProtocolExecution(
@@ -520,8 +526,8 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             opType,
             tokenIn,
             amountIn,
-            tokenOut,
-            amountOut,
+            tokensOut,
+            amountsOut,
             spendingCost
         );
 
@@ -571,21 +577,27 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         uint256 usedFromAcquired = amountIn > acquired ? acquired : amountIn;
         acquiredBalance[subAccount][tokenIn] -= usedFromAcquired;
 
-        // 8. Capture balance before for output tracking
-        address tokenOut = _getOutputToken(target, data, parser);
-        uint256 balanceBefore = tokenOut != address(0)
-            ? IERC20(tokenOut).balanceOf(avatar)
-            : avatar.balance;
+        // 8. Capture balances before for output tracking (multiple tokens)
+        address[] memory tokensOut = _getOutputTokens(target, data, parser);
+        uint256[] memory balancesBefore = new uint256[](tokensOut.length);
+        for (uint256 i = 0; i < tokensOut.length; i++) {
+            balancesBefore[i] = tokensOut[i] != address(0)
+                ? IERC20(tokensOut[i]).balanceOf(avatar)
+                : avatar.balance;
+        }
 
         // 9. Execute with value
         bool success = exec(target, value, data, ISafe.Operation.Call);
         if (!success) revert TransactionFailed();
 
-        // 10. Calculate output amount (works for both ERC20 and native ETH)
-        uint256 balanceAfter = tokenOut != address(0)
-            ? IERC20(tokenOut).balanceOf(avatar)
-            : avatar.balance;
-        uint256 amountOut = balanceAfter - balanceBefore;
+        // 10. Calculate output amounts for all tokens
+        uint256[] memory amountsOut = new uint256[](tokensOut.length);
+        for (uint256 i = 0; i < tokensOut.length; i++) {
+            uint256 balanceAfter = tokensOut[i] != address(0)
+                ? IERC20(tokensOut[i]).balanceOf(avatar)
+                : avatar.balance;
+            amountsOut[i] = balanceAfter - balancesBefore[i];
+        }
 
         // 11. Emit event for oracle
         emit ProtocolExecution(
@@ -594,8 +606,8 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             opType,
             tokenIn,
             amountIn,
-            tokenOut,
-            amountOut,
+            tokensOut,
+            amountsOut,
             spendingCost
         );
 
@@ -622,21 +634,27 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             revert InvalidRecipient(recipient, avatar);
         }
 
-        // 3. Get output token from parser (parser may query vault for ERC4626)
-        address tokenOut = parser.extractOutputToken(target, data);
-        uint256 balanceBefore = tokenOut != address(0)
-            ? IERC20(tokenOut).balanceOf(avatar)
-            : avatar.balance;
+        // 3. Get output tokens from parser (parser may query vault for ERC4626)
+        address[] memory tokensOut = parser.extractOutputTokens(target, data);
+        uint256[] memory balancesBefore = new uint256[](tokensOut.length);
+        for (uint256 i = 0; i < tokensOut.length; i++) {
+            balancesBefore[i] = tokensOut[i] != address(0)
+                ? IERC20(tokensOut[i]).balanceOf(avatar)
+                : avatar.balance;
+        }
 
         // 4. Execute (NO spending check - withdrawals and claims are free)
         bool success = exec(target, 0, data, ISafe.Operation.Call);
         if (!success) revert TransactionFailed();
 
-        // 5. Calculate received amount (works for both ERC20 and native ETH)
-        uint256 balanceAfter = tokenOut != address(0)
-            ? IERC20(tokenOut).balanceOf(avatar)
-            : avatar.balance;
-        uint256 amountOut = balanceAfter - balanceBefore;
+        // 5. Calculate received amounts for all tokens
+        uint256[] memory amountsOut = new uint256[](tokensOut.length);
+        for (uint256 i = 0; i < tokensOut.length; i++) {
+            uint256 balanceAfter = tokensOut[i] != address(0)
+                ? IERC20(tokensOut[i]).balanceOf(avatar)
+                : avatar.balance;
+            amountsOut[i] = balanceAfter - balancesBefore[i];
+        }
 
         // 6. Emit event for oracle to:
         //    - Mark received as acquired if matched to deposit (both WITHDRAW and CLAIM)
@@ -646,8 +664,8 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             opType,
             address(0), // no tokenIn for withdraw/claim
             0,          // no amountIn
-            tokenOut,
-            amountOut,
+            tokensOut,
+            amountsOut,
             0           // no spending cost
         );
 
@@ -673,21 +691,27 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             revert InvalidRecipient(recipient, avatar);
         }
 
-        // 3. Get output token from parser (parser may query vault for ERC4626)
-        address tokenOut = parser.extractOutputToken(target, data);
-        uint256 balanceBefore = tokenOut != address(0)
-            ? IERC20(tokenOut).balanceOf(avatar)
-            : avatar.balance;
+        // 3. Get output tokens from parser (parser may query vault for ERC4626)
+        address[] memory tokensOut = parser.extractOutputTokens(target, data);
+        uint256[] memory balancesBefore = new uint256[](tokensOut.length);
+        for (uint256 i = 0; i < tokensOut.length; i++) {
+            balancesBefore[i] = tokensOut[i] != address(0)
+                ? IERC20(tokensOut[i]).balanceOf(avatar)
+                : avatar.balance;
+        }
 
         // 4. Execute with value (NO spending check - withdrawals and claims are free)
         bool success = exec(target, value, data, ISafe.Operation.Call);
         if (!success) revert TransactionFailed();
 
-        // 5. Calculate received amount (works for both ERC20 and native ETH)
-        uint256 balanceAfter = tokenOut != address(0)
-            ? IERC20(tokenOut).balanceOf(avatar)
-            : avatar.balance;
-        uint256 amountOut = balanceAfter - balanceBefore;
+        // 5. Calculate received amounts for all tokens
+        uint256[] memory amountsOut = new uint256[](tokensOut.length);
+        for (uint256 i = 0; i < tokensOut.length; i++) {
+            uint256 balanceAfter = tokensOut[i] != address(0)
+                ? IERC20(tokensOut[i]).balanceOf(avatar)
+                : avatar.balance;
+            amountsOut[i] = balanceAfter - balancesBefore[i];
+        }
 
         // 6. Emit event for oracle to:
         //    - Mark received as acquired if matched to deposit (both WITHDRAW and CLAIM)
@@ -697,8 +721,8 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             opType,
             address(0), // no tokenIn for withdraw/claim
             0,          // no amountIn
-            tokenOut,
-            amountOut,
+            tokensOut,
+            amountsOut,
             0           // no spending cost
         );
 
@@ -746,15 +770,15 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         bool success = exec(target, 0, data, ISafe.Operation.Call);
         if (!success) revert ApprovalFailed();
 
-        // 5. Emit event
+        // 5. Emit event (APPROVE has no output tokens)
         emit ProtocolExecution(
             subAccount,
             target,
             OperationType.APPROVE,
             tokenIn,
             amount,
-            address(0),
-            0,
+            new address[](0),
+            new uint256[](0),
             0 // No spending cost for approve
         );
 
@@ -952,19 +976,19 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         );
     }
 
-    function _getOutputToken(
+    function _getOutputTokens(
         address target,
         bytes calldata data,
         ICalldataParser parser
-    ) internal view returns (address) {
+    ) internal view returns (address[] memory) {
         if (address(parser) != address(0)) {
-            try parser.extractOutputToken(target, data) returns (address token) {
-                return token;
+            try parser.extractOutputTokens(target, data) returns (address[] memory tokens) {
+                return tokens;
             } catch {
-                return address(0);
+                return new address[](0);
             }
         }
-        return address(0);
+        return new address[](0);
     }
 
     // ============ View Functions ============

@@ -113,43 +113,49 @@ contract UniswapV4Parser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractOutputToken(address, bytes calldata data) external pure override returns (address token) {
+    function extractOutputTokens(address, bytes calldata data) external pure override returns (address[] memory tokens) {
         bytes4 selector = bytes4(data[:4]);
         if (selector != MODIFY_LIQUIDITIES_SELECTOR) revert UnsupportedSelector();
 
         (bytes memory unlockData,) = abi.decode(data[4:], (bytes, uint256));
         (bytes memory actions, bytes[] memory params) = _decodeActionsAndParams(unlockData);
 
-        // Find TAKE, TAKE_PAIR, or SWEEP action to get output token
+        // Find TAKE, TAKE_PAIR, or SWEEP action to get output token(s)
         for (uint256 i = 0; i < actions.length; i++) {
             uint8 action = uint8(actions[i]);
 
             if (action == TAKE || action == TAKE_ALL || action == TAKE_PORTION) {
                 // TAKE params: (Currency currency, address recipient, uint256 amount)
                 if (params[i].length >= 32) {
-                    token = _readAddress(params[i], 0);
-                    return token;
+                    tokens = new address[](1);
+                    tokens[0] = _readAddress(params[i], 0);
+                    return tokens;
                 }
             } else if (action == TAKE_PAIR) {
                 // TAKE_PAIR params: (Currency currency0, Currency currency1, address recipient)
-                if (params[i].length >= 32) {
-                    token = _readAddress(params[i], 0);
-                    return token;
+                // Returns both tokens
+                if (params[i].length >= 64) {
+                    tokens = new address[](2);
+                    tokens[0] = _readAddress(params[i], 0);
+                    tokens[1] = _readAddress(params[i], 32);
+                    return tokens;
                 }
             } else if (action == SWEEP) {
                 // SWEEP params: (Currency currency, address recipient)
                 if (params[i].length >= 32) {
-                    token = _readAddress(params[i], 0);
-                    return token;
+                    tokens = new address[](1);
+                    tokens[0] = _readAddress(params[i], 0);
+                    return tokens;
                 }
             } else if (action == DECREASE_LIQUIDITY || action == BURN_POSITION) {
-                // These return tokens - output tracked via balance change
-                // Return address(0) to signal balance-based tracking
-                return address(0);
+                // These return both tokens from the position
+                // Can't determine tokens without on-chain query - return empty array
+                // Oracle should track balance changes for these operations
+                return new address[](0);
             }
         }
 
-        return address(0);
+        return new address[](0);
     }
 
     /// @inheritdoc ICalldataParser

@@ -50,15 +50,16 @@ contract MerklParserTest is Test {
         assertEq(inputAmount, 0, "Input amount should be zero for claims");
     }
 
-    function testExtractOutputTokenSingleToken() public view {
+    function testExtractOutputTokensSingleToken() public view {
         bytes memory data = _buildClaimCalldata();
 
-        // Should return the first token from the tokens array
-        address outputToken = parser.extractOutputToken(MERKL_DISTRIBUTOR, data);
-        assertEq(outputToken, TOKEN_A, "Output token should be first token in array");
+        // Should return all tokens from the tokens array
+        address[] memory outputTokens = parser.extractOutputTokens(MERKL_DISTRIBUTOR, data);
+        assertEq(outputTokens.length, 1, "Should have 1 output token");
+        assertEq(outputTokens[0], TOKEN_A, "Output token should be TOKEN_A");
     }
 
-    function testExtractOutputTokenMultipleTokens() public view {
+    function testExtractOutputTokensMultipleTokens() public view {
         // Build calldata with multiple tokens
         address[] memory users = new address[](2);
         users[0] = USER;
@@ -86,9 +87,11 @@ contract MerklParserTest is Test {
             proofs
         );
 
-        // extractOutputToken returns first token
-        address outputToken = parser.extractOutputToken(MERKL_DISTRIBUTOR, data);
-        assertEq(outputToken, TOKEN_A, "Should return first token");
+        // extractOutputTokens returns all tokens
+        address[] memory outputTokens = parser.extractOutputTokens(MERKL_DISTRIBUTOR, data);
+        assertEq(outputTokens.length, 2, "Should have 2 output tokens");
+        assertEq(outputTokens[0], TOKEN_A, "First token mismatch");
+        assertEq(outputTokens[1], TOKEN_B, "Second token mismatch");
     }
 
     function testExtractAllClaimTokens() public view {
@@ -179,7 +182,7 @@ contract MerklParserTest is Test {
         parser.extractInputAmount(MERKL_DISTRIBUTOR, badData);
 
         vm.expectRevert(MerklParser.UnsupportedSelector.selector);
-        parser.extractOutputToken(MERKL_DISTRIBUTOR, badData);
+        parser.extractOutputTokens(MERKL_DISTRIBUTOR, badData);
 
         vm.expectRevert(MerklParser.UnsupportedSelector.selector);
         parser.extractAllClaimTokens(badData);
@@ -202,9 +205,9 @@ contract MerklParserTest is Test {
             proofs
         );
 
-        // Should return address(0) for empty tokens array
-        address outputToken = parser.extractOutputToken(MERKL_DISTRIBUTOR, data);
-        assertEq(outputToken, address(0), "Should return zero address for empty array");
+        // Should return empty array for empty tokens
+        address[] memory outputTokens = parser.extractOutputTokens(MERKL_DISTRIBUTOR, data);
+        assertEq(outputTokens.length, 0, "Should return empty array for empty tokens");
     }
 
     // Helper function to build standard claim calldata

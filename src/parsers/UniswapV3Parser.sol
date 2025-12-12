@@ -180,16 +180,23 @@ contract UniswapV3Parser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractOutputToken(address, bytes calldata data) external pure override returns (address token) {
+    function extractOutputTokens(address target, bytes calldata data) external view override returns (address[] memory tokens) {
         bytes4 selector = bytes4(data[:4]);
+        address token;
 
         // ============ SwapRouter Functions ============
         if (selector == EXACT_INPUT_SINGLE_SELECTOR || selector == EXACT_OUTPUT_SINGLE_SELECTOR) {
             // tokenOut is second field (V1)
             (, token,,,,,,) = abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint256, uint160));
+            tokens = new address[](1);
+            tokens[0] = token;
+            return tokens;
         } else if (selector == EXACT_INPUT_SINGLE_02_SELECTOR || selector == EXACT_OUTPUT_SINGLE_02_SELECTOR) {
             // tokenOut is second field (V2, no deadline)
             (, token,,,,,) = abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint160));
+            tokens = new address[](1);
+            tokens[0] = token;
+            return tokens;
         } else if (selector == EXACT_INPUT_SELECTOR) {
             // ExactInputParams (V1): path contains tokenOut as last 20 bytes
             (bytes memory path,,,,) = abi.decode(data[4:], (bytes, address, uint256, uint256, uint256));
@@ -197,6 +204,9 @@ contract UniswapV3Parser is ICalldataParser {
             assembly {
                 token := shr(96, mload(add(add(path, 32), sub(mload(path), 20))))
             }
+            tokens = new address[](1);
+            tokens[0] = token;
+            return tokens;
         } else if (selector == EXACT_INPUT_02_SELECTOR) {
             // ExactInputParams (V2): no deadline
             (bytes memory path,,,) = abi.decode(data[4:], (bytes, address, uint256, uint256));
@@ -204,6 +214,9 @@ contract UniswapV3Parser is ICalldataParser {
             assembly {
                 token := shr(96, mload(add(add(path, 32), sub(mload(path), 20))))
             }
+            tokens = new address[](1);
+            tokens[0] = token;
+            return tokens;
         } else if (selector == EXACT_OUTPUT_SELECTOR) {
             // ExactOutputParams (V1): path is reversed, tokenOut is first 20 bytes
             (bytes memory path,,,,) = abi.decode(data[4:], (bytes, address, uint256, uint256, uint256));
@@ -211,6 +224,9 @@ contract UniswapV3Parser is ICalldataParser {
             assembly {
                 token := shr(96, mload(add(path, 32)))
             }
+            tokens = new address[](1);
+            tokens[0] = token;
+            return tokens;
         } else if (selector == EXACT_OUTPUT_02_SELECTOR) {
             // ExactOutputParams (V2): no deadline
             (bytes memory path,,,) = abi.decode(data[4:], (bytes, address, uint256, uint256));
@@ -218,19 +234,32 @@ contract UniswapV3Parser is ICalldataParser {
             assembly {
                 token := shr(96, mload(add(path, 32)))
             }
+            tokens = new address[](1);
+            tokens[0] = token;
+            return tokens;
         }
         // ============ NonfungiblePositionManager Functions ============
         else if (selector == MINT_SELECTOR || selector == INCREASE_LIQUIDITY_SELECTOR) {
-            // Deposit operations - output is LP NFT, tracked via balance change
-            return address(0);
+            // Deposit operations - no output tokens (LP NFT is not tracked)
+            return new address[](0);
         } else if (selector == DECREASE_LIQUIDITY_SELECTOR) {
             // DecreaseLiquidityParams: (tokenId, liquidity, amount0Min, amount1Min, deadline)
-            // Output tokens tracked via balance change (both tokens returned)
-            return address(0);
+            // Returns both token0 and token1 - query position for tokens
+            (uint256 tokenId,,,,) = abi.decode(data[4:], (uint256, uint128, uint256, uint256, uint256));
+            (,, address token0, address token1,,,,,,,,) = INonfungiblePositionManager(target).positions(tokenId);
+            tokens = new address[](2);
+            tokens[0] = token0;
+            tokens[1] = token1;
+            return tokens;
         } else if (selector == COLLECT_SELECTOR) {
             // CollectParams: (tokenId, recipient, amount0Max, amount1Max)
-            // Output tokens tracked via balance change (fees in both tokens)
-            return address(0);
+            // Returns fees in both token0 and token1 - query position for tokens
+            (uint256 tokenId,,,) = abi.decode(data[4:], (uint256, address, uint128, uint128));
+            (,, address token0, address token1,,,,,,,,) = INonfungiblePositionManager(target).positions(tokenId);
+            tokens = new address[](2);
+            tokens[0] = token0;
+            tokens[1] = token1;
+            return tokens;
         } else {
             revert UnsupportedSelector();
         }
