@@ -58,8 +58,8 @@ contract UniswapV3ParserTest is Test {
             uint160(0)      // sqrtPriceLimitX96
         );
 
-        address token = parser.extractInputToken(SWAP_ROUTER, data);
-        assertEq(token, USDC, "Input token should be USDC");
+        address[] memory tokens = parser.extractInputTokens(SWAP_ROUTER, data);
+        assertEq(tokens[0], USDC, "Input token should be USDC");
     }
 
     function testExactInputSingleExtractInputAmount() public view {
@@ -75,8 +75,8 @@ contract UniswapV3ParserTest is Test {
             uint160(0)
         );
 
-        uint256 amount = parser.extractInputAmount(SWAP_ROUTER, data);
-        assertEq(amount, 1000e6, "Input amount should be 1000e6");
+        uint256[] memory amounts = parser.extractInputAmounts(SWAP_ROUTER, data);
+        assertEq(amounts[0], 1000e6, "Input amount should be 1000e6");
     }
 
     function testExactInputSingleExtractOutputTokens() public view {
@@ -113,8 +113,8 @@ contract UniswapV3ParserTest is Test {
             0
         );
 
-        address token = parser.extractInputToken(SWAP_ROUTER, data);
-        assertEq(token, USDC, "Input token should be USDC (first in path)");
+        address[] memory tokens = parser.extractInputTokens(SWAP_ROUTER, data);
+        assertEq(tokens[0], USDC, "Input token should be USDC (first in path)");
     }
 
     function testExactInputExtractInputAmount() public view {
@@ -129,8 +129,8 @@ contract UniswapV3ParserTest is Test {
             0
         );
 
-        uint256 amount = parser.extractInputAmount(SWAP_ROUTER, data);
-        assertEq(amount, 1000e6, "Input amount should be 1000e6");
+        uint256[] memory amounts = parser.extractInputAmounts(SWAP_ROUTER, data);
+        assertEq(amounts[0], 1000e6, "Input amount should be 1000e6");
     }
 
     function testExactInputExtractOutputTokens() public view {
@@ -169,10 +169,10 @@ contract UniswapV3ParserTest is Test {
             0
         );
 
-        address inputToken = parser.extractInputToken(SWAP_ROUTER, data);
+        address[] memory inputTokens = parser.extractInputTokens(SWAP_ROUTER, data);
         address[] memory outputTokens = parser.extractOutputTokens(SWAP_ROUTER, data);
 
-        assertEq(inputToken, USDC, "Input should be first token (USDC)");
+        assertEq(inputTokens[0], USDC, "Input should be first token (USDC)");
         assertEq(outputTokens.length, 1, "Should have 1 output token");
         assertEq(outputTokens[0], DAI, "Output should be last token (DAI)");
     }
@@ -193,8 +193,8 @@ contract UniswapV3ParserTest is Test {
             uint160(0)
         );
 
-        address token = parser.extractInputToken(SWAP_ROUTER, data);
-        assertEq(token, USDC, "Input token should be USDC");
+        address[] memory tokens = parser.extractInputTokens(SWAP_ROUTER, data);
+        assertEq(tokens[0], USDC, "Input token should be USDC");
     }
 
     function testExactOutputSingleExtractInputAmount() public view {
@@ -210,8 +210,8 @@ contract UniswapV3ParserTest is Test {
             uint160(0)
         );
 
-        uint256 amount = parser.extractInputAmount(SWAP_ROUTER, data);
-        assertEq(amount, 2000e6, "Input amount should be amountInMaximum");
+        uint256[] memory amounts = parser.extractInputAmounts(SWAP_ROUTER, data);
+        assertEq(amounts[0], 2000e6, "Input amount should be amountInMaximum");
     }
 
     function testExactOutputSingleExtractOutputTokens() public view {
@@ -248,11 +248,11 @@ contract UniswapV3ParserTest is Test {
             2000e6          // amountInMaximum
         );
 
-        address inputToken = parser.extractInputToken(SWAP_ROUTER, data);
+        address[] memory inputTokens = parser.extractInputTokens(SWAP_ROUTER, data);
         address[] memory outputTokens = parser.extractOutputTokens(SWAP_ROUTER, data);
 
         // In reversed path: last token is input, first token is output
-        assertEq(inputToken, USDC, "Input token should be USDC (last in reversed path)");
+        assertEq(inputTokens[0], USDC, "Input token should be USDC (last in reversed path)");
         assertEq(outputTokens.length, 1, "Should have 1 output token");
         assertEq(outputTokens[0], WETH, "Output token should be WETH (first in reversed path)");
     }
@@ -269,8 +269,8 @@ contract UniswapV3ParserTest is Test {
             2000e6
         );
 
-        uint256 amount = parser.extractInputAmount(SWAP_ROUTER, data);
-        assertEq(amount, 2000e6, "Input amount should be amountInMaximum");
+        uint256[] memory amounts = parser.extractInputAmounts(SWAP_ROUTER, data);
+        assertEq(amounts[0], 2000e6, "Input amount should be amountInMaximum");
     }
 
     // ============ Operation Type Tests ============
@@ -296,10 +296,10 @@ contract UniswapV3ParserTest is Test {
         bytes memory badData = abi.encodeWithSelector(bytes4(0xdeadbeef), uint256(100));
 
         vm.expectRevert(UniswapV3Parser.UnsupportedSelector.selector);
-        parser.extractInputToken(SWAP_ROUTER, badData);
+        parser.extractInputTokens(SWAP_ROUTER, badData);
 
         vm.expectRevert(UniswapV3Parser.UnsupportedSelector.selector);
-        parser.extractInputAmount(SWAP_ROUTER, badData);
+        parser.extractInputAmounts(SWAP_ROUTER, badData);
 
         vm.expectRevert(UniswapV3Parser.UnsupportedSelector.selector);
         parser.extractOutputTokens(SWAP_ROUTER, badData);
@@ -319,6 +319,6 @@ contract UniswapV3ParserTest is Test {
         );
 
         vm.expectRevert(UniswapV3Parser.InvalidPath.selector);
-        parser.extractInputToken(SWAP_ROUTER, data);
+        parser.extractInputTokens(SWAP_ROUTER, data);
     }
 }

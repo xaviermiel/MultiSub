@@ -41,14 +41,14 @@ contract UniswapV4Parser is ICalldataParser {
     uint8 public constant SWEEP = 0x14;
 
     /// @inheritdoc ICalldataParser
-    function extractInputToken(address, bytes calldata data) external pure override returns (address token) {
+    function extractInputTokens(address, bytes calldata data) external pure override returns (address[] memory tokens) {
         bytes4 selector = bytes4(data[:4]);
         if (selector != MODIFY_LIQUIDITIES_SELECTOR) revert UnsupportedSelector();
 
         // Decode modifyLiquidities(bytes unlockData, uint256 deadline)
         (bytes memory unlockData,) = abi.decode(data[4:], (bytes, uint256));
 
-        // Find SETTLE or SETTLE_PAIR action to get input token
+        // Find SETTLE, SETTLE_PAIR, or liquidity actions to get input token(s)
         (bytes memory actions, bytes[] memory params) = _decodeActionsAndParams(unlockData);
 
         for (uint256 i = 0; i < actions.length; i++) {
@@ -58,58 +58,82 @@ contract UniswapV4Parser is ICalldataParser {
                 // SETTLE params: (Currency currency, uint256 amount, bool payerIsUser)
                 // Currency is first 20 bytes (address)
                 if (params[i].length >= 32) {
-                    token = _readAddress(params[i], 0);
-                    return token;
+                    tokens = new address[](1);
+                    tokens[0] = _readAddress(params[i], 0);
+                    return tokens;
                 }
             } else if (action == SETTLE_PAIR) {
                 // SETTLE_PAIR params: (Currency currency0, Currency currency1)
-                // Return first currency as input token
-                if (params[i].length >= 32) {
-                    token = _readAddress(params[i], 0);
-                    return token;
+                // Returns both currencies as input tokens
+                if (params[i].length >= 64) {
+                    tokens = new address[](2);
+                    tokens[0] = _readAddress(params[i], 0);
+                    tokens[1] = _readAddress(params[i], 32);
+                    return tokens;
                 }
             } else if (action == MINT_POSITION || action == MINT_POSITION_FROM_DELTAS) {
                 // MINT params include PoolKey which has currency0 and currency1
                 // PoolKey: (Currency currency0, Currency currency1, uint24 fee, int24 tickSpacing, IHooks hooks)
                 if (params[i].length >= 64) {
-                    // currency0 is at offset 0
-                    token = _readAddress(params[i], 0);
-                    return token;
+                    tokens = new address[](2);
+                    tokens[0] = _readAddress(params[i], 0);
+                    tokens[1] = _readAddress(params[i], 32);
+                    return tokens;
                 }
+            } else if (action == INCREASE_LIQUIDITY || action == INCREASE_LIQUIDITY_FROM_DELTAS) {
+                // For INCREASE_LIQUIDITY, we can't determine tokens from calldata
+                // Return empty array - oracle tracks balance changes
+                return new address[](0);
+            } else if (action == DECREASE_LIQUIDITY || action == BURN_POSITION) {
+                // Withdraw/claim operations - no input tokens
+                return new address[](0);
             }
         }
 
-        return address(0);
+        return new address[](0);
     }
 
     /// @inheritdoc ICalldataParser
-    function extractInputAmount(address, bytes calldata data) external pure override returns (uint256 amount) {
+    function extractInputAmounts(address, bytes calldata data) external pure override returns (uint256[] memory amounts) {
         bytes4 selector = bytes4(data[:4]);
         if (selector != MODIFY_LIQUIDITIES_SELECTOR) revert UnsupportedSelector();
 
         (bytes memory unlockData,) = abi.decode(data[4:], (bytes, uint256));
         (bytes memory actions, bytes[] memory params) = _decodeActionsAndParams(unlockData);
 
-        // Sum up all SETTLE amounts
+        // Find SETTLE or SETTLE_PAIR to get input amounts
         for (uint256 i = 0; i < actions.length; i++) {
             uint8 action = uint8(actions[i]);
 
             if (action == SETTLE) {
                 // SETTLE params: (Currency currency, uint256 amount, bool payerIsUser)
                 if (params[i].length >= 64) {
-                    uint256 settleAmount = _readUint256(params[i], 32);
-                    amount += settleAmount;
+                    amounts = new uint256[](1);
+                    amounts[0] = _readUint256(params[i], 32);
+                    return amounts;
                 }
             } else if (action == SETTLE_ALL) {
                 // SETTLE_ALL: (Currency currency, uint256 maxAmount)
                 if (params[i].length >= 64) {
-                    uint256 maxAmount = _readUint256(params[i], 32);
-                    amount += maxAmount;
+                    amounts = new uint256[](1);
+                    amounts[0] = _readUint256(params[i], 32);
+                    return amounts;
                 }
+            } else if (action == SETTLE_PAIR) {
+                // SETTLE_PAIR doesn't have amounts - tracked via balance changes
+                // Return empty array
+                return new uint256[](0);
+            } else if (action == MINT_POSITION || action == MINT_POSITION_FROM_DELTAS ||
+                       action == INCREASE_LIQUIDITY || action == INCREASE_LIQUIDITY_FROM_DELTAS) {
+                // Liquidity operations have amounts tracked via balance changes
+                return new uint256[](0);
+            } else if (action == DECREASE_LIQUIDITY || action == BURN_POSITION) {
+                // Withdraw/claim operations - no input amounts
+                return new uint256[](0);
             }
         }
 
-        return amount;
+        return new uint256[](0);
     }
 
     /// @inheritdoc ICalldataParser

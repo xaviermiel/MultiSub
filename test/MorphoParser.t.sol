@@ -77,8 +77,8 @@ contract MorphoParserTest is Test {
             USER
         );
 
-        address token = parser.extractInputToken(address(vault), data);
-        assertEq(token, USDC, "Input token should be vault's underlying asset");
+        address[] memory tokens = parser.extractInputTokens(address(vault), data);
+        assertEq(tokens[0], USDC, "Input token should be vault's underlying asset");
     }
 
     function testDepositExtractInputAmount() public view {
@@ -88,8 +88,8 @@ contract MorphoParserTest is Test {
             USER
         );
 
-        uint256 amount = parser.extractInputAmount(address(vault), data);
-        assertEq(amount, 1000e6, "Input amount should be 1000e6");
+        uint256[] memory amounts = parser.extractInputAmounts(address(vault), data);
+        assertEq(amounts[0], 1000e6, "Input amount should be 1000e6");
     }
 
     // ============ Mint Tests ============
@@ -102,8 +102,8 @@ contract MorphoParserTest is Test {
             USER
         );
 
-        address token = parser.extractInputToken(address(vault), data);
-        assertEq(token, USDC, "Input token should be vault's underlying asset");
+        address[] memory tokens = parser.extractInputTokens(address(vault), data);
+        assertEq(tokens[0], USDC, "Input token should be vault's underlying asset");
     }
 
     function testMintExtractInputAmount() public view {
@@ -114,8 +114,8 @@ contract MorphoParserTest is Test {
         );
 
         // With 1:1 exchange rate, assets = shares
-        uint256 amount = parser.extractInputAmount(address(vault), data);
-        assertEq(amount, 1000e18, "Input amount should be assets (converted from shares)");
+        uint256[] memory amounts = parser.extractInputAmounts(address(vault), data);
+        assertEq(amounts[0], 1000e18, "Input amount should be assets (converted from shares)");
     }
 
     function testMintExtractInputAmountWithExchangeRate() public {
@@ -129,8 +129,8 @@ contract MorphoParserTest is Test {
         );
 
         // With 2:1 exchange rate, 1000 shares = 2000 assets
-        uint256 amount = parser.extractInputAmount(address(vault), data);
-        assertEq(amount, 2000e18, "Input amount should be 2x shares with 2:1 rate");
+        uint256[] memory amounts = parser.extractInputAmounts(address(vault), data);
+        assertEq(amounts[0], 2000e18, "Input amount should be 2x shares with 2:1 rate");
     }
 
     // ============ Withdraw Tests ============
@@ -193,14 +193,14 @@ contract MorphoParserTest is Test {
         bytes memory badData = abi.encodeWithSelector(bytes4(0xdeadbeef), uint256(100));
 
         vm.expectRevert(MorphoParser.UnsupportedSelector.selector);
-        parser.extractInputToken(address(vault), badData);
+        parser.extractInputTokens(address(vault), badData);
     }
 
     function testUnsupportedSelectorRevertsOnInputAmount() public {
         bytes memory badData = abi.encodeWithSelector(bytes4(0xdeadbeef), uint256(100));
 
         vm.expectRevert(MorphoParser.UnsupportedSelector.selector);
-        parser.extractInputAmount(address(vault), badData);
+        parser.extractInputAmounts(address(vault), badData);
     }
 
     function testUnsupportedSelectorRevertsOnOutputTokens() public {
@@ -210,8 +210,8 @@ contract MorphoParserTest is Test {
         parser.extractOutputTokens(address(vault), badData);
     }
 
-    function testWithdrawRevertsOnInputToken() public {
-        // Withdraw is not a valid input operation
+    function testWithdrawReturnsEmptyInputTokens() public view {
+        // Withdraw returns empty array (no input tokens)
         bytes memory data = abi.encodeWithSelector(
             parser.WITHDRAW_SELECTOR(),
             1000e6,
@@ -219,8 +219,8 @@ contract MorphoParserTest is Test {
             OWNER
         );
 
-        vm.expectRevert(MorphoParser.UnsupportedSelector.selector);
-        parser.extractInputToken(address(vault), data);
+        address[] memory tokens = parser.extractInputTokens(address(vault), data);
+        assertEq(tokens.length, 0, "Withdraw should return empty input tokens array");
     }
 
     function testDepositExtractOutputTokens() public view {
@@ -261,8 +261,8 @@ contract MorphoParserTest is Test {
             USER
         );
 
-        address token = parser.extractInputToken(address(wethVault), data);
-        assertEq(token, WETH, "Should return WETH as underlying asset");
+        address[] memory tokens = parser.extractInputTokens(address(wethVault), data);
+        assertEq(tokens[0], WETH, "Should return WETH as underlying asset");
     }
 
     // ============ Fuzz Tests ============
@@ -274,8 +274,8 @@ contract MorphoParserTest is Test {
             USER
         );
 
-        uint256 extracted = parser.extractInputAmount(address(vault), data);
-        assertEq(extracted, amount, "Should extract any amount correctly");
+        uint256[] memory extracted = parser.extractInputAmounts(address(vault), data);
+        assertEq(extracted[0], amount, "Should extract any amount correctly");
     }
 
     function testFuzzMintShares(uint256 shares) public view {
@@ -291,7 +291,7 @@ contract MorphoParserTest is Test {
         );
 
         // With 1:1 exchange rate, extracted amount equals shares
-        uint256 extracted = parser.extractInputAmount(address(vault), data);
-        assertEq(extracted, shares, "Should extract shares correctly with 1:1 rate");
+        uint256[] memory extracted = parser.extractInputAmounts(address(vault), data);
+        assertEq(extracted[0], shares, "Should extract shares correctly with 1:1 rate");
     }
 }

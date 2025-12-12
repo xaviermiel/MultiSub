@@ -91,11 +91,12 @@ contract AaveV3ParserTest is Test {
             uint16(0)
         );
 
-        address token = parser.extractInputToken(AAVE_POOL, data);
-        assertEq(token, USDC, "Input token should be USDC");
+        address[] memory tokens = parser.extractInputTokens(AAVE_POOL, data);
+        assertEq(tokens.length, 1, "Should have 1 input token");
+        assertEq(tokens[0], USDC, "Input token should be USDC");
     }
 
-    function testSupplyExtractInputAmount() public view {
+    function testSupplyExtractInputAmounts() public view {
         bytes memory data = abi.encodeWithSelector(
             parser.SUPPLY_SELECTOR(),
             USDC,
@@ -104,8 +105,9 @@ contract AaveV3ParserTest is Test {
             uint16(0)
         );
 
-        uint256 amount = parser.extractInputAmount(AAVE_POOL, data);
-        assertEq(amount, 1000e6, "Input amount should be 1000e6");
+        uint256[] memory amounts = parser.extractInputAmounts(AAVE_POOL, data);
+        assertEq(amounts.length, 1, "Should have 1 input amount");
+        assertEq(amounts[0], 1000e6, "Input amount should be 1000e6");
     }
 
     function testSupplyExtractOutputTokens() public view {
@@ -160,7 +162,7 @@ contract AaveV3ParserTest is Test {
 
     // ============ Repay Tests ============
 
-    function testRepayExtractInputToken() public view {
+    function testRepayExtractInputTokens() public view {
         // repay(address asset, uint256 amount, uint256 interestRateMode, address onBehalfOf)
         bytes memory data = abi.encodeWithSelector(
             parser.REPAY_SELECTOR(),
@@ -170,11 +172,12 @@ contract AaveV3ParserTest is Test {
             USER
         );
 
-        address token = parser.extractInputToken(AAVE_POOL, data);
-        assertEq(token, WETH, "Input token should be WETH");
+        address[] memory tokens = parser.extractInputTokens(AAVE_POOL, data);
+        assertEq(tokens.length, 1, "Should have 1 input token");
+        assertEq(tokens[0], WETH, "Input token should be WETH");
     }
 
-    function testRepayExtractInputAmount() public view {
+    function testRepayExtractInputAmounts() public view {
         bytes memory data = abi.encodeWithSelector(
             parser.REPAY_SELECTOR(),
             WETH,
@@ -183,8 +186,9 @@ contract AaveV3ParserTest is Test {
             USER
         );
 
-        uint256 amount = parser.extractInputAmount(AAVE_POOL, data);
-        assertEq(amount, 1e18, "Input amount should be 1e18");
+        uint256[] memory amounts = parser.extractInputAmounts(AAVE_POOL, data);
+        assertEq(amounts.length, 1, "Should have 1 input amount");
+        assertEq(amounts[0], 1e18, "Input amount should be 1e18");
     }
 
     function testRepayExtractOutputTokens() public view {
@@ -203,7 +207,7 @@ contract AaveV3ParserTest is Test {
 
     // ============ Claim Rewards Tests ============
 
-    function testClaimRewardsNoInputToken() public view {
+    function testClaimRewardsNoInputTokens() public view {
         // claimRewards(address[] assets, uint256 amount, address to, address reward)
         address[] memory assets = new address[](1);
         assets[0] = USDC;
@@ -216,11 +220,11 @@ contract AaveV3ParserTest is Test {
             REWARD_TOKEN
         );
 
-        address token = parser.extractInputToken(REWARDS_CONTROLLER, data);
-        assertEq(token, address(0), "Claim should have no input token");
+        address[] memory tokens = parser.extractInputTokens(REWARDS_CONTROLLER, data);
+        assertEq(tokens.length, 0, "Claim should have no input tokens");
     }
 
-    function testClaimRewardsNoInputAmount() public view {
+    function testClaimRewardsNoInputAmounts() public view {
         address[] memory assets = new address[](1);
         assets[0] = USDC;
 
@@ -232,8 +236,8 @@ contract AaveV3ParserTest is Test {
             REWARD_TOKEN
         );
 
-        uint256 amount = parser.extractInputAmount(REWARDS_CONTROLLER, data);
-        assertEq(amount, 0, "Claim should have no input amount");
+        uint256[] memory amounts = parser.extractInputAmounts(REWARDS_CONTROLLER, data);
+        assertEq(amounts.length, 0, "Claim should have no input amounts");
     }
 
     function testClaimRewardsExtractOutputTokens() public view {
@@ -341,10 +345,10 @@ contract AaveV3ParserTest is Test {
         bytes memory badData = abi.encodeWithSelector(bytes4(0xdeadbeef), uint256(100));
 
         vm.expectRevert(AaveV3Parser.UnsupportedSelector.selector);
-        parser.extractInputToken(AAVE_POOL, badData);
+        parser.extractInputTokens(AAVE_POOL, badData);
 
         vm.expectRevert(AaveV3Parser.UnsupportedSelector.selector);
-        parser.extractInputAmount(AAVE_POOL, badData);
+        parser.extractInputAmounts(AAVE_POOL, badData);
 
         vm.expectRevert(AaveV3Parser.UnsupportedSelector.selector);
         parser.extractOutputTokens(AAVE_POOL, badData);

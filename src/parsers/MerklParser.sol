@@ -17,23 +17,23 @@ contract MerklParser is ICalldataParser {
     bytes4 public constant CLAIM_SELECTOR = 0x71ee95c0;
 
     /// @inheritdoc ICalldataParser
-    function extractInputToken(address, bytes calldata data) external pure override returns (address) {
+    function extractInputTokens(address, bytes calldata data) external pure override returns (address[] memory) {
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == CLAIM_SELECTOR) {
             // CLAIM operations don't have input tokens (no spending)
-            return address(0);
+            return new address[](0);
         }
         revert UnsupportedSelector();
     }
 
     /// @inheritdoc ICalldataParser
-    function extractInputAmount(address, bytes calldata data) external pure override returns (uint256) {
+    function extractInputAmounts(address, bytes calldata data) external pure override returns (uint256[] memory) {
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == CLAIM_SELECTOR) {
             // CLAIM operations don't have input amounts (no spending)
-            return 0;
+            return new uint256[](0);
         }
         revert UnsupportedSelector();
     }

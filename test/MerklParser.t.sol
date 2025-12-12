@@ -33,21 +33,21 @@ contract MerklParserTest is Test {
         assertFalse(parser.supportsSelector(bytes4(0xdeadbeef)), "Should not support random selector");
     }
 
-    function testExtractInputTokenReturnsZero() public view {
+    function testExtractInputTokensReturnsEmpty() public view {
         // Build claim calldata
         bytes memory data = _buildClaimCalldata();
 
-        // Claim operations have no input token
-        address inputToken = parser.extractInputToken(MERKL_DISTRIBUTOR, data);
-        assertEq(inputToken, address(0), "Input token should be zero for claims");
+        // Claim operations have no input tokens
+        address[] memory inputTokens = parser.extractInputTokens(MERKL_DISTRIBUTOR, data);
+        assertEq(inputTokens.length, 0, "Input tokens should be empty for claims");
     }
 
-    function testExtractInputAmountReturnsZero() public view {
+    function testExtractInputAmountsReturnsEmpty() public view {
         bytes memory data = _buildClaimCalldata();
 
-        // Claim operations have no input amount (no spending)
-        uint256 inputAmount = parser.extractInputAmount(MERKL_DISTRIBUTOR, data);
-        assertEq(inputAmount, 0, "Input amount should be zero for claims");
+        // Claim operations have no input amounts (no spending)
+        uint256[] memory inputAmounts = parser.extractInputAmounts(MERKL_DISTRIBUTOR, data);
+        assertEq(inputAmounts.length, 0, "Input amounts should be empty for claims");
     }
 
     function testExtractOutputTokensSingleToken() public view {
@@ -176,10 +176,10 @@ contract MerklParserTest is Test {
         bytes memory badData = abi.encodeWithSelector(bytes4(0xdeadbeef), uint256(100));
 
         vm.expectRevert(MerklParser.UnsupportedSelector.selector);
-        parser.extractInputToken(MERKL_DISTRIBUTOR, badData);
+        parser.extractInputTokens(MERKL_DISTRIBUTOR, badData);
 
         vm.expectRevert(MerklParser.UnsupportedSelector.selector);
-        parser.extractInputAmount(MERKL_DISTRIBUTOR, badData);
+        parser.extractInputAmounts(MERKL_DISTRIBUTOR, badData);
 
         vm.expectRevert(MerklParser.UnsupportedSelector.selector);
         parser.extractOutputTokens(MERKL_DISTRIBUTOR, badData);

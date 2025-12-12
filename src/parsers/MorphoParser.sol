@@ -21,31 +21,42 @@ contract MorphoParser is ICalldataParser {
     bytes4 public constant REDEEM_SELECTOR = 0xba087652;    // redeem(uint256,address,address)
 
     /// @inheritdoc ICalldataParser
-    function extractInputToken(address target, bytes calldata data) external view override returns (address) {
+    function extractInputTokens(address target, bytes calldata data) external view override returns (address[] memory tokens) {
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == DEPOSIT_SELECTOR || selector == MINT_SELECTOR) {
             // Query the vault for its underlying asset
-            return IMorphoVault(target).asset();
+            tokens = new address[](1);
+            tokens[0] = IMorphoVault(target).asset();
+            return tokens;
+        } else if (selector == WITHDRAW_SELECTOR || selector == REDEEM_SELECTOR) {
+            // Withdraw/Redeem operations don't have input tokens (they use vault shares)
+            return new address[](0);
         }
         revert UnsupportedSelector();
     }
 
     /// @inheritdoc ICalldataParser
-    function extractInputAmount(address target, bytes calldata data) external view override returns (uint256 amount) {
+    function extractInputAmounts(address target, bytes calldata data) external view override returns (uint256[] memory amounts) {
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == DEPOSIT_SELECTOR) {
             // deposit(uint256 assets, address receiver)
-            (amount,) = abi.decode(data[4:], (uint256, address));
+            amounts = new uint256[](1);
+            (amounts[0],) = abi.decode(data[4:], (uint256, address));
+            return amounts;
         } else if (selector == MINT_SELECTOR) {
             // mint(uint256 shares, address receiver)
             // Convert shares to assets using previewMint
             (uint256 shares,) = abi.decode(data[4:], (uint256, address));
-            amount = IMorphoVault(target).previewMint(shares);
-        } else {
-            revert UnsupportedSelector();
+            amounts = new uint256[](1);
+            amounts[0] = IMorphoVault(target).previewMint(shares);
+            return amounts;
+        } else if (selector == WITHDRAW_SELECTOR || selector == REDEEM_SELECTOR) {
+            // Withdraw/Redeem operations don't have input amounts
+            return new uint256[](0);
         }
+        revert UnsupportedSelector();
     }
 
     /// @inheritdoc ICalldataParser

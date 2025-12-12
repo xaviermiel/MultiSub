@@ -38,12 +38,13 @@ contract UniversalRouterParser is ICalldataParser {
     address public constant WETH = 0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14;
 
     /// @inheritdoc ICalldataParser
-    function extractInputToken(address, bytes calldata data) external pure override returns (address token) {
+    function extractInputTokens(address, bytes calldata data) external pure override returns (address[] memory tokens) {
         bytes4 selector = bytes4(data[:4]);
         if (selector != EXECUTE_SELECTOR) revert UnsupportedSelector();
 
         // Decode execute(bytes commands, bytes[] inputs, uint256 deadline)
         (bytes memory commands, bytes[] memory inputs,) = abi.decode(data[4:], (bytes, bytes[], uint256));
+        address token;
 
         // Find first swap command to get input token
         for (uint256 i = 0; i < commands.length && i < inputs.length; i++) {
@@ -51,7 +52,9 @@ contract UniversalRouterParser is ICalldataParser {
 
             if (command == WRAP_ETH) {
                 // WRAP_ETH means ETH is input - return address(0) for native ETH
-                return address(0);
+                tokens = new address[](1);
+                tokens[0] = address(0);
+                return tokens;
             } else if (command == V3_SWAP_EXACT_IN || command == V3_SWAP_EXACT_OUT) {
                 // V3 swap params: (address recipient, uint256 amountIn, uint256 amountOutMin, bytes path, bool payerIsUser)
                 // First token is at start of path
@@ -72,7 +75,9 @@ contract UniversalRouterParser is ICalldataParser {
                                 token := shr(96, mload(add(add(path, 32), sub(mload(path), 20))))
                             }
                         }
-                        return token;
+                        tokens = new address[](1);
+                        tokens[0] = token;
+                        return tokens;
                     }
                 }
             } else if (command == V2_SWAP_EXACT_IN || command == V2_SWAP_EXACT_OUT) {
@@ -81,25 +86,28 @@ contract UniversalRouterParser is ICalldataParser {
                 if (swapInput.length >= 128) {
                     (, , , address[] memory path, ) = abi.decode(swapInput, (address, uint256, uint256, address[], bool));
                     if (path.length > 0) {
+                        tokens = new address[](1);
                         if (command == V2_SWAP_EXACT_IN) {
-                            return path[0];
+                            tokens[0] = path[0];
                         } else {
-                            return path[path.length - 1];
+                            tokens[0] = path[path.length - 1];
                         }
+                        return tokens;
                     }
                 }
             }
         }
 
-        return address(0);
+        return new address[](0);
     }
 
     /// @inheritdoc ICalldataParser
-    function extractInputAmount(address, bytes calldata data) external pure override returns (uint256 amount) {
+    function extractInputAmounts(address, bytes calldata data) external pure override returns (uint256[] memory amounts) {
         bytes4 selector = bytes4(data[:4]);
         if (selector != EXECUTE_SELECTOR) revert UnsupportedSelector();
 
         (bytes memory commands, bytes[] memory inputs,) = abi.decode(data[4:], (bytes, bytes[], uint256));
+        uint256 amount;
 
         // Find first swap command to get input amount
         for (uint256 i = 0; i < commands.length && i < inputs.length; i++) {
@@ -110,7 +118,9 @@ contract UniversalRouterParser is ICalldataParser {
                 bytes memory wrapInput = inputs[i];
                 if (wrapInput.length >= 64) {
                     (, amount) = abi.decode(wrapInput, (address, uint256));
-                    return amount;
+                    amounts = new uint256[](1);
+                    amounts[0] = amount;
+                    return amounts;
                 }
             } else if (command == V3_SWAP_EXACT_IN || command == V3_SWAP_EXACT_OUT) {
                 bytes memory swapInput = inputs[i];
@@ -122,7 +132,9 @@ contract UniversalRouterParser is ICalldataParser {
                         // EXACT_OUT: amountInMax is third param
                         (, , amount, , ) = abi.decode(swapInput, (address, uint256, uint256, bytes, bool));
                     }
-                    return amount;
+                    amounts = new uint256[](1);
+                    amounts[0] = amount;
+                    return amounts;
                 }
             } else if (command == V2_SWAP_EXACT_IN || command == V2_SWAP_EXACT_OUT) {
                 bytes memory swapInput = inputs[i];
@@ -132,12 +144,14 @@ contract UniversalRouterParser is ICalldataParser {
                     } else {
                         (, , amount, , ) = abi.decode(swapInput, (address, uint256, uint256, address[], bool));
                     }
-                    return amount;
+                    amounts = new uint256[](1);
+                    amounts[0] = amount;
+                    return amounts;
                 }
             }
         }
 
-        return 0;
+        return new uint256[](0);
     }
 
     /// @inheritdoc ICalldataParser

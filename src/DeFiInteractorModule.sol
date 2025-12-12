@@ -139,8 +139,8 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         address indexed subAccount,
         address indexed target,
         OperationType opType,
-        address tokenIn,
-        uint256 amountIn,
+        address[] tokensIn,
+        uint256[] amountsIn,
         address[] tokensOut,
         uint256[] amountsOut,
         uint256 spendingCost
@@ -478,26 +478,34 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             revert InvalidRecipient(recipient, avatar);
         }
 
-        // 3. Extract token and amount from calldata via parser
-        address tokenIn = parser.extractInputToken(target, data);
-        uint256 amountIn = parser.extractInputAmount(target, data);
+        // 3. Extract tokens and amounts from calldata via parser (arrays for multi-token operations)
+        address[] memory tokensIn = parser.extractInputTokens(target, data);
+        uint256[] memory amountsIn = parser.extractInputAmounts(target, data);
 
-        // 4. Calculate spending cost (acquired balance is free)
-        uint256 acquired = acquiredBalance[subAccount][tokenIn];
-        uint256 fromOriginal = amountIn > acquired ? amountIn - acquired : 0;
-        uint256 spendingCost = _estimateTokenValueUSD(tokenIn, fromOriginal);
+        // 4. Calculate total spending cost across all input tokens (acquired balance is free)
+        uint256 spendingCost = 0;
+        for (uint256 i = 0; i < tokensIn.length; i++) {
+            uint256 acquired = acquiredBalance[subAccount][tokensIn[i]];
+            uint256 fromOriginal = amountsIn[i] > acquired ? amountsIn[i] - acquired : 0;
+            spendingCost += _estimateTokenValueUSD(tokensIn[i], fromOriginal);
+        }
 
         // 5. Check spending allowance
         if (spendingCost > spendingAllowance[subAccount]) {
             revert ExceedsSpendingLimit();
         }
 
-        // 6. Deduct spending and acquired balance
+        // 6. Deduct spending allowance
         spendingAllowance[subAccount] -= spendingCost;
-        uint256 usedFromAcquired = amountIn > acquired ? acquired : amountIn;
-        acquiredBalance[subAccount][tokenIn] -= usedFromAcquired;
 
-        // 7. Capture balances before for output tracking (multiple tokens)
+        // 7. Deduct acquired balance for each input token
+        for (uint256 i = 0; i < tokensIn.length; i++) {
+            uint256 acquired = acquiredBalance[subAccount][tokensIn[i]];
+            uint256 usedFromAcquired = amountsIn[i] > acquired ? acquired : amountsIn[i];
+            acquiredBalance[subAccount][tokensIn[i]] -= usedFromAcquired;
+        }
+
+        // 8. Capture balances before for output tracking (multiple tokens)
         address[] memory tokensOut = _getOutputTokens(target, data, parser);
         uint256[] memory balancesBefore = new uint256[](tokensOut.length);
         for (uint256 i = 0; i < tokensOut.length; i++) {
@@ -506,11 +514,11 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
                 : avatar.balance;
         }
 
-        // 8. Execute
+        // 9. Execute
         bool success = exec(target, 0, data, ISafe.Operation.Call);
         if (!success) revert TransactionFailed();
 
-        // 9. Calculate output amounts for all tokens
+        // 10. Calculate output amounts for all tokens
         uint256[] memory amountsOut = new uint256[](tokensOut.length);
         for (uint256 i = 0; i < tokensOut.length; i++) {
             uint256 balanceAfter = tokensOut[i] != address(0)
@@ -519,13 +527,13 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             amountsOut[i] = balanceAfter - balancesBefore[i];
         }
 
-        // 10. Emit event for oracle
+        // 11. Emit event for oracle
         emit ProtocolExecution(
             subAccount,
             target,
             opType,
-            tokenIn,
-            amountIn,
+            tokensIn,
+            amountsIn,
             tokensOut,
             amountsOut,
             spendingCost
@@ -553,31 +561,41 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             revert InvalidRecipient(recipient, avatar);
         }
 
-        // 3. Extract token and amount from calldata via parser
-        address tokenIn = parser.extractInputToken(target, data);
-        uint256 amountIn = parser.extractInputAmount(target, data);
+        // 3. Extract tokens and amounts from calldata via parser (arrays for multi-token operations)
+        address[] memory tokensIn = parser.extractInputTokens(target, data);
+        uint256[] memory amountsIn = parser.extractInputAmounts(target, data);
 
-        // 4. For ETH swaps, use native ETH (address(0)) and the msg.value
-        if (tokenIn == address(0) && value > 0) {
-            amountIn = value;
+        // 4. For ETH swaps, override native ETH amount with msg.value
+        for (uint256 i = 0; i < tokensIn.length; i++) {
+            if (tokensIn[i] == address(0) && value > 0) {
+                amountsIn[i] = value;
+            }
         }
 
-        // 5. Calculate spending cost (acquired balance is free)
-        uint256 acquired = acquiredBalance[subAccount][tokenIn];
-        uint256 fromOriginal = amountIn > acquired ? amountIn - acquired : 0;
-        uint256 spendingCost = _estimateTokenValueUSD(tokenIn, fromOriginal);
+        // 5. Calculate total spending cost across all input tokens (acquired balance is free)
+        uint256 spendingCost = 0;
+        for (uint256 i = 0; i < tokensIn.length; i++) {
+            uint256 acquired = acquiredBalance[subAccount][tokensIn[i]];
+            uint256 fromOriginal = amountsIn[i] > acquired ? amountsIn[i] - acquired : 0;
+            spendingCost += _estimateTokenValueUSD(tokensIn[i], fromOriginal);
+        }
 
         // 6. Check spending allowance
         if (spendingCost > spendingAllowance[subAccount]) {
             revert ExceedsSpendingLimit();
         }
 
-        // 7. Deduct spending and acquired balance
+        // 7. Deduct spending allowance
         spendingAllowance[subAccount] -= spendingCost;
-        uint256 usedFromAcquired = amountIn > acquired ? acquired : amountIn;
-        acquiredBalance[subAccount][tokenIn] -= usedFromAcquired;
 
-        // 8. Capture balances before for output tracking (multiple tokens)
+        // 8. Deduct acquired balance for each input token
+        for (uint256 i = 0; i < tokensIn.length; i++) {
+            uint256 acquired = acquiredBalance[subAccount][tokensIn[i]];
+            uint256 usedFromAcquired = amountsIn[i] > acquired ? acquired : amountsIn[i];
+            acquiredBalance[subAccount][tokensIn[i]] -= usedFromAcquired;
+        }
+
+        // 9. Capture balances before for output tracking (multiple tokens)
         address[] memory tokensOut = _getOutputTokens(target, data, parser);
         uint256[] memory balancesBefore = new uint256[](tokensOut.length);
         for (uint256 i = 0; i < tokensOut.length; i++) {
@@ -586,11 +604,11 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
                 : avatar.balance;
         }
 
-        // 9. Execute with value
+        // 10. Execute with value
         bool success = exec(target, value, data, ISafe.Operation.Call);
         if (!success) revert TransactionFailed();
 
-        // 10. Calculate output amounts for all tokens
+        // 11. Calculate output amounts for all tokens
         uint256[] memory amountsOut = new uint256[](tokensOut.length);
         for (uint256 i = 0; i < tokensOut.length; i++) {
             uint256 balanceAfter = tokensOut[i] != address(0)
@@ -599,13 +617,13 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             amountsOut[i] = balanceAfter - balancesBefore[i];
         }
 
-        // 11. Emit event for oracle
+        // 12. Emit event for oracle
         emit ProtocolExecution(
             subAccount,
             target,
             opType,
-            tokenIn,
-            amountIn,
+            tokensIn,
+            amountsIn,
             tokensOut,
             amountsOut,
             spendingCost
@@ -662,11 +680,11 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             subAccount,
             target,
             opType,
-            address(0), // no tokenIn for withdraw/claim
-            0,          // no amountIn
+            new address[](0), // no tokensIn for withdraw/claim
+            new uint256[](0), // no amountsIn
             tokensOut,
             amountsOut,
-            0           // no spending cost
+            0                 // no spending cost
         );
 
         return "";
@@ -719,11 +737,11 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             subAccount,
             target,
             opType,
-            address(0), // no tokenIn for withdraw/claim
-            0,          // no amountIn
+            new address[](0), // no tokensIn for withdraw/claim
+            new uint256[](0), // no amountsIn
             tokensOut,
             amountsOut,
-            0           // no spending cost
+            0                 // no spending cost
         );
 
         return "";
@@ -770,13 +788,19 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         bool success = exec(target, 0, data, ISafe.Operation.Call);
         if (!success) revert ApprovalFailed();
 
-        // 5. Emit event (APPROVE has no output tokens)
+        // 5. Create arrays for event (APPROVE has single input, no outputs)
+        address[] memory tokensIn = new address[](1);
+        tokensIn[0] = tokenIn;
+        uint256[] memory amountsIn = new uint256[](1);
+        amountsIn[0] = amount;
+
+        // 6. Emit event (APPROVE has no output tokens)
         emit ProtocolExecution(
             subAccount,
             target,
             OperationType.APPROVE,
-            tokenIn,
-            amount,
+            tokensIn,
+            amountsIn,
             new address[](0),
             new uint256[](0),
             0 // No spending cost for approve

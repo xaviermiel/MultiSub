@@ -16,12 +16,17 @@ contract MockParser {
         tokenAddress = _token;
     }
 
-    function extractInputToken(address, bytes calldata) external view returns (address) {
-        return tokenAddress;
+    function extractInputTokens(address, bytes calldata) external view returns (address[] memory tokens) {
+        tokens = new address[](1);
+        tokens[0] = tokenAddress;
+        return tokens;
     }
 
-    function extractInputAmount(address, bytes calldata data) external pure returns (uint256 amount) {
-        (amount,) = abi.decode(data[4:], (uint256, address));
+    function extractInputAmounts(address, bytes calldata data) external pure returns (uint256[] memory amounts) {
+        (uint256 amount,) = abi.decode(data[4:], (uint256, address));
+        amounts = new uint256[](1);
+        amounts[0] = amount;
+        return amounts;
     }
 
     function extractOutputTokens(address, bytes calldata) external view returns (address[] memory tokens) {

@@ -9,20 +9,24 @@ pragma solidity ^0.8.20;
  */
 interface ICalldataParser {
     /**
-     * @notice Extract the input token from calldata
+     * @notice Extract the input tokens from calldata
      * @param target The protocol/vault address being called
      * @param data The calldata to parse
-     * @return token The input token address
+     * @return tokens Array of input token addresses (empty array if no input tokens)
+     * @dev For single-token inputs (swaps), returns array with 1 element.
+     *      For multi-token inputs (LP mint/increase), returns all input tokens.
+     *      For operations with no input tokens (claims), returns empty array.
      */
-    function extractInputToken(address target, bytes calldata data) external view returns (address token);
+    function extractInputTokens(address target, bytes calldata data) external view returns (address[] memory tokens);
 
     /**
-     * @notice Extract the input amount from calldata
+     * @notice Extract the input amounts from calldata
      * @param target The protocol/vault address being called
      * @param data The calldata to parse
-     * @return amount The input amount
+     * @return amounts Array of input amounts (empty array if no input amounts)
+     * @dev Array length must match extractInputTokens result.
      */
-    function extractInputAmount(address target, bytes calldata data) external view returns (uint256 amount);
+    function extractInputAmounts(address target, bytes calldata data) external view returns (uint256[] memory amounts);
 
     /**
      * @notice Extract the output tokens from calldata (for swaps/withdrawals)

@@ -52,14 +52,14 @@ contract UniswapV4ParserTest is Test {
         bytes memory badData = abi.encodeWithSelector(bytes4(0xdeadbeef), uint256(100));
 
         vm.expectRevert(UniswapV4Parser.UnsupportedSelector.selector);
-        parser.extractInputToken(V4_POSITION_MANAGER, badData);
+        parser.extractInputTokens(V4_POSITION_MANAGER, badData);
     }
 
     function testUnsupportedSelectorRevertsOnInputAmount() public {
         bytes memory badData = abi.encodeWithSelector(bytes4(0xdeadbeef), uint256(100));
 
         vm.expectRevert(UniswapV4Parser.UnsupportedSelector.selector);
-        parser.extractInputAmount(V4_POSITION_MANAGER, badData);
+        parser.extractInputAmounts(V4_POSITION_MANAGER, badData);
     }
 
     function testUnsupportedSelectorRevertsOnOutputTokens() public {
@@ -94,9 +94,9 @@ contract UniswapV4ParserTest is Test {
             block.timestamp + 1
         );
 
-        // Should return zero addresses without reverting
-        address inputToken = parser.extractInputToken(V4_POSITION_MANAGER, data);
-        assertEq(inputToken, address(0), "Should return zero address for empty data");
+        // Should return empty array without reverting
+        address[] memory inputTokens = parser.extractInputTokens(V4_POSITION_MANAGER, data);
+        assertEq(inputTokens.length, 0, "Should return empty array for empty data");
     }
 
     function testMinimalUnlockData() public view {
@@ -108,8 +108,8 @@ contract UniswapV4ParserTest is Test {
             block.timestamp + 1
         );
 
-        address inputToken = parser.extractInputToken(V4_POSITION_MANAGER, data);
-        assertEq(inputToken, address(0), "Should return zero address for minimal data");
+        address[] memory inputTokens = parser.extractInputTokens(V4_POSITION_MANAGER, data);
+        assertEq(inputTokens.length, 0, "Should return empty array for minimal data");
     }
 
     // ============ SETTLE Action Tests ============
@@ -132,8 +132,8 @@ contract UniswapV4ParserTest is Test {
             block.timestamp + 1
         );
 
-        address inputToken = parser.extractInputToken(V4_POSITION_MANAGER, data);
-        assertEq(inputToken, USDC, "Input token should be USDC from SETTLE");
+        address[] memory inputTokens = parser.extractInputTokens(V4_POSITION_MANAGER, data);
+        assertEq(inputTokens[0], USDC, "Input token should be USDC from SETTLE");
     }
 
     function testExtractInputAmountFromSettle() public view {
@@ -151,8 +151,8 @@ contract UniswapV4ParserTest is Test {
             block.timestamp + 1
         );
 
-        uint256 amount = parser.extractInputAmount(V4_POSITION_MANAGER, data);
-        assertEq(amount, 1000e6, "Input amount should be 1000e6");
+        uint256[] memory amounts = parser.extractInputAmounts(V4_POSITION_MANAGER, data);
+        assertEq(amounts[0], 1000e6, "Input amount should be 1000e6");
     }
 
     // ============ SETTLE_PAIR Action Tests ============
@@ -173,8 +173,8 @@ contract UniswapV4ParserTest is Test {
             block.timestamp + 1
         );
 
-        address inputToken = parser.extractInputToken(V4_POSITION_MANAGER, data);
-        assertEq(inputToken, USDC, "Input token should be first currency (USDC) from SETTLE_PAIR");
+        address[] memory inputTokens = parser.extractInputTokens(V4_POSITION_MANAGER, data);
+        assertEq(inputTokens[0], USDC, "Input token should be first currency (USDC) from SETTLE_PAIR");
     }
 
     // ============ TAKE Action Tests ============
@@ -444,7 +444,8 @@ contract UniswapV4ParserTest is Test {
 
     // ============ Multi-Action Tests ============
 
-    function testMultipleSettleActionsSumAmounts() public view {
+    function testMultipleSettleActionsReturnsFirst() public view {
+        // With multiple SETTLE actions, parser returns the first one found
         bytes memory actions = new bytes(2);
         actions[0] = bytes1(parser.SETTLE());
         actions[1] = bytes1(parser.SETTLE());
@@ -461,7 +462,14 @@ contract UniswapV4ParserTest is Test {
             block.timestamp + 1
         );
 
-        uint256 amount = parser.extractInputAmount(V4_POSITION_MANAGER, data);
-        assertEq(amount, 1000e6 + 2e18, "Should sum all SETTLE amounts");
+        // Returns just the first SETTLE amount
+        uint256[] memory amounts = parser.extractInputAmounts(V4_POSITION_MANAGER, data);
+        assertEq(amounts.length, 1, "Should have 1 input amount from first SETTLE");
+        assertEq(amounts[0], 1000e6, "Should return first SETTLE amount");
+
+        // Returns just the first SETTLE token
+        address[] memory tokens = parser.extractInputTokens(V4_POSITION_MANAGER, data);
+        assertEq(tokens.length, 1, "Should have 1 input token from first SETTLE");
+        assertEq(tokens[0], USDC, "Should return first SETTLE token");
     }
 }

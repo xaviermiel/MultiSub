@@ -69,111 +69,159 @@ contract UniswapV3Parser is ICalldataParser {
     bytes4 public constant COLLECT_SELECTOR = 0xfc6f7865;
 
     /// @inheritdoc ICalldataParser
-    function extractInputToken(address target, bytes calldata data) external view override returns (address token) {
+    function extractInputTokens(address target, bytes calldata data) external view override returns (address[] memory tokens) {
         bytes4 selector = bytes4(data[:4]);
+        address token;
 
-        // ============ SwapRouter Functions ============
+        // ============ SwapRouter Functions (single input token) ============
         if (selector == EXACT_INPUT_SINGLE_SELECTOR) {
-            // ExactInputSingleParams (V1): tokenIn is first field
             (token,,,,,,,) = abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint256, uint160));
+            tokens = new address[](1);
+            tokens[0] = token;
+            return tokens;
         } else if (selector == EXACT_INPUT_SINGLE_02_SELECTOR) {
-            // ExactInputSingleParams (V2): no deadline, tokenIn is first field
             (token,,,,,,) = abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint160));
+            tokens = new address[](1);
+            tokens[0] = token;
+            return tokens;
         } else if (selector == EXACT_OUTPUT_SINGLE_SELECTOR) {
-            // ExactOutputSingleParams (V1): tokenIn is first field, tokenOut is second
             (token,,,,,,,) = abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint256, uint160));
+            tokens = new address[](1);
+            tokens[0] = token;
+            return tokens;
         } else if (selector == EXACT_OUTPUT_SINGLE_02_SELECTOR) {
-            // ExactOutputSingleParams (V2): no deadline
             (token,,,,,,) = abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint160));
+            tokens = new address[](1);
+            tokens[0] = token;
+            return tokens;
         } else if (selector == EXACT_INPUT_SELECTOR) {
-            // ExactInputParams (V1): path contains tokenIn as first 20 bytes
             (bytes memory path,,,,) = abi.decode(data[4:], (bytes, address, uint256, uint256, uint256));
             if (path.length < 20) revert InvalidPath();
             assembly {
                 token := shr(96, mload(add(path, 32)))
             }
+            tokens = new address[](1);
+            tokens[0] = token;
+            return tokens;
         } else if (selector == EXACT_INPUT_02_SELECTOR) {
-            // ExactInputParams (V2): no deadline
             (bytes memory path,,,) = abi.decode(data[4:], (bytes, address, uint256, uint256));
             if (path.length < 20) revert InvalidPath();
             assembly {
                 token := shr(96, mload(add(path, 32)))
             }
+            tokens = new address[](1);
+            tokens[0] = token;
+            return tokens;
         } else if (selector == EXACT_OUTPUT_SELECTOR) {
-            // ExactOutputParams (V1): path is reversed, tokenIn is last 20 bytes
             (bytes memory path,,,,) = abi.decode(data[4:], (bytes, address, uint256, uint256, uint256));
             if (path.length < 20) revert InvalidPath();
             assembly {
                 token := shr(96, mload(add(add(path, 32), sub(mload(path), 20))))
             }
+            tokens = new address[](1);
+            tokens[0] = token;
+            return tokens;
         } else if (selector == EXACT_OUTPUT_02_SELECTOR) {
-            // ExactOutputParams (V2): no deadline
             (bytes memory path,,,) = abi.decode(data[4:], (bytes, address, uint256, uint256));
             if (path.length < 20) revert InvalidPath();
             assembly {
                 token := shr(96, mload(add(add(path, 32), sub(mload(path), 20))))
             }
+            tokens = new address[](1);
+            tokens[0] = token;
+            return tokens;
         }
-        // ============ NonfungiblePositionManager Functions ============
+        // ============ NonfungiblePositionManager Functions (dual input tokens) ============
         else if (selector == MINT_SELECTOR) {
             // MintParams: (token0, token1, fee, tickLower, tickUpper, amount0Desired, amount1Desired, amount0Min, amount1Min, recipient, deadline)
-            // Return token0 as the input token (both tokens are input)
-            (token,,,,,,,,,) = abi.decode(data[4:], (address, address, uint24, int24, int24, uint256, uint256, uint256, uint256, address));
+            // Both tokens are inputs
+            (address token0, address token1,,,,,,,,,) = abi.decode(data[4:], (address, address, uint24, int24, int24, uint256, uint256, uint256, uint256, address, uint256));
+            tokens = new address[](2);
+            tokens[0] = token0;
+            tokens[1] = token1;
+            return tokens;
         } else if (selector == INCREASE_LIQUIDITY_SELECTOR) {
             // IncreaseLiquidityParams: (tokenId, amount0Desired, amount1Desired, amount0Min, amount1Min, deadline)
-            // Query the position's token0 from the NonfungiblePositionManager
+            // Query the position's tokens from the NonfungiblePositionManager
             (uint256 tokenId,,,,,) = abi.decode(data[4:], (uint256, uint256, uint256, uint256, uint256, uint256));
-            (,, token,,,,,,,,,) = INonfungiblePositionManager(target).positions(tokenId);
+            (,, address token0, address token1,,,,,,,,) = INonfungiblePositionManager(target).positions(tokenId);
+            tokens = new address[](2);
+            tokens[0] = token0;
+            tokens[1] = token1;
+            return tokens;
         } else if (selector == DECREASE_LIQUIDITY_SELECTOR || selector == COLLECT_SELECTOR) {
-            // These are withdraw/claim operations - no input token
-            return address(0);
+            // These are withdraw/claim operations - no input tokens
+            return new address[](0);
         } else {
             revert UnsupportedSelector();
         }
     }
 
     /// @inheritdoc ICalldataParser
-    function extractInputAmount(address, bytes calldata data) external pure override returns (uint256 amount) {
+    function extractInputAmounts(address, bytes calldata data) external pure override returns (uint256[] memory amounts) {
         bytes4 selector = bytes4(data[:4]);
+        uint256 amount;
 
-        // ============ SwapRouter Functions ============
+        // ============ SwapRouter Functions (single input amount) ============
         if (selector == EXACT_INPUT_SINGLE_SELECTOR) {
-            // ExactInputSingleParams (V1): amountIn is 6th field (index 5, after deadline)
             (,,,,, amount,,) = abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint256, uint160));
+            amounts = new uint256[](1);
+            amounts[0] = amount;
+            return amounts;
         } else if (selector == EXACT_INPUT_SINGLE_02_SELECTOR) {
-            // ExactInputSingleParams (V2): amountIn is 5th field (no deadline)
             (,,,, amount,,) = abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint160));
+            amounts = new uint256[](1);
+            amounts[0] = amount;
+            return amounts;
         } else if (selector == EXACT_INPUT_SELECTOR) {
-            // ExactInputParams (V1): amountIn is 4th field
             (,,, amount,) = abi.decode(data[4:], (bytes, address, uint256, uint256, uint256));
+            amounts = new uint256[](1);
+            amounts[0] = amount;
+            return amounts;
         } else if (selector == EXACT_INPUT_02_SELECTOR) {
-            // ExactInputParams (V2): amountIn is 3rd field (no deadline)
             (,, amount,) = abi.decode(data[4:], (bytes, address, uint256, uint256));
+            amounts = new uint256[](1);
+            amounts[0] = amount;
+            return amounts;
         } else if (selector == EXACT_OUTPUT_SINGLE_SELECTOR) {
-            // ExactOutputSingleParams (V1): amountInMaximum is 7th field
             (,,,,,, amount,) = abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint256, uint160));
+            amounts = new uint256[](1);
+            amounts[0] = amount;
+            return amounts;
         } else if (selector == EXACT_OUTPUT_SINGLE_02_SELECTOR) {
-            // ExactOutputSingleParams (V2): amountInMaximum is 6th field (no deadline)
             (,,,,, amount,) = abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint160));
+            amounts = new uint256[](1);
+            amounts[0] = amount;
+            return amounts;
         } else if (selector == EXACT_OUTPUT_SELECTOR) {
-            // ExactOutputParams (V1): amountInMaximum is 5th field
             (,,,, amount) = abi.decode(data[4:], (bytes, address, uint256, uint256, uint256));
+            amounts = new uint256[](1);
+            amounts[0] = amount;
+            return amounts;
         } else if (selector == EXACT_OUTPUT_02_SELECTOR) {
-            // ExactOutputParams (V2): amountInMaximum is 4th field (no deadline)
             (,,, amount) = abi.decode(data[4:], (bytes, address, uint256, uint256));
+            amounts = new uint256[](1);
+            amounts[0] = amount;
+            return amounts;
         }
-        // ============ NonfungiblePositionManager Functions ============
+        // ============ NonfungiblePositionManager Functions (dual input amounts) ============
         else if (selector == MINT_SELECTOR) {
             // MintParams: (token0, token1, fee, tickLower, tickUpper, amount0Desired, amount1Desired, amount0Min, amount1Min, recipient, deadline)
-            // Return amount0Desired as the primary input amount (tracked via balance change for both)
-            (,,,,, amount,,,,) = abi.decode(data[4:], (address, address, uint24, int24, int24, uint256, uint256, uint256, uint256, address));
+            (,,,,, uint256 amount0Desired, uint256 amount1Desired,,,) = abi.decode(data[4:], (address, address, uint24, int24, int24, uint256, uint256, uint256, uint256, address));
+            amounts = new uint256[](2);
+            amounts[0] = amount0Desired;
+            amounts[1] = amount1Desired;
+            return amounts;
         } else if (selector == INCREASE_LIQUIDITY_SELECTOR) {
             // IncreaseLiquidityParams: (tokenId, amount0Desired, amount1Desired, amount0Min, amount1Min, deadline)
-            // Return amount0Desired
-            (, amount,,,,) = abi.decode(data[4:], (uint256, uint256, uint256, uint256, uint256, uint256));
+            (, uint256 amount0Desired, uint256 amount1Desired,,,) = abi.decode(data[4:], (uint256, uint256, uint256, uint256, uint256, uint256));
+            amounts = new uint256[](2);
+            amounts[0] = amount0Desired;
+            amounts[1] = amount1Desired;
+            return amounts;
         } else if (selector == DECREASE_LIQUIDITY_SELECTOR || selector == COLLECT_SELECTOR) {
-            // These are withdraw/claim operations - no input amount
-            return 0;
+            // These are withdraw/claim operations - no input amounts
+            return new uint256[](0);
         } else {
             revert UnsupportedSelector();
         }

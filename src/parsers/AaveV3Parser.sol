@@ -30,32 +30,35 @@ contract AaveV3Parser is ICalldataParser {
     bytes4 public constant CLAIM_ALL_ON_BEHALF_SELECTOR = 0x9ff55db9;     // claimAllRewardsOnBehalf(address[],address,address)
 
     /// @inheritdoc ICalldataParser
-    function extractInputToken(address, bytes calldata data) external pure override returns (address token) {
+    function extractInputTokens(address, bytes calldata data) external pure override returns (address[] memory tokens) {
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == SUPPLY_SELECTOR || selector == REPAY_SELECTOR) {
             // supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode)
             // repay(address asset, uint256 amount, uint256 interestRateMode, address onBehalfOf)
-            return abi.decode(data[4:], (address));
-        } else if (_isClaimSelector(selector)) {
-            // CLAIM operations don't have input tokens
-            return address(0);
+            tokens = new address[](1);
+            tokens[0] = abi.decode(data[4:], (address));
+            return tokens;
+        } else if (_isClaimSelector(selector) || selector == WITHDRAW_SELECTOR) {
+            // CLAIM and WITHDRAW operations don't have input tokens
+            return new address[](0);
         }
         revert UnsupportedSelector();
     }
 
     /// @inheritdoc ICalldataParser
-    function extractInputAmount(address, bytes calldata data) external pure override returns (uint256 amount) {
+    function extractInputAmounts(address, bytes calldata data) external pure override returns (uint256[] memory amounts) {
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == SUPPLY_SELECTOR || selector == REPAY_SELECTOR) {
             // supply(address asset, uint256 amount, ...)
             // repay(address asset, uint256 amount, ...)
-            (, amount) = abi.decode(data[4:], (address, uint256));
-            return amount;
-        } else if (_isClaimSelector(selector)) {
-            // CLAIM operations don't have input amounts
-            return 0;
+            amounts = new uint256[](1);
+            (, amounts[0]) = abi.decode(data[4:], (address, uint256));
+            return amounts;
+        } else if (_isClaimSelector(selector) || selector == WITHDRAW_SELECTOR) {
+            // CLAIM and WITHDRAW operations don't have input amounts
+            return new uint256[](0);
         }
         revert UnsupportedSelector();
     }
