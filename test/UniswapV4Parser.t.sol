@@ -5,11 +5,39 @@ import {Test} from "forge-std/Test.sol";
 import {UniswapV4Parser} from "../src/parsers/UniswapV4Parser.sol";
 
 /**
+ * @title MockV4PositionManager
+ * @notice Mock contract for testing INCREASE_LIQUIDITY position queries
+ */
+contract MockV4PositionManager {
+    mapping(uint256 => address) public token0s;
+    mapping(uint256 => address) public token1s;
+
+    function setPosition(uint256 tokenId, address currency0, address currency1) external {
+        token0s[tokenId] = currency0;
+        token1s[tokenId] = currency1;
+    }
+
+    function getPoolAndPositionInfo(uint256 tokenId) external view returns (
+        address currency0,
+        address currency1,
+        uint24 fee,
+        int24 tickSpacing,
+        address hooks,
+        int24 tickLower,
+        int24 tickUpper,
+        uint128 liquidity
+    ) {
+        return (token0s[tokenId], token1s[tokenId], 3000, 60, address(0), -887220, 887220, 1000e6);
+    }
+}
+
+/**
  * @title UniswapV4ParserTest
  * @notice Tests for the Uniswap V4 PositionManager parser
  */
 contract UniswapV4ParserTest is Test {
     UniswapV4Parser public parser;
+    MockV4PositionManager public mockPositionManager;
 
     // Test addresses
     address constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
@@ -19,6 +47,7 @@ contract UniswapV4ParserTest is Test {
 
     function setUp() public {
         parser = new UniswapV4Parser();
+        mockPositionManager = new MockV4PositionManager();
     }
 
     // ============ Selector Tests ============
@@ -499,6 +528,49 @@ contract UniswapV4ParserTest is Test {
 
         uint8 opType = parser.getOperationType(data);
         assertEq(opType, 2, "INCREASE_LIQUIDITY should be DEPOSIT (2)");
+    }
+
+    function testIncreaseLiquidityExtractsTokensAndAmounts() public {
+        // Setup mock position
+        uint256 tokenId = 42;
+        mockPositionManager.setPosition(tokenId, USDC, WETH);
+
+        bytes memory actions = new bytes(1);
+        actions[0] = bytes1(parser.INCREASE_LIQUIDITY());
+
+        // IncreaseLiquidityParams: (uint256 tokenId, uint256 liquidity, uint128 amount0Max, uint128 amount1Max, bytes hookData)
+        // Offsets: tokenId=0, liquidity=32, amount0Max=64, amount1Max=96
+        bytes[] memory params = new bytes[](1);
+        params[0] = abi.encode(
+            tokenId,           // tokenId at offset 0
+            uint256(1000e6),   // liquidity at offset 32
+            uint128(500e6),    // amount0Max at offset 64
+            uint128(2e18),     // amount1Max at offset 96
+            ""                 // hookData
+        );
+
+        bytes memory unlockData = abi.encode(actions, params);
+
+        bytes memory data = abi.encodeWithSelector(
+            parser.MODIFY_LIQUIDITIES_SELECTOR(),
+            unlockData,
+            block.timestamp + 1
+        );
+
+        // Extract tokens - queries the mock position manager
+        address[] memory inputTokens = parser.extractInputTokens(address(mockPositionManager), data);
+        assertEq(inputTokens.length, 2, "Should have 2 tokens");
+        assertEq(inputTokens[0], USDC, "Token0 should be USDC from position");
+        assertEq(inputTokens[1], WETH, "Token1 should be WETH from position");
+
+        // Extract amounts - decoded from params
+        uint256[] memory inputAmounts = parser.extractInputAmounts(address(mockPositionManager), data);
+        assertEq(inputAmounts.length, 2, "Should have 2 amounts");
+        assertEq(inputAmounts[0], 500e6, "Amount0 should be amount0Max");
+        assertEq(inputAmounts[1], 2e18, "Amount1 should be amount1Max");
+
+        // Verify lengths match for module compatibility
+        assertEq(inputTokens.length, inputAmounts.length, "Token and amount arrays must match");
     }
 
     // ============ Multi-Action Tests ============

@@ -4,6 +4,25 @@ pragma solidity ^0.8.20;
 import {ICalldataParser} from "../interfaces/ICalldataParser.sol";
 
 /**
+ * @title IV4PositionManager
+ * @notice Interface for querying position info from Uniswap V4 PositionManager
+ */
+interface IV4PositionManager {
+    /// @notice Returns the pool and position info for a given tokenId
+    /// @dev PoolKey contains (Currency currency0, Currency currency1, uint24 fee, int24 tickSpacing, IHooks hooks)
+    function getPoolAndPositionInfo(uint256 tokenId) external view returns (
+        address currency0,
+        address currency1,
+        uint24 fee,
+        int24 tickSpacing,
+        address hooks,
+        int24 tickLower,
+        int24 tickUpper,
+        uint128 liquidity
+    );
+}
+
+/**
  * @title UniswapV4Parser
  * @notice Calldata parser for Uniswap V4 PositionManager operations
  * @dev Extracts token/amount from modifyLiquidities calldata
@@ -41,7 +60,7 @@ contract UniswapV4Parser is ICalldataParser {
     uint8 public constant SWEEP = 0x14;
 
     /// @inheritdoc ICalldataParser
-    function extractInputTokens(address, bytes calldata data) external pure override returns (address[] memory tokens) {
+    function extractInputTokens(address target, bytes calldata data) external view override returns (address[] memory tokens) {
         bytes4 selector = bytes4(data[:4]);
         if (selector != MODIFY_LIQUIDITIES_SELECTOR) revert UnsupportedSelector();
 
@@ -81,9 +100,16 @@ contract UniswapV4Parser is ICalldataParser {
                     return tokens;
                 }
             } else if (action == INCREASE_LIQUIDITY || action == INCREASE_LIQUIDITY_FROM_DELTAS) {
-                // For INCREASE_LIQUIDITY, we can't determine tokens from calldata
-                // Return empty array - oracle tracks balance changes
-                return new address[](0);
+                // INCREASE_LIQUIDITY params: (uint256 tokenId, uint256 liquidity, uint128 amount0Max, uint128 amount1Max, bytes hookData)
+                // Query the position's tokens from the PositionManager
+                if (params[i].length >= 32) {
+                    uint256 tokenId = _readUint256(params[i], 0);
+                    (address currency0, address currency1,,,,,,) = IV4PositionManager(target).getPoolAndPositionInfo(tokenId);
+                    tokens = new address[](2);
+                    tokens[0] = currency0;
+                    tokens[1] = currency1;
+                    return tokens;
+                }
             } else if (action == DECREASE_LIQUIDITY || action == BURN_POSITION) {
                 // Withdraw/claim operations - no input tokens
                 return new address[](0);
@@ -133,16 +159,32 @@ contract UniswapV4Parser is ICalldataParser {
                 // PoolKey is (currency0, currency1, fee, tickSpacing, hooks) = 5 slots = 160 bytes
                 // Then: int24 tickLower (32), int24 tickUpper (32), uint256 liquidity (32), uint128 amount0Max (32), uint128 amount1Max (32)
                 // amount0Max at offset 160 + 32 + 32 + 32 = 256, amount1Max at offset 288
-                // However, these are MAX amounts, actual spent may differ - return zeros for safety
-                // Module tracks balance changes for actual amounts
+                // These are MAX amounts - return them for spending limit checks
+                if (params[i].length >= 320) {
+                    amounts = new uint256[](2);
+                    amounts[0] = uint256(_readUint128(params[i], 256));
+                    amounts[1] = uint256(_readUint128(params[i], 288));
+                    return amounts;
+                }
+                // Fallback to zeros if params too short
                 amounts = new uint256[](2);
                 amounts[0] = 0;
                 amounts[1] = 0;
                 return amounts;
             } else if (action == INCREASE_LIQUIDITY || action == INCREASE_LIQUIDITY_FROM_DELTAS) {
-                // INCREASE_LIQUIDITY: amounts tracked via balance changes
-                // extractInputTokens returns empty for these, so return empty amounts
-                return new uint256[](0);
+                // INCREASE_LIQUIDITY params: (uint256 tokenId, uint256 liquidity, uint128 amount0Max, uint128 amount1Max, bytes hookData)
+                // tokenId at offset 0 (32 bytes), liquidity at 32 (32 bytes), amount0Max at 64 (32 bytes), amount1Max at 96 (32 bytes)
+                if (params[i].length >= 128) {
+                    amounts = new uint256[](2);
+                    amounts[0] = uint256(_readUint128(params[i], 64));
+                    amounts[1] = uint256(_readUint128(params[i], 96));
+                    return amounts;
+                }
+                // Fallback to zeros if params too short
+                amounts = new uint256[](2);
+                amounts[0] = 0;
+                amounts[1] = 0;
+                return amounts;
             } else if (action == DECREASE_LIQUIDITY || action == BURN_POSITION) {
                 // Withdraw/claim operations - no input amounts
                 return new uint256[](0);
