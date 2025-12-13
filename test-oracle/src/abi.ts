@@ -101,6 +101,49 @@ export const DeFiInteractorModuleABI = [
     outputs: [{ name: '', type: 'address[]', internalType: 'address[]' }],
     stateMutability: 'view',
   },
+  {
+    type: 'function',
+    name: 'safeValue',
+    inputs: [],
+    outputs: [
+      { name: 'totalValueUSD', type: 'uint256', internalType: 'uint256' },
+      { name: 'lastUpdated', type: 'uint256', internalType: 'uint256' },
+      { name: 'updateCount', type: 'uint256', internalType: 'uint256' },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'absoluteMaxSpendingBps',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256', internalType: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'subAccountLimits',
+    inputs: [{ name: 'subAccount', type: 'address', internalType: 'address' }],
+    outputs: [
+      { name: 'maxSpendingBps', type: 'uint256', internalType: 'uint256' },
+      { name: 'windowDuration', type: 'uint256', internalType: 'uint256' },
+      { name: 'isConfigured', type: 'bool', internalType: 'bool' },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'DEFI_EXECUTE_ROLE',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint16', internalType: 'uint16' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'DEFI_TRANSFER_ROLE',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint16', internalType: 'uint16' }],
+    stateMutability: 'view',
+  },
   // ============ Events ============
   // Note: Events no longer include timestamp - contract uses block.timestamp internally
   {
@@ -136,6 +179,16 @@ export const DeFiInteractorModuleABI = [
     inputs: [
       { name: 'totalValueUSD', type: 'uint256', indexed: false, internalType: 'uint256' },
       { name: 'updateCount', type: 'uint256', indexed: false, internalType: 'uint256' },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'SpendingAllowanceUpdated',
+    inputs: [
+      { name: 'subAccount', type: 'address', indexed: true, internalType: 'address' },
+      { name: 'newAllowance', type: 'uint256', indexed: false, internalType: 'uint256' },
+      { name: 'timestamp', type: 'uint256', indexed: false, internalType: 'uint256' },
     ],
     anonymous: false,
   },

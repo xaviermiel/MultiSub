@@ -181,6 +181,13 @@ const configSchema = z.object({
 
 type Config = z.infer<typeof configSchema>
 
+/**
+ * Determine if the chain is a testnet based on chainSelectorName
+ */
+const isTestnetChain = (chainSelectorName: string): boolean => {
+	return chainSelectorName.includes('testnet') || chainSelectorName.includes('sepolia')
+}
+
 interface TokenBalance {
 	tokenAddress: string
 	symbol: string
@@ -206,7 +213,7 @@ const getSafeAddress = (runtime: Runtime<Config>): string => {
 	const network = getNetwork({
 		chainFamily: 'evm',
 		chainSelectorName: runtime.config.chainSelectorName,
-		isTestnet: true,
+		isTestnet: isTestnetChain(runtime.config.chainSelectorName),
 	})
 
 	runtime.log('0')
@@ -281,7 +288,7 @@ const getTokenBalance = (
 	const network = getNetwork({
 		chainFamily: 'evm',
 		chainSelectorName: chainSelectorName,
-		isTestnet: true,
+		isTestnet: isTestnetChain(chainSelectorName),
 	})
 
 	if (!network) {
@@ -327,7 +334,7 @@ const getTokenDecimals = (
 	const network = getNetwork({
 		chainFamily: 'evm',
 		chainSelectorName: chainSelectorName,
-		isTestnet: true,
+		isTestnet: isTestnetChain(chainSelectorName),
 	})
 
 	if (!network) {
@@ -382,7 +389,7 @@ const getChainlinkPrice = (
 	const network = getNetwork({
 		chainFamily: 'evm',
 		chainSelectorName: chainSelectorName,
-		isTestnet: true,
+		isTestnet: isTestnetChain(chainSelectorName),
 	})
 
 	if (!network) {
@@ -471,7 +478,7 @@ const calculateMorphoValue = (
 	const network = getNetwork({
 		chainFamily: 'evm',
 		chainSelectorName: runtime.config.chainSelectorName,
-		isTestnet: true,
+		isTestnet: isTestnetChain(runtime.config.chainSelectorName),
 	})
 
 	if (!network) {
@@ -529,7 +536,7 @@ const calculateUniswapV2LPValue = (
 	const network = getNetwork({
 		chainFamily: 'evm',
 		chainSelectorName: runtime.config.chainSelectorName,
-		isTestnet: true,
+		isTestnet: isTestnetChain(runtime.config.chainSelectorName),
 	})
 
 	if (!network) {
@@ -622,7 +629,7 @@ const getBatchTokenBalances = (runtime: Runtime<Config>): Map<string, bigint> =>
 	const network = getNetwork({
 		chainFamily: 'evm',
 		chainSelectorName: config.chainSelectorName,
-		isTestnet: true,
+		isTestnet: isTestnetChain(config.chainSelectorName),
 	})
 
 	if (!network) {
@@ -674,7 +681,7 @@ const getNativeEthBalance = (runtime: Runtime<Config>, address: string): bigint 
 	const network = getNetwork({
 		chainFamily: 'evm',
 		chainSelectorName: runtime.config.chainSelectorName,
-		isTestnet: true,
+		isTestnet: isTestnetChain(runtime.config.chainSelectorName),
 	})
 
 	if (!network) {
@@ -830,7 +837,7 @@ const getOnChainSafeValue = (runtime: Runtime<Config>): bigint => {
 	const network = getNetwork({
 		chainFamily: 'evm',
 		chainSelectorName: runtime.config.chainSelectorName,
-		isTestnet: true,
+		isTestnet: isTestnetChain(runtime.config.chainSelectorName),
 	})
 
 	if (!network) {
@@ -884,7 +891,7 @@ const writeSafeValueToChain = (runtime: Runtime<Config>, safeValueData: SafeValu
 	const network = getNetwork({
 		chainFamily: 'evm',
 		chainSelectorName: config.chainSelectorName,
-		isTestnet: true,
+		isTestnet: isTestnetChain(config.chainSelectorName),
 	})
 
 	if (!network) {

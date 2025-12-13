@@ -151,11 +151,11 @@ export const DeFiInteractorModule = [
 		inputs: [
 			{ name: 'subAccount', type: 'address', indexed: true, internalType: 'address' },
 			{ name: 'target', type: 'address', indexed: true, internalType: 'address' },
-			{ name: 'opType', type: 'uint8', indexed: false, internalType: 'enum DeFiInteractorModule.OperationType' },
-			{ name: 'tokenIn', type: 'address', indexed: false, internalType: 'address' },
-			{ name: 'amountIn', type: 'uint256', indexed: false, internalType: 'uint256' },
-			{ name: 'tokenOut', type: 'address', indexed: false, internalType: 'address' },
-			{ name: 'amountOut', type: 'uint256', indexed: false, internalType: 'uint256' },
+			{ name: 'opType', type: 'uint8', indexed: false, internalType: 'uint8' },
+			{ name: 'tokensIn', type: 'address[]', indexed: false, internalType: 'address[]' },
+			{ name: 'amountsIn', type: 'uint256[]', indexed: false, internalType: 'uint256[]' },
+			{ name: 'tokensOut', type: 'address[]', indexed: false, internalType: 'address[]' },
+			{ name: 'amountsOut', type: 'uint256[]', indexed: false, internalType: 'uint256[]' },
 			{ name: 'spendingCost', type: 'uint256', indexed: false, internalType: 'uint256' },
 		],
 		anonymous: false,
@@ -198,7 +198,6 @@ export const DeFiInteractorModule = [
 			{ name: 'subAccount', type: 'address', indexed: true, internalType: 'address' },
 			{ name: 'token', type: 'address', indexed: true, internalType: 'address' },
 			{ name: 'newBalance', type: 'uint256', indexed: false, internalType: 'uint256' },
-			{ name: 'timestamp', type: 'uint256', indexed: false, internalType: 'uint256' },
 		],
 		anonymous: false,
 	},
@@ -217,8 +216,8 @@ export enum OperationType {
 // Event signature hashes for log filtering
 // Note: These are raw signatures, not keccak256 hashed - hash them before use
 export const EVENT_SIGNATURES = {
-	ProtocolExecution: 'ProtocolExecution(address,address,uint8,address,uint256,address,uint256,uint256)',
+	ProtocolExecution: 'ProtocolExecution(address,address,uint8,address[],uint256[],address[],uint256[],uint256)',
 	TransferExecuted: 'TransferExecuted(address,address,address,uint256,uint256)',
 	SafeValueUpdated: 'SafeValueUpdated(uint256,uint256)',
-	AcquiredBalanceUpdated: 'AcquiredBalanceUpdated(address,address,uint256,uint256)',
+	AcquiredBalanceUpdated: 'AcquiredBalanceUpdated(address,address,uint256)',
 }

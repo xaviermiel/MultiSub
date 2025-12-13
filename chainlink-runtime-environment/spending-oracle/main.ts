@@ -147,7 +147,7 @@ const TRANSFER_EXECUTED_EVENT_SIG = keccak256(
 )
 
 const ACQUIRED_BALANCE_UPDATED_EVENT_SIG = keccak256(
-	toHex('AcquiredBalanceUpdated(address,address,uint256,uint256)')
+	toHex('AcquiredBalanceUpdated(address,address,uint256)')
 )
 
 // ============ Helper Functions ============
@@ -442,6 +442,8 @@ const getBlockTimestamps = (
 
 /**
  * Query historical ProtocolExecution events from the past 24h
+ * Uses 2x the lookback range to discover tokens that may have acquired balance
+ * even if the original acquisition is outside the current window
  */
 const queryHistoricalEvents = (
 	runtime: Runtime<Config>,
@@ -450,7 +452,7 @@ const queryHistoricalEvents = (
 	const evmClient = createEvmClient(runtime)
 	const events: ProtocolExecutionEvent[] = []
 
-	runtime.log(`Querying historical events (last ${runtime.config.blocksToLookBack} blocks)...`)
+	runtime.log(`Querying historical events (last ${runtime.config.blocksToLookBack * 2} blocks)...`)
 
 	try {
 		// Get current finalized block number
@@ -460,7 +462,8 @@ const queryHistoricalEvents = (
 			return events
 		}
 
-		const fromBlock = currentBlock - BigInt(runtime.config.blocksToLookBack)
+		// Use 2x the lookback range to discover tokens that may have acquired balance
+		const fromBlock = currentBlock - BigInt(runtime.config.blocksToLookBack * 2)
 		runtime.log(`Block range: ${fromBlock} to ${currentBlock}`)
 
 		// Build topics array for filterLogs
@@ -681,6 +684,8 @@ const parseTransferExecutedEvent = (log: any): TransferExecutedEvent => {
 
 /**
  * Query historical TransferExecuted events from the past 24h
+ * Uses 2x the lookback range to discover tokens that may have acquired balance
+ * even if the original acquisition is outside the current window
  */
 const queryTransferEvents = (
 	runtime: Runtime<Config>,
@@ -689,7 +694,7 @@ const queryTransferEvents = (
 	const evmClient = createEvmClient(runtime)
 	const events: TransferExecutedEvent[] = []
 
-	runtime.log(`Querying transfer events (last ${runtime.config.blocksToLookBack} blocks)...`)
+	runtime.log(`Querying transfer events (last ${runtime.config.blocksToLookBack * 2} blocks)...`)
 
 	try {
 		const currentBlock = getCurrentBlockNumber(runtime)
@@ -698,7 +703,8 @@ const queryTransferEvents = (
 			return events
 		}
 
-		const fromBlock = currentBlock - BigInt(runtime.config.blocksToLookBack)
+		// Use 2x the lookback range to discover tokens that may have acquired balance
+		const fromBlock = currentBlock - BigInt(runtime.config.blocksToLookBack * 2)
 
 		const topics: Array<{ topic: string[] }> = [
 			{ topic: [TRANSFER_EXECUTED_EVENT_SIG] },
@@ -1176,11 +1182,12 @@ const buildSubAccountState = (
 
 		// Sum remaining valid balance
 		const validBalance = getValidQueueBalance(queue, currentTimestamp, windowDuration)
-		state.acquiredBalances.set(token, validBalance)
-
+		// Only store non-zero balances - stale balances are cleared via queryHistoricalAcquiredTokens
 		if (validBalance > 0n) {
-			runtime.log(`  Token ${token}: acquired balance = ${validBalance}`)
+			state.acquiredBalances.set(token, validBalance)
 		}
+
+		runtime.log(`  Token ${token}: acquired balance = ${validBalance}`)
 	}
 
 	// Store queues in state for potential debugging
