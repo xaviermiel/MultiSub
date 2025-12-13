@@ -1148,6 +1148,8 @@ const buildSubAccountState = (
 						const outputTimestamp = matchedOriginalTimestamp || event.timestamp
 						runtime.log(`  ${OperationType[event.opType]} matched: ${matchedAmount} ${tokenOut} inherits original timestamp ${outputTimestamp}`)
 						addToQueue(outputQueue, matchedAmount, outputTimestamp)
+					} else {
+						runtime.log(`  ${OperationType[event.opType]} NOT matched: no matching deposit found for token ${tokenOut}`)
 					}
 				}
 			}
