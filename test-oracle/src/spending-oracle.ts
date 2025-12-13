@@ -61,6 +61,9 @@ interface DepositRecord {
   tokenIn: Address
   amountIn: bigint
   remainingAmount: bigint  // Tracks how much of the deposit hasn't been withdrawn yet
+  tokenOut: Address        // Output token received from deposit (e.g., aToken, LP token)
+  amountOut: bigint        // Amount of output token received
+  remainingOutputAmount: bigint  // Tracks how much output hasn't been consumed by withdrawal
   timestamp: bigint  // When the deposit happened
   originalAcquisitionTimestamp: bigint  // When the tokens were originally acquired (for FIFO inheritance)
 }
@@ -578,7 +581,7 @@ function buildSubAccountState(
 
       // Track deposits for withdrawal matching
       // Store the original acquisition timestamp so withdrawals inherit it correctly
-      // For multi-token deposits (LP), create a record for each input token
+      // For multi-token deposits (LP), create a record for each input/output token pair
       if (event.opType === OperationType.DEPOSIT) {
         // Find the oldest original timestamp from consumed acquired tokens
         // If no acquired tokens were consumed, use the deposit timestamp (it's new spending)
@@ -591,11 +594,16 @@ function buildSubAccountState(
           log(`  DEPOSIT: storing original acquisition timestamp ${originalAcquisitionTimestamp} for future withdrawal`)
         }
 
-        // Create a deposit record for each input token
+        // Create a deposit record linking input token to output token
+        // This allows us to consume the output token (e.g., aLINK) when withdrawing the input token (LINK)
         for (let i = 0; i < event.tokensIn.length; i++) {
           const tokenIn = event.tokensIn[i]
           const amountIn = event.amountsIn[i]
           if (amountIn <= 0n) continue
+
+          // Find corresponding output token (same index if available, otherwise first output)
+          const tokenOut = event.tokensOut[i] || event.tokensOut[0] || ('0x' as Address)
+          const amountOut = event.amountsOut[i] || event.amountsOut[0] || 0n
 
           state.depositRecords.push({
             subAccount: event.subAccount,
@@ -603,6 +611,9 @@ function buildSubAccountState(
             tokenIn: tokenIn,
             amountIn: amountIn,
             remainingAmount: amountIn,
+            tokenOut: tokenOut,
+            amountOut: amountOut,
+            remainingOutputAmount: amountOut,
             timestamp: event.timestamp,
             originalAcquisitionTimestamp,
           })
@@ -677,6 +688,9 @@ function buildSubAccountState(
           let remainingToMatch = amountOut
           let matchedOriginalTimestamp: bigint | null = null
 
+          // Track output tokens to consume from acquired queue (e.g., aLINK when withdrawing LINK)
+          const outputTokensToConsume: { token: Address; amount: bigint }[] = []
+
           for (const deposit of state.depositRecords) {
             if (remainingToMatch <= 0n) break
 
@@ -692,6 +706,25 @@ function buildSubAccountState(
               deposit.remainingAmount -= consumeAmount
               remainingToMatch -= consumeAmount
 
+              // Calculate proportional output token consumption (e.g., aLINK)
+              // If we're withdrawing 50% of the deposited amount, consume 50% of the output token
+              if (deposit.tokenOut && deposit.tokenOut !== '0x' && deposit.remainingOutputAmount > 0n) {
+                const ratio = (consumeAmount * 10000n) / deposit.amountIn
+                const outputToConsume = (deposit.amountOut * ratio) / 10000n
+                const actualConsume = outputToConsume > deposit.remainingOutputAmount
+                  ? deposit.remainingOutputAmount
+                  : outputToConsume
+
+                if (actualConsume > 0n) {
+                  deposit.remainingOutputAmount -= actualConsume
+                  outputTokensToConsume.push({
+                    token: deposit.tokenOut.toLowerCase() as Address,
+                    amount: actualConsume
+                  })
+                  log(`  ${OperationType[event.opType]} will consume ${actualConsume} ${deposit.tokenOut} (deposit output token)`)
+                }
+              }
+
               // Track the original acquisition timestamp for inheritance (not the deposit timestamp)
               // This ensures the full chain of acquired status is preserved:
               // Original swap → deposit → withdrawal all share the same original timestamp
@@ -701,6 +734,16 @@ function buildSubAccountState(
 
               log(`  ${OperationType[event.opType]} consuming ${consumeAmount} from deposit (original acquisition: ${deposit.originalAcquisitionTimestamp})`)
             }
+          }
+
+          // Consume the deposit's output tokens (e.g., aLINK) from the acquired queue
+          // These tokens were added when depositing and should be removed when withdrawing
+          for (const { token, amount } of outputTokensToConsume) {
+            const outputTokenQueue = getQueue(token)
+            tokensWithAcquiredHistory.add(token)
+            const { consumed } = consumeFromQueue(outputTokenQueue, amount, event.timestamp, windowDuration)
+            const totalConsumed = consumed.reduce((sum, e) => sum + e.amount, 0n)
+            log(`  ${OperationType[event.opType]} consumed ${totalConsumed} ${token} from acquired queue (deposit receipt token)`)
           }
 
           const matchedAmount = amountOut - remainingToMatch
