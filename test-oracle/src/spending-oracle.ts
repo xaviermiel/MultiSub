@@ -121,9 +121,8 @@ let account: ReturnType<typeof privateKeyToAccount>
 // Track last processed block for event polling
 let lastProcessedBlock = 0n
 
-// Prevent overlapping operations
-let isPolling = false
-let isRefreshing = false
+// Prevent overlapping operations - single mutex for all state updates
+let isProcessing = false
 
 function initWalletClient() {
   account = privateKeyToAccount(config.privateKey)
@@ -755,8 +754,40 @@ function buildSubAccountState(
             const outputTimestamp = matchedOriginalTimestamp || event.timestamp
             log(`  ${OperationType[event.opType]} matched: ${matchedAmount} inherits original timestamp ${outputTimestamp}`)
             addToQueue(outputQueue, matchedAmount, outputTimestamp)
-          } else {
-            log(`  ${OperationType[event.opType]} NOT matched: no matching deposit found for token ${tokenOut}`)
+          }
+
+          // Handle unmatched amount
+          if (remainingToMatch > 0n) {
+            if (event.opType === OperationType.CLAIM) {
+              // CLAIM rewards should only be acquired if there's a matching deposit for this target
+              // (i.e., the subaccount created the position that generates rewards)
+              const hasMatchingDeposit = state.depositRecords.some(
+                d => d.target.toLowerCase() === event.target.toLowerCase() &&
+                     d.subAccount.toLowerCase() === event.subAccount.toLowerCase()
+              )
+
+              if (hasMatchingDeposit) {
+                // Find the oldest deposit timestamp for this target to inherit
+                const oldestDepositTimestamp = state.depositRecords
+                  .filter(d => d.target.toLowerCase() === event.target.toLowerCase() &&
+                              d.subAccount.toLowerCase() === event.subAccount.toLowerCase())
+                  .reduce((oldest, d) => d.originalAcquisitionTimestamp < oldest ? d.originalAcquisitionTimestamp : oldest,
+                          event.timestamp)
+
+                tokensWithAcquiredHistory.add(tokenOutLower)
+                const outputQueue = getQueue(tokenOutLower)
+                log(`  CLAIM: ${remainingToMatch} ${tokenOut} is acquired (has deposit at target), inherits timestamp ${oldestDepositTimestamp}`)
+                addToQueue(outputQueue, remainingToMatch, oldestDepositTimestamp)
+              } else {
+                // No matching deposit - claim is from multisig's position, not subaccount's
+                log(`  CLAIM: ${remainingToMatch} ${tokenOut} NOT acquired (no matching deposit from subaccount)`)
+              }
+            } else {
+              // Unmatched WITHDRAW - the LP/receipt tokens weren't acquired by subaccount
+              // This means either: external aTokens sent to Safe, or deposit was outside window/by multisig
+              // In either case, the withdrawn tokens belong to the multisig, not subaccount
+              log(`  WITHDRAW unmatched: ${remainingToMatch} ${tokenOut} NOT acquired (no matching deposit from subaccount)`)
+            }
           }
         }
       }
@@ -909,11 +940,11 @@ async function pushBatchUpdate(
 // ============ Event Polling ============
 
 async function pollForNewEvents() {
-  // Prevent overlapping polls
-  if (isPolling) {
+  // Prevent overlapping operations (shared mutex with cron refresh)
+  if (isProcessing) {
     return
   }
-  isPolling = true
+  isProcessing = true
 
   try {
     const currentBlock = await publicClient.getBlockNumber()
@@ -924,7 +955,7 @@ async function pollForNewEvents() {
     }
 
     if (currentBlock <= lastProcessedBlock) {
-      isPolling = false
+      isProcessing = false
       return // No new blocks
     }
 
@@ -959,7 +990,7 @@ async function pollForNewEvents() {
   } catch (error) {
     log(`Error polling for events: ${error}`)
   } finally {
-    isPolling = false
+    isProcessing = false
   }
 }
 
@@ -993,12 +1024,12 @@ async function processSubaccount(subAccount: Address, currentBlock?: bigint) {
 // ============ Cron Handler ============
 
 async function onCronRefresh() {
-  // Prevent overlapping refreshes
-  if (isRefreshing) {
-    log('Skipping cron refresh - previous refresh still running')
+  // Prevent overlapping operations (shared mutex with polling)
+  if (isProcessing) {
+    log('Skipping cron refresh - another operation is running')
     return
   }
-  isRefreshing = true
+  isProcessing = true
 
   log('=== Spending Oracle: Periodic Refresh ===')
 
@@ -1034,7 +1065,7 @@ async function onCronRefresh() {
   } catch (error) {
     log(`Error in periodic refresh: ${error}`)
   } finally {
-    isRefreshing = false
+    isProcessing = false
   }
 }
 
