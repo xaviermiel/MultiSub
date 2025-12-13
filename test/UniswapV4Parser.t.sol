@@ -447,6 +447,60 @@ contract UniswapV4ParserTest is Test {
         assertEq(opType, 3, "BURN_POSITION should be WITHDRAW (3)");
     }
 
+    function testDecreaseLiquidityExtractsOutputTokens() public {
+        // Setup mock position with known tokens
+        uint256 tokenId = 123;
+        mockPositionManager.setPosition(tokenId, USDC, WETH);
+
+        bytes memory actions = new bytes(1);
+        actions[0] = bytes1(parser.DECREASE_LIQUIDITY());
+
+        // DecreaseLiquidityParams: (uint256 tokenId, uint128 liquidity, uint128 amount0Min, uint128 amount1Min, bytes hookData)
+        bytes[] memory params = new bytes[](1);
+        params[0] = abi.encode(tokenId, uint128(1000e6), uint128(0), uint128(0), "");
+
+        bytes memory unlockData = abi.encode(actions, params);
+
+        bytes memory data = abi.encodeWithSelector(
+            parser.MODIFY_LIQUIDITIES_SELECTOR(),
+            unlockData,
+            block.timestamp + 1
+        );
+
+        // Extract output tokens - should query position manager
+        address[] memory outputTokens = parser.extractOutputTokens(address(mockPositionManager), data);
+        assertEq(outputTokens.length, 2, "Should have 2 output tokens for DECREASE_LIQUIDITY");
+        assertEq(outputTokens[0], USDC, "Token0 should be USDC from position");
+        assertEq(outputTokens[1], WETH, "Token1 should be WETH from position");
+    }
+
+    function testBurnPositionExtractsOutputTokens() public {
+        // Setup mock position with known tokens
+        uint256 tokenId = 456;
+        mockPositionManager.setPosition(tokenId, USDC, WETH);
+
+        bytes memory actions = new bytes(1);
+        actions[0] = bytes1(parser.BURN_POSITION());
+
+        // BurnPositionParams: (uint256 tokenId, uint128 amount0Min, uint128 amount1Min, bytes hookData)
+        bytes[] memory params = new bytes[](1);
+        params[0] = abi.encode(tokenId, uint128(0), uint128(0), "");
+
+        bytes memory unlockData = abi.encode(actions, params);
+
+        bytes memory data = abi.encodeWithSelector(
+            parser.MODIFY_LIQUIDITIES_SELECTOR(),
+            unlockData,
+            block.timestamp + 1
+        );
+
+        // Extract output tokens - should query position manager
+        address[] memory outputTokens = parser.extractOutputTokens(address(mockPositionManager), data);
+        assertEq(outputTokens.length, 2, "Should have 2 output tokens for BURN_POSITION");
+        assertEq(outputTokens[0], USDC, "Token0 should be USDC from position");
+        assertEq(outputTokens[1], WETH, "Token1 should be WETH from position");
+    }
+
     // ============ MINT_POSITION Operation Type Tests ============
 
     function testMintPositionIsDeposit() public view {

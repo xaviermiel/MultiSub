@@ -195,7 +195,7 @@ contract UniswapV4Parser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractOutputTokens(address, bytes calldata data) external pure override returns (address[] memory tokens) {
+    function extractOutputTokens(address target, bytes calldata data) external view override returns (address[] memory tokens) {
         bytes4 selector = bytes4(data[:4]);
         if (selector != MODIFY_LIQUIDITIES_SELECTOR) revert UnsupportedSelector();
 
@@ -230,10 +230,17 @@ contract UniswapV4Parser is ICalldataParser {
                     return tokens;
                 }
             } else if (action == DECREASE_LIQUIDITY || action == BURN_POSITION) {
-                // These return both tokens from the position
-                // Can't determine tokens without on-chain query - return empty array
-                // Oracle should track balance changes for these operations
-                return new address[](0);
+                // Query position for output tokens (both tokens from the position)
+                // DECREASE_LIQUIDITY params: (uint256 tokenId, uint128 liquidity, uint128 amount0Min, uint128 amount1Min, bytes hookData)
+                // BURN_POSITION params: (uint256 tokenId, uint128 amount0Min, uint128 amount1Min, bytes hookData)
+                if (params[i].length >= 32) {
+                    uint256 tokenId = _readUint256(params[i], 0);
+                    (address currency0, address currency1,,,,,,) = IV4PositionManager(target).getPoolAndPositionInfo(tokenId);
+                    tokens = new address[](2);
+                    tokens[0] = currency0;
+                    tokens[1] = currency1;
+                    return tokens;
+                }
             }
         }
 
