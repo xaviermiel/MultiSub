@@ -91,6 +91,101 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         module.setSubAccountLimits(subAccount1, 15000, 2 days); // >100%
     }
 
+    function testSetSubAccountLimitsCapsSpendingAllowance() public {
+        // Safe value is $1,000,000 (set in base setUp)
+        // Set initial limits at 10% = $100,000 max
+        module.setSubAccountLimits(subAccount1, 1000, 1 days);
+
+        // Oracle sets spending allowance to $50,000 (remaining)
+        module.updateSpendingAllowance(subAccount1, 50_000 * 10**18);
+        assertEq(module.getSpendingAllowance(subAccount1), 50_000 * 10**18);
+
+        // Reduce limits to 4% = $40,000 max (less than remaining $50,000)
+        // Remaining should be capped to $40,000
+        module.setSubAccountLimits(subAccount1, 400, 1 days);
+
+        assertEq(module.getSpendingAllowance(subAccount1), 40_000 * 10**18);
+    }
+
+    function testSetSubAccountLimitsDoesNotIncreaseAllowance() public {
+        // Safe value is $1,000,000 (set in base setUp)
+        // Set initial limits at 10% = $100,000 max
+        module.setSubAccountLimits(subAccount1, 1000, 1 days);
+
+        // Oracle sets spending allowance to $50,000 (remaining)
+        module.updateSpendingAllowance(subAccount1, 50_000 * 10**18);
+        assertEq(module.getSpendingAllowance(subAccount1), 50_000 * 10**18);
+
+        // Increase limits to 7% = $70,000 max (more than remaining $50,000)
+        // Remaining should stay at $50,000 (no auto-increase)
+        module.setSubAccountLimits(subAccount1, 700, 1 days);
+
+        assertEq(module.getSpendingAllowance(subAccount1), 50_000 * 10**18);
+    }
+
+    function testSetSubAccountLimitsEmitsEventOnCap() public {
+        // Safe value is $1,000,000
+        module.setSubAccountLimits(subAccount1, 1000, 1 days); // 10% = $100k max
+        module.updateSpendingAllowance(subAccount1, 50_000 * 10**18);
+
+        // Expect SpendingAllowanceUpdated event when capping
+        vm.expectEmit(true, false, false, true);
+        emit DeFiInteractorModule.SpendingAllowanceUpdated(subAccount1, 40_000 * 10**18);
+
+        module.setSubAccountLimits(subAccount1, 400, 1 days); // 4% = $40k max
+    }
+
+    function testSetSubAccountLimitsNoCapWhenZeroSafeValue() public {
+        // Deploy a fresh module with zero safe value
+        DeFiInteractorModule freshModule = new DeFiInteractorModule(
+            address(safe),
+            address(this),
+            address(this)
+        );
+
+        // Safe value is 0 (not initialized)
+        (uint256 totalValue,,) = freshModule.getSafeValue();
+        assertEq(totalValue, 0);
+
+        // Even if we had some allowance, it shouldn't be modified since safeValue is 0
+        // The capping logic is skipped when safeValue.totalValueUSD == 0
+        freshModule.setSubAccountLimits(subAccount1, 500, 1 days);
+
+        // Allowance should remain 0 (unchanged, not capped)
+        assertEq(freshModule.getSpendingAllowance(subAccount1), 0);
+    }
+
+    function testSetSubAccountLimitsNoCapWhenStaleSafeValue() public {
+        // Safe value is $1,000,000 and fresh
+        module.setSubAccountLimits(subAccount1, 1000, 1 days); // 10% = $100k max
+        module.updateSpendingAllowance(subAccount1, 80_000 * 10**18); // $80k remaining
+
+        // Fast forward past Safe value staleness (maxSafeValueAge is 60 minutes)
+        vm.warp(block.timestamp + 61 minutes);
+
+        // Now Safe value is stale. If we reduce limits to 5% ($50k max),
+        // the allowance should NOT be capped because Safe value is stale
+        // (using stale value could be dangerous if real value dropped)
+        module.setSubAccountLimits(subAccount1, 500, 1 days);
+
+        // Allowance should remain $80k (not capped due to stale Safe value)
+        assertEq(module.getSpendingAllowance(subAccount1), 80_000 * 10**18);
+    }
+
+    function testSetSubAccountLimitsExactMatch() public {
+        // Safe value is $1,000,000
+        module.setSubAccountLimits(subAccount1, 1000, 1 days); // 10% = $100k max
+
+        // Set remaining exactly at what the new max will be
+        module.updateSpendingAllowance(subAccount1, 50_000 * 10**18);
+
+        // Set new max to exactly $50,000 (5%)
+        module.setSubAccountLimits(subAccount1, 500, 1 days);
+
+        // Should remain exactly $50,000 (not capped, just equal)
+        assertEq(module.getSpendingAllowance(subAccount1), 50_000 * 10**18);
+    }
+
     // ============ Allowed Addresses Tests ============
 
     function testSetAllowedAddresses() public {

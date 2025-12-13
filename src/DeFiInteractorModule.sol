@@ -328,6 +328,20 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             isConfigured: true
         });
 
+        // Cap spending allowance to new maximum if it exceeds it
+        // - If remaining > new max: cap to new max (can't keep more than allowed)
+        // - If remaining <= new max: keep as is (don't auto-increase)
+        // Only cap if Safe value is fresh (stale value could be dangerously outdated)
+        if (safeValue.totalValueUSD > 0 &&
+            safeValue.lastUpdated > 0 &&
+            block.timestamp - safeValue.lastUpdated <= maxSafeValueAge) {
+            uint256 newMaxAllowance = (safeValue.totalValueUSD * maxSpendingBps) / 10000;
+            if (spendingAllowance[subAccount] > newMaxAllowance) {
+                spendingAllowance[subAccount] = newMaxAllowance;
+                emit SpendingAllowanceUpdated(subAccount, newMaxAllowance);
+            }
+        }
+
         emit SubAccountLimitsSet(subAccount, maxSpendingBps, windowDuration);
     }
 
