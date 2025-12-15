@@ -88,7 +88,7 @@ contract ConfigureSubaccount is Script, SafeTxHelper {
 
         // 4. Whitelist protocol addresses
         console.log("\n4. Whitelisting protocol addresses...");
-        address[] memory protocols = new address[](7);
+        address[] memory protocols = new address[](8);
         protocols[0] = AAVE_V3_POOL;
         protocols[1] = AAVE_V3_REWARDS;
         protocols[2] = UNISWAP_V3_ROUTER;
