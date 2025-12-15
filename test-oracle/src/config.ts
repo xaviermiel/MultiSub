@@ -70,8 +70,8 @@ export const config = {
   moduleAddress: process.env.MODULE_ADDRESS as `0x${string}`,
 
   // Cron schedules
-  safeValueCron: process.env.SAFE_VALUE_CRON || '0 */30 * * * *', // Every 30 minutes
-  spendingOracleCron: process.env.SPENDING_ORACLE_CRON || '0 */5 * * * *', // Every 5 minutes
+  safeValueCron: process.env.SAFE_VALUE_CRON || '0 */10 * * * *', // Every 30 minutes
+  spendingOracleCron: process.env.SPENDING_ORACLE_CRON || '0 */2 * * * *', // Every 5 minutes
 
   // Polling (15s default - slightly longer than Sepolia's ~12s block time)
   pollIntervalMs: parseInt(process.env.POLL_INTERVAL_MS || '15000'),
