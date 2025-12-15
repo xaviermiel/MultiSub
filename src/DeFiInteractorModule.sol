@@ -199,6 +199,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     error LengthMismatch();
     error ExceedsMaxBps();
     error InvalidRecipient(address recipient, address expected);
+    error CannotBeSubaccount(address account);
 
     // ============ Modifiers ============
 
@@ -238,6 +239,8 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
     function grantRole(address member, uint16 roleId) external onlyOwner {
         if (member == address(0)) revert InvalidAddress();
+        // Prevent Safe and Module from being subaccounts
+        if (member == avatar || member == address(this)) revert CannotBeSubaccount(member);
         if (!subAccountRoles[member][roleId]) {
             subAccountRoles[member][roleId] = true;
             subaccounts[roleId].push(member);
@@ -318,6 +321,8 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         uint256 windowDuration
     ) external onlyOwner {
         if (subAccount == address(0)) revert InvalidAddress();
+        // Prevent Safe and Module from being subaccounts
+        if (subAccount == avatar || subAccount == address(this)) revert CannotBeSubaccount(subAccount);
         if (maxSpendingBps > 10000 || windowDuration < 1 hours) {
             revert InvalidLimitConfiguration();
         }
