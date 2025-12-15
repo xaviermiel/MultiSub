@@ -31,6 +31,7 @@ contract ConfigureSubaccount is Script, SafeTxHelper {
     address constant NONFUNGIBLE_POSITION_MANAGER = 0x1238536071E1c677A632429e3655c799b22cDA52;
     address constant UNISWAP_V4_POSITION_MANAGER = 0x429ba70129df741B2Ca2a85BC3A2a3328e5c09b4;
     address constant UNIVERSAL_ROUTER = 0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD;
+    address constant PANCAKESWAP_UNIVERSAL_ROUTER = 0x55D32fa7Da7290838347bc97cb7fAD4992672255;
     address constant MERKL_DISTRIBUTOR = 0x3Ef3D8bA38EBe18DB133cEc108f4D14CE00Dd9Ae;
 
     function run() external {
@@ -94,7 +95,8 @@ contract ConfigureSubaccount is Script, SafeTxHelper {
         protocols[3] = NONFUNGIBLE_POSITION_MANAGER;
         protocols[4] = UNISWAP_V4_POSITION_MANAGER;
         protocols[5] = UNIVERSAL_ROUTER;
-        protocols[6] = MERKL_DISTRIBUTOR;
+        protocols[6] = PANCAKESWAP_UNIVERSAL_ROUTER;
+        protocols[7] = MERKL_DISTRIBUTOR;
 
         _executeSafeTx(safe, module, abi.encodeWithSignature(
             "setAllowedAddresses(address,address[],bool)",
