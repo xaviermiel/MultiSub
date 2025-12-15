@@ -200,6 +200,9 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     error ExceedsMaxBps();
     error InvalidRecipient(address recipient, address expected);
     error CannotBeSubaccount(address account);
+    error CannotBeOracle(address account);
+    error CannotWhitelistCoreAddress(address account);
+    error CannotRegisterParserForCoreAddress(address account);
 
     // ============ Modifiers ============
 
@@ -239,8 +242,9 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
     function grantRole(address member, uint16 roleId) external onlyOwner {
         if (member == address(0)) revert InvalidAddress();
-        // Prevent Safe and Module from being subaccounts
+        // Prevent Safe, Module, and Oracle from being subaccounts
         if (member == avatar || member == address(this)) revert CannotBeSubaccount(member);
+        if (member == authorizedOracle) revert CannotBeSubaccount(member);
         if (!subAccountRoles[member][roleId]) {
             subAccountRoles[member][roleId] = true;
             subaccounts[roleId].push(member);
@@ -309,6 +313,8 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
      * @param parser The parser contract address
      */
     function registerParser(address protocol, address parser) external onlyOwner {
+        // Prevent registering parser for Safe or Module (could enable self-calls)
+        if (protocol == avatar || protocol == address(this)) revert CannotRegisterParserForCoreAddress(protocol);
         protocolParsers[protocol] = ICalldataParser(parser);
         emit ParserRegistered(protocol, parser);
     }
@@ -368,6 +374,8 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     ) external onlyOwner {
         if (subAccount == address(0)) revert InvalidAddress();
         for (uint256 i = 0; i < targets.length; i++) {
+            // Prevent whitelisting Safe or Module as targets
+            if (targets[i] == avatar || targets[i] == address(this)) revert CannotWhitelistCoreAddress(targets[i]);
             if (targets[i] == address(0)) revert InvalidAddress();
             allowedAddresses[subAccount][targets[i]] = allowed;
         }
@@ -930,6 +938,10 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
     function setAuthorizedOracle(address newOracle) external onlyOwner {
         if (newOracle == address(0)) revert InvalidOracleAddress();
+        // Prevent Safe or Module from being oracle
+        if (newOracle == avatar || newOracle == address(this)) revert CannotBeOracle(newOracle);
+        // Prevent subaccounts from being oracle (check DEFI_EXECUTE_ROLE)
+        if (subAccountRoles[newOracle][DEFI_EXECUTE_ROLE]) revert CannotBeOracle(newOracle);
         address oldOracle = authorizedOracle;
         authorizedOracle = newOracle;
         emit OracleUpdated(oldOracle, newOracle);
