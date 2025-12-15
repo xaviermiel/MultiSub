@@ -30,7 +30,7 @@ import { DeFiInteractorModuleABI, OperationType } from './abi.js'
 
 // ============ Types ============
 
-interface ProtocolExecutionEvent {
+export interface ProtocolExecutionEvent {
   subAccount: Address
   target: Address
   opType: OperationType
@@ -44,7 +44,7 @@ interface ProtocolExecutionEvent {
   logIndex: number
 }
 
-interface TransferExecutedEvent {
+export interface TransferExecutedEvent {
   subAccount: Address
   token: Address
   recipient: Address
@@ -55,7 +55,7 @@ interface TransferExecutedEvent {
   logIndex: number
 }
 
-interface DepositRecord {
+export interface DepositRecord {
   subAccount: Address
   target: Address
   tokenIn: Address
@@ -73,7 +73,7 @@ interface DepositRecord {
  * Tracks the original acquisition timestamp so tokens expire together
  * when swapped (output inherits input's original timestamp)
  */
-interface AcquiredBalanceEntry {
+export interface AcquiredBalanceEntry {
   amount: bigint
   originalTimestamp: bigint  // When the tokens were originally acquired (for expiry calculation)
 }
@@ -82,9 +82,9 @@ interface AcquiredBalanceEntry {
  * FIFO queue for each token's acquired balance
  * Oldest entries are consumed first when spending
  */
-type AcquiredBalanceQueue = AcquiredBalanceEntry[]
+export type AcquiredBalanceQueue = AcquiredBalanceEntry[]
 
-interface SubAccountState {
+export interface SubAccountState {
   spendingRecords: { amount: bigint; timestamp: bigint }[]
   depositRecords: DepositRecord[]
   totalSpendingInWindow: bigint
@@ -398,7 +398,7 @@ async function queryHistoricalAcquiredTokens(subAccount: Address): Promise<Set<A
  * Returns the entries consumed with their original timestamps
  * Only consumes non-expired entries based on the event timestamp
  */
-function consumeFromQueue(
+export function consumeFromQueue(
   queue: AcquiredBalanceQueue,
   amount: bigint,
   eventTimestamp: bigint,
@@ -436,7 +436,7 @@ function consumeFromQueue(
 /**
  * Add tokens to a FIFO queue with the given original timestamp
  */
-function addToQueue(
+export function addToQueue(
   queue: AcquiredBalanceQueue,
   amount: bigint,
   originalTimestamp: bigint
@@ -448,7 +448,7 @@ function addToQueue(
 /**
  * Get total amount in queue that hasn't expired
  */
-function getValidQueueBalance(
+export function getValidQueueBalance(
   queue: AcquiredBalanceQueue,
   currentTimestamp: bigint,
   windowDuration: bigint
@@ -466,7 +466,7 @@ function getValidQueueBalance(
 /**
  * Remove expired entries from queue
  */
-function pruneExpiredEntries(
+export function pruneExpiredEntries(
   queue: AcquiredBalanceQueue,
   currentTimestamp: bigint,
   windowDuration: bigint
@@ -480,11 +480,11 @@ function pruneExpiredEntries(
 // ============ State Building ============
 
 // Unified event type for chronological processing
-type UnifiedEvent =
+export type UnifiedEvent =
   | { type: 'protocol'; event: ProtocolExecutionEvent }
   | { type: 'transfer'; event: TransferExecutedEvent }
 
-function buildSubAccountState(
+export function buildSubAccountState(
   events: ProtocolExecutionEvent[],
   transferEvents: TransferExecutedEvent[],
   subAccount: Address,
