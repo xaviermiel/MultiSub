@@ -861,11 +861,24 @@ async function calculateSpendingAllowance(
 // Threshold for considering allowance values "equal" (0% tolerance for allowances)
 const ALLOWANCE_CHANGE_THRESHOLD_BPS = 0n // 0%
 
-async function pushBatchUpdate(
+// Pending transaction tracking for batch submissions
+interface PendingTransaction {
+  hash: `0x${string}`
+  subAccount: Address
+}
+
+let pendingTransactions: PendingTransaction[] = []
+let currentNonce: number | null = null
+
+/**
+ * Prepare a batch update (check if changes needed)
+ * Returns the transaction parameters if update is needed, null otherwise
+ */
+async function prepareBatchUpdate(
   subAccount: Address,
   newAllowance: bigint,
   acquiredBalances: Map<Address, bigint>
-): Promise<string | null> {
+): Promise<{ tokens: Address[]; balances: bigint[]; allowanceChanged: boolean } | null> {
   // Get current on-chain values
   const onChainAllowance = await getOnChainSpendingAllowance(subAccount)
 
@@ -912,8 +925,22 @@ async function pushBatchUpdate(
     return null
   }
 
-  log(`Pushing batch update: subAccount=${subAccount}, allowance=${formatUnits(newAllowance, 18)} (was ${formatUnits(onChainAllowance, 18)}), tokens=${tokens.length}`)
+  log(`Preparing batch update: subAccount=${subAccount}, allowance=${formatUnits(newAllowance, 18)} (was ${formatUnits(onChainAllowance, 18)}), tokens=${tokens.length}`)
 
+  return { tokens, balances, allowanceChanged }
+}
+
+/**
+ * Submit a batch update transaction without waiting for confirmation
+ * Uses nonce management for parallel submission
+ */
+async function submitBatchUpdate(
+  subAccount: Address,
+  newAllowance: bigint,
+  tokens: Address[],
+  balances: bigint[],
+  nonce: number
+): Promise<`0x${string}`> {
   try {
     const hash = await walletClient.writeContract({
       chain: config.chain,
@@ -923,18 +950,82 @@ async function pushBatchUpdate(
       functionName: 'batchUpdate',
       args: [subAccount, newAllowance, tokens, balances],
       gas: config.gasLimit,
+      nonce,
     })
 
-    log(`Transaction submitted: ${hash}`)
-
-    const receipt = await publicClient.waitForTransactionReceipt({ hash })
-    log(`Transaction confirmed in block ${receipt.blockNumber}`)
-
+    log(`Transaction submitted: ${hash} (nonce: ${nonce})`)
     return hash
   } catch (error) {
-    log(`Error pushing batch update: ${error}`)
+    log(`Error submitting batch update for ${subAccount}: ${error}`)
     throw error
   }
+}
+
+/**
+ * Wait for all pending transactions to confirm
+ */
+async function waitForPendingTransactions(): Promise<void> {
+  if (pendingTransactions.length === 0) return
+
+  log(`Waiting for ${pendingTransactions.length} pending transactions...`)
+
+  const results = await Promise.allSettled(
+    pendingTransactions.map(async (tx) => {
+      try {
+        const receipt = await publicClient.waitForTransactionReceipt({
+          hash: tx.hash,
+          timeout: 120_000 // 2 minute timeout
+        })
+        log(`Transaction ${tx.hash.slice(0, 10)}... confirmed in block ${receipt.blockNumber} (${tx.subAccount})`)
+        return receipt
+      } catch (error) {
+        log(`Transaction ${tx.hash.slice(0, 10)}... failed for ${tx.subAccount}: ${error}`)
+        throw error
+      }
+    })
+  )
+
+  // Log summary
+  const successful = results.filter(r => r.status === 'fulfilled').length
+  const failed = results.filter(r => r.status === 'rejected').length
+  log(`Transaction results: ${successful} confirmed, ${failed} failed`)
+
+  // Clear pending transactions
+  pendingTransactions = []
+  currentNonce = null
+}
+
+/**
+ * Legacy function for backward compatibility - prepares and submits with waiting
+ */
+async function pushBatchUpdate(
+  subAccount: Address,
+  newAllowance: bigint,
+  acquiredBalances: Map<Address, bigint>
+): Promise<string | null> {
+  const prepared = await prepareBatchUpdate(subAccount, newAllowance, acquiredBalances)
+  if (!prepared) return null
+
+  // Get nonce if not already tracking
+  if (currentNonce === null) {
+    currentNonce = await publicClient.getTransactionCount({ address: account.address })
+  }
+
+  const hash = await submitBatchUpdate(
+    subAccount,
+    newAllowance,
+    prepared.tokens,
+    prepared.balances,
+    currentNonce
+  )
+
+  // Increment nonce for next transaction
+  currentNonce++
+
+  // Track pending transaction
+  pendingTransactions.push({ hash, subAccount })
+
+  return hash
 }
 
 // ============ Event Polling ============
@@ -947,6 +1038,10 @@ async function pollForNewEvents() {
   isProcessing = true
 
   try {
+    // Reset nonce tracking at start of batch
+    currentNonce = null
+    pendingTransactions = []
+
     const currentBlock = await publicClient.getBlockNumber()
 
     if (lastProcessedBlock === 0n) {
@@ -980,7 +1075,7 @@ async function pollForNewEvents() {
         affectedSubaccounts.add(e.subAccount)
       }
 
-      // Process affected subaccounts sequentially to avoid nonce conflicts
+      // Process all affected subaccounts - transactions are submitted without waiting
       for (const subAccount of affectedSubaccounts) {
         // Skip if the subaccount is the module itself
         if (subAccount.toLowerCase() === config.moduleAddress.toLowerCase()) {
@@ -994,6 +1089,9 @@ async function pollForNewEvents() {
           log(`Error processing ${subAccount}: ${error}`)
         }
       }
+
+      // Wait for all pending transactions to confirm
+      await waitForPendingTransactions()
     }
 
     lastProcessedBlock = currentBlock
@@ -1044,6 +1142,10 @@ async function onCronRefresh() {
   log('=== Spending Oracle: Periodic Refresh ===')
 
   try {
+    // Reset nonce tracking at start of batch
+    currentNonce = null
+    pendingTransactions = []
+
     // Fetch subaccounts and current block in parallel
     const [subaccounts, currentBlock] = await Promise.all([
       getActiveSubaccounts(),
@@ -1056,7 +1158,7 @@ async function onCronRefresh() {
       return
     }
 
-    // Process subaccounts sequentially to avoid nonce conflicts
+    // Process all subaccounts - transactions are submitted without waiting
     for (const subAccount of subaccounts) {
       // Skip if the subaccount is the module itself (shouldn't happen but safety check)
       if (subAccount.toLowerCase() === config.moduleAddress.toLowerCase()) {
@@ -1071,6 +1173,9 @@ async function onCronRefresh() {
         log(`Error processing ${subAccount}: ${error}`)
       }
     }
+
+    // Wait for all pending transactions to confirm
+    await waitForPendingTransactions()
 
     log('=== Periodic Refresh Complete ===')
   } catch (error) {
