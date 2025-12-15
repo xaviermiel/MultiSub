@@ -342,25 +342,30 @@ async function writeSafeValueToChain(totalValueUSD: bigint): Promise<string> {
   }
 }
 
+// ============ Update Thresholds ============
+// Only update if value changed by more than this percentage
+const VALUE_CHANGE_THRESHOLD_BPS = BigInt(process.env.SAFE_VALUE_CHANGE_THRESHOLD_BPS || '100') // 1%
+
+// Always update if timestamp is older than this (in seconds)
+// This ensures the contract doesn't reject transactions due to stale data
+const MAX_STALENESS_SECONDS = BigInt(process.env.SAFE_VALUE_MAX_STALENESS_SECONDS || '3000') // 50 minutes
+
 /**
- * Get current on-chain safe value
+ * Get current on-chain safe value with timestamp
  */
-async function getOnChainSafeValue(): Promise<bigint> {
+async function getOnChainSafeValueWithTimestamp(): Promise<{ value: bigint; lastUpdated: bigint }> {
   try {
-    const [totalValueUSD] = await publicClient.readContract({
+    const [totalValueUSD, lastUpdated] = await publicClient.readContract({
       address: config.moduleAddress,
       abi: DeFiInteractorModuleABI,
       functionName: 'getSafeValue',
     })
-    return totalValueUSD
+    return { value: totalValueUSD, lastUpdated }
   } catch (error) {
     log(`Error reading on-chain safe value: ${error}`)
-    return 0n
+    return { value: 0n, lastUpdated: 0n }
   }
 }
-
-// // Threshold for considering values "equal" (0.1% tolerance to avoid tx for tiny changes)
-// const VALUE_CHANGE_THRESHOLD_BPS = 10n // 0.1%
 
 /**
  * Main cron job handler
@@ -369,11 +374,17 @@ async function onCronTrigger() {
   log('=== Safe Value Monitor: Starting check ===')
 
   try {
-    const [totalValueUSD, onChainValue] = await Promise.all([
+    const [totalValueUSD, onChainData] = await Promise.all([
       calculateSafeValue(),
-      getOnChainSafeValue(),
+      getOnChainSafeValueWithTimestamp(),
     ])
+
+    const { value: onChainValue, lastUpdated } = onChainData
+    const currentTimestamp = BigInt(Math.floor(Date.now() / 1000))
+    const timeSinceUpdate = currentTimestamp - lastUpdated
+
     log(`Total USD Value: $${formatUnits(totalValueUSD, 18)} (on-chain: $${formatUnits(onChainValue, 18)})`)
+    log(`Last updated: ${timeSinceUpdate}s ago (max staleness: ${MAX_STALENESS_SECONDS}s)`)
 
     if (totalValueUSD === 0n) {
       log('Skipping write - total value is 0')
@@ -381,17 +392,32 @@ async function onCronTrigger() {
       return
     }
 
-    // // Check if change is significant (more than 0.1% difference)
-    // const diff = totalValueUSD > onChainValue
-    //   ? totalValueUSD - onChainValue
-    //   : onChainValue - totalValueUSD
-    // const threshold = (onChainValue * VALUE_CHANGE_THRESHOLD_BPS) / 10000n
+    // Check if update is needed
+    const valueDiff = totalValueUSD > onChainValue
+      ? totalValueUSD - onChainValue
+      : onChainValue - totalValueUSD
+    const percentageThreshold = (onChainValue * VALUE_CHANGE_THRESHOLD_BPS) / 10000n
 
-    // if (diff <= threshold) {
-    //   log(`Value change (${formatUnits(diff, 18)}) below threshold (${formatUnits(threshold, 18)}) - updating timestamp only`)
-    // }
+    const exceedsPercentageThreshold = valueDiff > percentageThreshold
+    const isStale = timeSinceUpdate > MAX_STALENESS_SECONDS
 
-    // Always write to keep the timestamp fresh (required for tx)
+    const shouldUpdate = exceedsPercentageThreshold || isStale
+
+    if (!shouldUpdate) {
+      log(`Skipping update - value change within threshold:`)
+      log(`  Diff: $${formatUnits(valueDiff, 18)} (${(valueDiff * 10000n / (onChainValue || 1n))}bps, threshold: ${VALUE_CHANGE_THRESHOLD_BPS}bps)`)
+      log(`  Time since update: ${timeSinceUpdate}s (max: ${MAX_STALENESS_SECONDS}s)`)
+      log('=== Safe Value Monitor: Complete (no update needed) ===')
+      return
+    }
+
+    // Log reason for update
+    if (isStale) {
+      log(`Updating due to staleness (${timeSinceUpdate}s > ${MAX_STALENESS_SECONDS}s)`)
+    } else {
+      log(`Updating due to value change >${VALUE_CHANGE_THRESHOLD_BPS / 100n}% (diff: $${formatUnits(valueDiff, 18)})`)
+    }
+
     await writeSafeValueToChain(totalValueUSD)
     log('=== Safe Value Monitor: Complete ===')
   } catch (error) {

@@ -858,8 +858,21 @@ async function calculateSpendingAllowance(
 
 // ============ Contract Write ============
 
-// Threshold for considering allowance values "equal" (0% tolerance for allowances)
-const ALLOWANCE_CHANGE_THRESHOLD_BPS = 0n // 0%
+// ============ Update Thresholds ============
+// Spending allowance update rules:
+// - Always update if acquired balances changed
+// - Always update if allowance went down (any decrease)
+// - Update if allowance went up by more than 2%
+// - Update if stale for more than 50 minutes
+
+// Only update if allowance INCREASED by more than this percentage
+const ALLOWANCE_INCREASE_THRESHOLD_BPS = BigInt(process.env.ALLOWANCE_INCREASE_THRESHOLD_BPS || '200') // 2%
+
+// Always update if last update was more than this many seconds ago
+const MAX_STALENESS_SECONDS = BigInt(process.env.SPENDING_ORACLE_MAX_STALENESS_SECONDS || '3000') // 50 minutes
+
+// Track last update timestamp per subaccount
+const lastUpdateTimestamp = new Map<Address, bigint>()
 
 // Pending transaction tracking for batch submissions
 interface PendingTransaction {
@@ -873,6 +886,12 @@ let currentNonce: number | null = null
 /**
  * Prepare a batch update (check if changes needed)
  * Returns the transaction parameters if update is needed, null otherwise
+ *
+ * Update logic:
+ * - Always update if acquired balances changed
+ * - Always update if allowance went down (any decrease)
+ * - Update if allowance went up by more than 2%
+ * - Update if stale for more than 50 minutes
  */
 async function prepareBatchUpdate(
   subAccount: Address,
@@ -881,13 +900,41 @@ async function prepareBatchUpdate(
 ): Promise<{ tokens: Address[]; balances: bigint[]; allowanceChanged: boolean } | null> {
   // Get current on-chain values
   const onChainAllowance = await getOnChainSpendingAllowance(subAccount)
+  const currentTimestamp = BigInt(Math.floor(Date.now() / 1000))
 
-  // Check if allowance change is significant
-  const allowanceDiff = newAllowance > onChainAllowance
-    ? newAllowance - onChainAllowance
-    : onChainAllowance - newAllowance
-  const allowanceThreshold = (onChainAllowance * ALLOWANCE_CHANGE_THRESHOLD_BPS) / 10000n
-  const allowanceChanged = allowanceDiff > allowanceThreshold
+  // Check staleness
+  const subAccountKey = subAccount.toLowerCase() as Address
+  const lastUpdate = lastUpdateTimestamp.get(subAccountKey) || 0n
+  const timeSinceUpdate = currentTimestamp - lastUpdate
+  const isStale = timeSinceUpdate > MAX_STALENESS_SECONDS
+
+  // Check allowance direction
+  const allowanceDecreased = newAllowance < onChainAllowance
+  const allowanceIncreased = newAllowance > onChainAllowance
+
+  // Check if increase exceeds 2% threshold
+  let significantIncrease = false
+  if (allowanceIncreased && onChainAllowance > 0n) {
+    const increaseAmount = newAllowance - onChainAllowance
+    const threshold = (onChainAllowance * ALLOWANCE_INCREASE_THRESHOLD_BPS) / 10000n
+    significantIncrease = increaseAmount > threshold
+  }
+
+  // Determine if allowance update is needed based on rules:
+  // 1. Allowance went down (any decrease) -> always update
+  // 2. Allowance went up by more than 2% -> update
+  // 3. Stale for more than 50 minutes -> update
+  const allowanceChanged = allowanceDecreased || significantIncrease || isStale
+
+  if (!allowanceChanged && !allowanceDecreased && !significantIncrease) {
+    if (allowanceIncreased) {
+      const increaseAmount = newAllowance - onChainAllowance
+      const increaseBps = onChainAllowance > 0n ? (increaseAmount * 10000n) / onChainAllowance : 0n
+      log(`  Allowance increase within threshold: ${formatUnits(onChainAllowance, 18)} -> ${formatUnits(newAllowance, 18)} (+${increaseBps}bps, threshold: ${ALLOWANCE_INCREASE_THRESHOLD_BPS}bps)`)
+    } else {
+      log(`  Allowance unchanged: ${formatUnits(onChainAllowance, 18)}`)
+    }
+  }
 
   // Check if any acquired balances changed
   const tokens: Address[] = []
@@ -919,13 +966,29 @@ async function prepareBatchUpdate(
     }
   }
 
-  // Skip if no changes
+  // Skip if no changes needed
   if (!allowanceChanged && !acquiredChanged) {
-    log(`Skipping batch update - no changes (allowance: ${formatUnits(onChainAllowance, 18)} -> ${formatUnits(newAllowance, 18)}, tokens: ${tokens.length})`)
+    log(`Skipping batch update - no changes needed:`)
+    log(`  Allowance: ${formatUnits(onChainAllowance, 18)} -> ${formatUnits(newAllowance, 18)} (no decrease, increase <2%)`)
+    log(`  Staleness: ${timeSinceUpdate}s (max: ${MAX_STALENESS_SECONDS}s)`)
+    log(`  Acquired tokens: ${tokens.length} (no changes)`)
     return null
   }
 
-  log(`Preparing batch update: subAccount=${subAccount}, allowance=${formatUnits(newAllowance, 18)} (was ${formatUnits(onChainAllowance, 18)}), tokens=${tokens.length}`)
+  // Log reason for update
+  const reasons: string[] = []
+  if (acquiredChanged) reasons.push('acquired changed')
+  if (allowanceDecreased) reasons.push('allowance decreased')
+  if (significantIncrease) reasons.push('allowance increased >2%')
+  if (isStale) reasons.push(`stale (${timeSinceUpdate}s > ${MAX_STALENESS_SECONDS}s)`)
+
+  log(`Preparing batch update: subAccount=${subAccount}`)
+  log(`  Reason: ${reasons.join(', ')}`)
+  log(`  Allowance: ${formatUnits(onChainAllowance, 18)} -> ${formatUnits(newAllowance, 18)}`)
+  log(`  Tokens: ${tokens.length}`)
+
+  // Update last update timestamp (will be set after successful tx)
+  lastUpdateTimestamp.set(subAccountKey, currentTimestamp)
 
   return { tokens, balances, allowanceChanged }
 }
