@@ -980,10 +980,20 @@ async function pollForNewEvents() {
         affectedSubaccounts.add(e.subAccount)
       }
 
-      // Process all affected subaccounts in parallel
-      await Promise.allSettled(
-        [...affectedSubaccounts].map((subAccount) => processSubaccount(subAccount, currentBlock))
-      )
+      // Process affected subaccounts sequentially to avoid nonce conflicts
+      for (const subAccount of affectedSubaccounts) {
+        // Skip if the subaccount is the module itself
+        if (subAccount.toLowerCase() === config.moduleAddress.toLowerCase()) {
+          log(`Skipping ${subAccount} - this is the module address, not a subaccount`)
+          continue
+        }
+
+        try {
+          await processSubaccount(subAccount, currentBlock)
+        } catch (error) {
+          log(`Error processing ${subAccount}: ${error}`)
+        }
+      }
     }
 
     lastProcessedBlock = currentBlock
@@ -1046,20 +1056,21 @@ async function onCronRefresh() {
       return
     }
 
-    // Process all subaccounts in parallel
-    const results = await Promise.allSettled(
-      subaccounts.map(async (subAccount) => {
-        log(`Processing subaccount: ${subAccount}`)
-        return processSubaccount(subAccount, currentBlock)
-      })
-    )
-
-    // Log any failures
-    results.forEach((result, i) => {
-      if (result.status === 'rejected') {
-        log(`Error processing ${subaccounts[i]}: ${result.reason}`)
+    // Process subaccounts sequentially to avoid nonce conflicts
+    for (const subAccount of subaccounts) {
+      // Skip if the subaccount is the module itself (shouldn't happen but safety check)
+      if (subAccount.toLowerCase() === config.moduleAddress.toLowerCase()) {
+        log(`Skipping ${subAccount} - this is the module address, not a subaccount`)
+        continue
       }
-    })
+
+      try {
+        log(`Processing subaccount: ${subAccount}`)
+        await processSubaccount(subAccount, currentBlock)
+      } catch (error) {
+        log(`Error processing ${subAccount}: ${error}`)
+      }
+    }
 
     log('=== Periodic Refresh Complete ===')
   } catch (error) {
