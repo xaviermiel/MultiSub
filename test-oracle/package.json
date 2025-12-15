@@ -9,7 +9,9 @@
     "spending-oracle": "npx tsx src/spending-oracle.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:fuzz": "npx tsx src/fuzz-test.ts",
+    "test:all": "vitest run && npx tsx src/fuzz-test.ts"
   },
   "dependencies": {
     "viem": "^2.21.0",

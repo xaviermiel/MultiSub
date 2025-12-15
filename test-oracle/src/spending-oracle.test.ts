@@ -11,6 +11,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest'
 import type { Address } from 'viem'
+import { formatUnits, parseUnits } from 'viem'
 import { OperationType } from './abi.js'
 import {
   consumeFromQueue,
@@ -1006,5 +1007,295 @@ describe('Mixed acquisition scenarios', () => {
 
     // Total should be 200
     expect(state.acquiredBalances.get(TOKEN_USDC.toLowerCase() as Address)).toBe(200n)
+  })
+})
+
+// ============ Complex Scenario Tests ============
+
+describe('Complex real-world scenarios', () => {
+  function createProtocolEvent(
+    overrides: Partial<ProtocolExecutionEvent>
+  ): ProtocolExecutionEvent {
+    return {
+      subAccount: SUB_ACCOUNT,
+      target: TARGET_AAVE,
+      opType: OperationType.SWAP,
+      tokensIn: [TOKEN_LINK],
+      amountsIn: [100n],
+      tokensOut: [TOKEN_WETH],
+      amountsOut: [50n],
+      spendingCost: 10n,
+      timestamp: HOUR_AGO,
+      blockNumber: 1000n,
+      logIndex: 0,
+      ...overrides,
+    }
+  }
+
+  function createTransferEvent(
+    overrides: Partial<TransferExecutedEvent>
+  ): TransferExecutedEvent {
+    return {
+      subAccount: SUB_ACCOUNT,
+      token: TOKEN_LINK,
+      recipient: RECIPIENT,
+      amount: 50n,
+      spendingCost: 5n,
+      timestamp: HOUR_AGO,
+      blockNumber: 1000n,
+      logIndex: 0,
+      ...overrides,
+    }
+  }
+
+  describe('DeFi yield farming scenario', () => {
+    it('should track full deposit -> earn rewards -> withdraw cycle', () => {
+      const events = [
+        // 1. Swap ETH for LINK (acquire 100 LINK)
+        createProtocolEvent({
+          opType: OperationType.SWAP,
+          tokensIn: [TOKEN_WETH],
+          amountsIn: [5n],
+          tokensOut: [TOKEN_LINK],
+          amountsOut: [100n],
+          spendingCost: 50n,
+          timestamp: HOUR_AGO,
+          blockNumber: 1000n,
+        }),
+        // 2. Deposit LINK into AAVE (get 100 aLINK)
+        createProtocolEvent({
+          opType: OperationType.DEPOSIT,
+          target: TARGET_AAVE,
+          tokensIn: [TOKEN_LINK],
+          amountsIn: [100n],
+          tokensOut: [TOKEN_ALINK],
+          amountsOut: [100n],
+          spendingCost: 0n,
+          timestamp: HOUR_AGO + 60n,
+          blockNumber: 1001n,
+        }),
+        // 3. Claim rewards (get 5 WETH rewards)
+        createProtocolEvent({
+          opType: OperationType.CLAIM,
+          target: TARGET_AAVE,
+          tokensIn: [],
+          amountsIn: [],
+          tokensOut: [TOKEN_WETH],
+          amountsOut: [5n],
+          spendingCost: 0n,
+          timestamp: HOUR_AGO + 120n,
+          blockNumber: 1002n,
+        }),
+        // 4. Withdraw LINK from AAVE (105 LINK due to interest)
+        createProtocolEvent({
+          opType: OperationType.WITHDRAW,
+          target: TARGET_AAVE,
+          tokensIn: [],
+          amountsIn: [],
+          tokensOut: [TOKEN_LINK],
+          amountsOut: [105n],
+          spendingCost: 0n,
+          timestamp: NOW,
+          blockNumber: 1003n,
+        }),
+      ]
+
+      const state = buildSubAccountState(events, [], SUB_ACCOUNT, NOW, WINDOW_DURATION)
+
+      // aLINK should be consumed (balance = 0 or undefined)
+      expect(state.acquiredBalances.get(TOKEN_ALINK.toLowerCase() as Address)).toBeUndefined()
+
+      // LINK should be acquired (matched portion from deposit)
+      // The deposit was 100, withdraw is 105, so 100 is matched, 5 is unmatched
+      expect(state.acquiredBalances.get(TOKEN_LINK.toLowerCase() as Address)).toBe(100n)
+
+      // WETH rewards should be acquired (has matching deposit at target)
+      expect(state.acquiredBalances.get(TOKEN_WETH.toLowerCase() as Address)).toBe(5n)
+
+      // Total spending should be 50 (from the initial swap)
+      expect(state.totalSpendingInWindow).toBe(50n)
+    })
+  })
+
+  describe('Multiple deposits and partial withdrawals', () => {
+    it('should handle FIFO matching for multiple deposits', () => {
+      const events = [
+        // Deposit 1: 50 LINK at HOUR_AGO
+        createProtocolEvent({
+          opType: OperationType.DEPOSIT,
+          target: TARGET_AAVE,
+          tokensIn: [TOKEN_LINK],
+          amountsIn: [50n],
+          tokensOut: [TOKEN_ALINK],
+          amountsOut: [50n],
+          timestamp: HOUR_AGO,
+          blockNumber: 1000n,
+        }),
+        // Deposit 2: 75 LINK at HOUR_AGO + 60
+        createProtocolEvent({
+          opType: OperationType.DEPOSIT,
+          target: TARGET_AAVE,
+          tokensIn: [TOKEN_LINK],
+          amountsIn: [75n],
+          tokensOut: [TOKEN_ALINK],
+          amountsOut: [75n],
+          timestamp: HOUR_AGO + 60n,
+          blockNumber: 1001n,
+        }),
+        // Withdraw 80 LINK (should match 50 from deposit 1, 30 from deposit 2)
+        createProtocolEvent({
+          opType: OperationType.WITHDRAW,
+          target: TARGET_AAVE,
+          tokensIn: [],
+          amountsIn: [],
+          tokensOut: [TOKEN_LINK],
+          amountsOut: [80n],
+          spendingCost: 0n,
+          timestamp: NOW,
+          blockNumber: 1002n,
+        }),
+      ]
+
+      const state = buildSubAccountState(events, [], SUB_ACCOUNT, NOW, WINDOW_DURATION)
+
+      // LINK should be acquired (80 withdrawn, 80 matched from deposits)
+      expect(state.acquiredBalances.get(TOKEN_LINK.toLowerCase() as Address)).toBe(80n)
+
+      // aLINK should have 45 remaining (125 - 80)
+      expect(state.acquiredBalances.get(TOKEN_ALINK.toLowerCase() as Address)).toBe(45n)
+
+      // Deposit records should show remaining amounts
+      expect(state.depositRecords[0].remainingAmount).toBe(0n) // First deposit fully consumed
+      expect(state.depositRecords[1].remainingAmount).toBe(45n) // Second deposit partially consumed
+    })
+  })
+
+  describe('Transfer scenarios', () => {
+    it('should properly track transfers of acquired tokens', () => {
+      const protocolEvents = [
+        // Acquire 100 LINK via swap
+        createProtocolEvent({
+          opType: OperationType.SWAP,
+          tokensIn: [TOKEN_WETH],
+          amountsIn: [5n],
+          tokensOut: [TOKEN_LINK],
+          amountsOut: [100n],
+          spendingCost: 50n,
+          timestamp: HOUR_AGO,
+          blockNumber: 1000n,
+        }),
+      ]
+
+      const transferEvents = [
+        // Transfer 30 LINK
+        createTransferEvent({
+          token: TOKEN_LINK,
+          amount: 30n,
+          spendingCost: 10n,
+          timestamp: HOUR_AGO + 60n,
+          blockNumber: 1001n,
+        }),
+        // Transfer another 20 LINK
+        createTransferEvent({
+          token: TOKEN_LINK,
+          amount: 20n,
+          spendingCost: 5n,
+          timestamp: NOW,
+          blockNumber: 1002n,
+        }),
+      ]
+
+      const state = buildSubAccountState(protocolEvents, transferEvents, SUB_ACCOUNT, NOW, WINDOW_DURATION)
+
+      // LINK should have 50 remaining (100 - 30 - 20)
+      expect(state.acquiredBalances.get(TOKEN_LINK.toLowerCase() as Address)).toBe(50n)
+
+      // Total spending should be 65 (50 from swap + 10 + 5 from transfers)
+      expect(state.totalSpendingInWindow).toBe(65n)
+    })
+
+    it('should handle transfer of non-acquired tokens', () => {
+      // Transfer without prior acquisition
+      const transferEvents = [
+        createTransferEvent({
+          token: TOKEN_LINK,
+          amount: 100n,
+          spendingCost: 50n,
+          timestamp: NOW,
+        }),
+      ]
+
+      const state = buildSubAccountState([], transferEvents, SUB_ACCOUNT, NOW, WINDOW_DURATION)
+
+      // No acquired balance (nothing was acquired)
+      expect(state.acquiredBalances.get(TOKEN_LINK.toLowerCase() as Address)).toBeUndefined()
+
+      // Spending should still be tracked
+      expect(state.totalSpendingInWindow).toBe(50n)
+    })
+  })
+
+  describe('Window boundary scenarios', () => {
+    it('should handle events inside vs outside window', () => {
+      const events = [
+        // Event inside window (should be valid for both spending and acquisition)
+        createProtocolEvent({
+          opType: OperationType.SWAP,
+          tokensIn: [TOKEN_WETH],
+          amountsIn: [1n],
+          tokensOut: [TOKEN_LINK],
+          amountsOut: [50n],
+          spendingCost: 25n,
+          timestamp: HOUR_AGO,
+          blockNumber: 1000n,
+        }),
+        // Event outside window (should not count for spending or acquisition)
+        createProtocolEvent({
+          opType: OperationType.SWAP,
+          tokensIn: [TOKEN_USDC],
+          amountsIn: [100n],
+          tokensOut: [TOKEN_WETH],
+          amountsOut: [1n],
+          spendingCost: 100n,
+          timestamp: TWO_DAYS_AGO,
+          blockNumber: 999n,
+        }),
+      ]
+
+      const state = buildSubAccountState(events, [], SUB_ACCOUNT, NOW, WINDOW_DURATION)
+
+      // LINK from inside window should be acquired
+      expect(state.acquiredBalances.get(TOKEN_LINK.toLowerCase() as Address)).toBe(50n)
+
+      // WETH from outside window should NOT be acquired (expired)
+      expect(state.acquiredBalances.get(TOKEN_WETH.toLowerCase() as Address)).toBeUndefined()
+
+      // Only spending from within window should count
+      expect(state.totalSpendingInWindow).toBe(25n)
+    })
+
+    it('should handle events far outside window', () => {
+      const events = [
+        // Event 2 days ago (clearly outside 1-day window)
+        createProtocolEvent({
+          opType: OperationType.SWAP,
+          tokensIn: [TOKEN_WETH],
+          amountsIn: [1n],
+          tokensOut: [TOKEN_LINK],
+          amountsOut: [100n],
+          spendingCost: 50n,
+          timestamp: TWO_DAYS_AGO,
+          blockNumber: 1000n,
+        }),
+      ]
+
+      const state = buildSubAccountState(events, [], SUB_ACCOUNT, NOW, WINDOW_DURATION)
+
+      // LINK should NOT be acquired (expired)
+      expect(state.acquiredBalances.get(TOKEN_LINK.toLowerCase() as Address)).toBeUndefined()
+
+      // Spending should NOT be counted
+      expect(state.totalSpendingInWindow).toBe(0n)
+    })
   })
 })
