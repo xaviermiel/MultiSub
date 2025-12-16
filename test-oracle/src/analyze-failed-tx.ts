@@ -777,24 +777,43 @@ async function simulateWithTrace(
       if (!obj || typeof obj !== 'object') return undefined
       const o = obj as Record<string, unknown>
 
-      if (typeof o.data === 'string' && o.data.startsWith('0x')) {
+      // Direct data field
+      if (typeof o.data === 'string' && o.data.startsWith('0x') && o.data.length >= 10) {
         return o.data as Hex
       }
+      // Some RPCs use errorData
+      if (typeof o.errorData === 'string' && o.errorData.startsWith('0x')) {
+        return o.errorData as Hex
+      }
+      // Viem wraps errors in cause
       if (o.cause && typeof o.cause === 'object') {
         const causeData = extractErrorData(o.cause)
         if (causeData) return causeData
       }
+      // Some errors nest in error field
       if (o.error && typeof o.error === 'object') {
         const errData = extractErrorData(o.error)
         if (errData) return errData
       }
+      // Extract from message string
       if (typeof o.message === 'string') {
-        const match = o.message.match(/data: "(0x[a-fA-F0-9]+)"/)
+        // Match: data: "0x..." or data: 0x...
+        const match = o.message.match(/data:\s*"?(0x[a-fA-F0-9]+)"?/)
         if (match) return match[1] as Hex
       }
+      // Extract from details string
       if (typeof o.details === 'string') {
         const match = o.details.match(/(0x[a-fA-F0-9]{8,})/)
         if (match) return match[1] as Hex
+      }
+      // Viem sometimes puts it in metaMessages
+      if (Array.isArray(o.metaMessages)) {
+        for (const msg of o.metaMessages) {
+          if (typeof msg === 'string') {
+            const match = msg.match(/(0x[a-fA-F0-9]{8,})/)
+            if (match) return match[1] as Hex
+          }
+        }
       }
       return undefined
     }
@@ -1216,18 +1235,29 @@ async function analyzeFailedTx(txHash: string): Promise<AnalysisResult> {
       result.simulationError = simResult.error
 
       if (simResult.errorData) {
-        console.log(`│  Error data: ${simResult.errorData}`)
+        // Check if the "error data" is actually the calldata being echoed back
+        // This happens when RPCs don't have archive state for historical blocks
+        const inputSelector = input.slice(0, 10).toLowerCase()
+        const errorSelector = simResult.errorData.slice(0, 10).toLowerCase()
+        const isEchoedCalldata = inputSelector === errorSelector && simResult.errorData.length > 100
 
-        const decodedError = decodeContractError(simResult.errorData)
-        if (decodedError) {
-          const errorInfo = CONTRACT_ERRORS[decodedError.name]
+        if (isEchoedCalldata) {
+          console.log(`│  Note: RPC returned calldata as error (no archive state for block ${result.blockNumber})`)
+          console.log(`│  Cannot determine exact error from this RPC`)
+        } else {
+          console.log(`│  Error data: ${simResult.errorData}`)
 
-          result.error = {
-            name: decodedError.name,
-            args: decodedError.args,
-            description: errorInfo?.description || 'Unknown error',
-            solution: errorInfo?.solution || 'Check contract source for error details',
-            rawData: simResult.errorData,
+          const decodedError = decodeContractError(simResult.errorData)
+          if (decodedError) {
+            const errorInfo = CONTRACT_ERRORS[decodedError.name]
+
+            result.error = {
+              name: decodedError.name,
+              args: decodedError.args,
+              description: errorInfo?.description || 'Unknown error',
+              solution: errorInfo?.solution || 'Check contract source for error details',
+              rawData: simResult.errorData,
+            }
           }
         }
       }
