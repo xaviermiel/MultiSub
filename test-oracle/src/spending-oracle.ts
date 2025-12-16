@@ -465,6 +465,8 @@ export function getValidQueueBalance(
 
 /**
  * Remove expired entries from queue
+ * Note: Queue may not be sorted by timestamp (e.g., inherited tokens from swaps
+ * can have older timestamps than newly acquired tokens), so we filter all entries
  */
 export function pruneExpiredEntries(
   queue: AcquiredBalanceQueue,
@@ -472,9 +474,17 @@ export function pruneExpiredEntries(
   windowDuration: bigint
 ): void {
   const expiryThreshold = currentTimestamp - windowDuration
-  while (queue.length > 0 && queue[0].originalTimestamp < expiryThreshold) {
-    queue.shift()
+
+  // Filter in-place: remove all expired entries, not just from front
+  // Queue may be unsorted due to inherited timestamps from swaps
+  let writeIndex = 0
+  for (let readIndex = 0; readIndex < queue.length; readIndex++) {
+    if (queue[readIndex].originalTimestamp >= expiryThreshold) {
+      queue[writeIndex] = queue[readIndex]
+      writeIndex++
+    }
   }
+  queue.length = writeIndex
 }
 
 // ============ State Building ============

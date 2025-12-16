@@ -243,6 +243,37 @@ describe('FIFO Queue Operations', () => {
 
       expect(queue).toHaveLength(0)
     })
+
+    it('should remove expired entries from unsorted queue (middle/end)', () => {
+      // This tests the fix for queues that aren't sorted by timestamp
+      // E.g., swaps can produce entries where inherited tokens (older) come after new ones
+      const queue: AcquiredBalanceQueue = [
+        { amount: 100n, originalTimestamp: HOUR_AGO },       // Valid (front)
+        { amount: 200n, originalTimestamp: TWO_DAYS_AGO },   // Expired (middle)
+        { amount: 300n, originalTimestamp: NOW },            // Valid
+        { amount: 400n, originalTimestamp: TWO_DAYS_AGO - 3600n }, // Expired (end)
+        { amount: 500n, originalTimestamp: HOUR_AGO - 60n }, // Valid
+      ]
+
+      pruneExpiredEntries(queue, NOW, WINDOW_DURATION)
+
+      // Should only have 3 valid entries left
+      expect(queue).toHaveLength(3)
+      expect(queue[0].amount).toBe(100n)
+      expect(queue[1].amount).toBe(300n)
+      expect(queue[2].amount).toBe(500n)
+    })
+
+    it('should handle queue where all entries are expired', () => {
+      const queue: AcquiredBalanceQueue = [
+        { amount: 100n, originalTimestamp: TWO_DAYS_AGO },
+        { amount: 200n, originalTimestamp: TWO_DAYS_AGO - 3600n },
+      ]
+
+      pruneExpiredEntries(queue, NOW, WINDOW_DURATION)
+
+      expect(queue).toHaveLength(0)
+    })
   })
 })
 
