@@ -1052,7 +1052,7 @@ async function calculateSpendingAllowance(
 const ALLOWANCE_INCREASE_THRESHOLD_BPS = BigInt(process.env.ALLOWANCE_INCREASE_THRESHOLD_BPS || '200') // 2%
 
 // Always update if last update was more than this many seconds ago
-const MAX_STALENESS_SECONDS = BigInt(process.env.SPENDING_ORACLE_MAX_STALENESS_SECONDS || '3000') // 50 minutes
+const MAX_STALENESS_SECONDS = BigInt(process.env.SPENDING_ORACLE_MAX_STALENESS_SECONDS || '2700') // 45 minutes
 
 // Track last update timestamp per subaccount
 const lastUpdateTimestamp = new Map<Address, bigint>()

@@ -348,8 +348,8 @@ const VALUE_CHANGE_THRESHOLD_BPS = BigInt(process.env.SAFE_VALUE_CHANGE_THRESHOL
 
 // Always update if timestamp is older than this (in seconds)
 // This ensures the contract doesn't reject transactions due to stale data
-const MAX_STALENESS_SECONDS = BigInt(process.env.SAFE_VALUE_MAX_STALENESS_SECONDS || '3000') // 50 minutes
-
+const MAX_STALENESS_SECONDS = BigInt(process.env.SAFE_VALUE_MAX_STALENESS_SECONDS || '2700') // 45 minutes
+4
 /**
  * Get current on-chain safe value with timestamp
  */
