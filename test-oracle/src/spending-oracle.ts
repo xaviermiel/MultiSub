@@ -25,8 +25,17 @@ import {
 } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import cron from 'node-cron'
-import { config, validateConfig } from './config.js'
-import { DeFiInteractorModuleABI, OperationType } from './abi.js'
+import { config, validateConfig, type TokenConfig } from './config.js'
+import { DeFiInteractorModuleABI, OperationType, ChainlinkPriceFeedABI, ERC20ABI } from './abi.js'
+
+// ============ Token Price Cache ============
+
+export interface TokenPriceInfo {
+  priceUSD: bigint      // Price in USD with 18 decimals
+  decimals: number      // Token decimals
+}
+
+export type TokenPriceCache = Map<Address, TokenPriceInfo>
 
 // ============ Types ============
 
@@ -391,6 +400,119 @@ async function queryHistoricalAcquiredTokens(subAccount: Address): Promise<Set<A
   return tokens
 }
 
+// ============ Token Price Helpers ============
+
+/**
+ * Get price feed address for a token from config
+ */
+function getPriceFeedForToken(tokenAddress: Address): Address | null {
+  const tokenLower = tokenAddress.toLowerCase()
+  const tokenConfig = config.tokens.find(t => t.address.toLowerCase() === tokenLower)
+  if (tokenConfig?.priceFeedAddress) {
+    return tokenConfig.priceFeedAddress as Address
+  }
+  return null
+}
+
+/**
+ * Get token decimals
+ */
+async function getTokenDecimals(tokenAddress: Address): Promise<number> {
+  try {
+    const decimals = await publicClient.readContract({
+      address: tokenAddress,
+      abi: ERC20ABI,
+      functionName: 'decimals',
+    })
+    return decimals
+  } catch (error) {
+    log(`Error getting decimals for ${tokenAddress}: ${error}`)
+    return 18 // Default to 18
+  }
+}
+
+/**
+ * Get price from Chainlink price feed (normalized to 18 decimals)
+ */
+async function getChainlinkPriceUSD(priceFeedAddress: Address): Promise<bigint> {
+  try {
+    const [, answer] = await publicClient.readContract({
+      address: priceFeedAddress,
+      abi: ChainlinkPriceFeedABI,
+      functionName: 'latestRoundData',
+    })
+
+    const feedDecimals = await publicClient.readContract({
+      address: priceFeedAddress,
+      abi: ChainlinkPriceFeedABI,
+      functionName: 'decimals',
+    })
+
+    // Normalize to 18 decimals
+    const price18 = BigInt(answer) * BigInt(10 ** (18 - feedDecimals))
+    return price18
+  } catch (error) {
+    log(`Error getting price from ${priceFeedAddress}: ${error}`)
+    return 0n
+  }
+}
+
+/**
+ * Build a price cache for all tokens involved in events
+ * Returns a map of token address -> { priceUSD (18 decimals), decimals }
+ */
+export async function buildTokenPriceCache(tokens: Set<Address>): Promise<TokenPriceCache> {
+  const cache: TokenPriceCache = new Map()
+
+  await Promise.all(
+    Array.from(tokens).map(async (token) => {
+      const tokenLower = token.toLowerCase() as Address
+      const priceFeed = getPriceFeedForToken(tokenLower)
+
+      if (!priceFeed) {
+        // No price feed configured - use 0 (will fall back to amount-weighted)
+        return
+      }
+
+      try {
+        const [priceUSD, decimals] = await Promise.all([
+          getChainlinkPriceUSD(priceFeed),
+          getTokenDecimals(tokenLower),
+        ])
+
+        if (priceUSD > 0n) {
+          cache.set(tokenLower, { priceUSD, decimals })
+        }
+      } catch (error) {
+        log(`Error fetching price for ${token}: ${error}`)
+      }
+    })
+  )
+
+  return cache
+}
+
+/**
+ * Calculate USD value for a token amount using the price cache
+ * Returns value in 18 decimals, or null if price not available
+ */
+export function getTokenValueUSD(
+  token: Address,
+  amount: bigint,
+  priceCache: TokenPriceCache
+): bigint | null {
+  const tokenLower = token.toLowerCase() as Address
+  const priceInfo = priceCache.get(tokenLower)
+
+  if (!priceInfo || priceInfo.priceUSD === 0n) {
+    return null
+  }
+
+  // value = amount * price / 10^decimals
+  // Both price and result are in 18 decimals
+  return (amount * priceInfo.priceUSD) / BigInt(10 ** priceInfo.decimals)
+}
+
 // ============ FIFO Queue Helpers ============
 
 /**
@@ -499,7 +621,8 @@ export function buildSubAccountState(
   transferEvents: TransferExecutedEvent[],
   subAccount: Address,
   currentTimestamp: bigint,
-  windowDuration: bigint
+  windowDuration: bigint,
+  priceCache?: TokenPriceCache
 ): SubAccountState {
   const windowStart = currentTimestamp - windowDuration
 
@@ -572,6 +695,9 @@ export function buildSubAccountState(
       // NOTE: Now handles multiple input tokens (e.g., LP position minting uses 2 tokens)
       let consumedEntries: AcquiredBalanceEntry[] = []
       let totalAmountIn = 0n
+      let totalValueInUSD = 0n       // USD value of all inputs (for weighted ratio)
+      let consumedValueUSD = 0n      // USD value of consumed acquired tokens
+      let hasAllPrices = true        // Whether we have prices for all input tokens
       if (event.opType === OperationType.SWAP || event.opType === OperationType.DEPOSIT) {
         // Process each input token
         for (let i = 0; i < event.tokensIn.length; i++) {
@@ -585,6 +711,22 @@ export function buildSubAccountState(
           const result = consumeFromQueue(inputQueue, amountIn, event.timestamp, windowDuration)
           consumedEntries.push(...result.consumed)
           tokensWithAcquiredHistory.add(tokenInLower)
+
+          // Track USD values for weighted ratio calculation
+          if (priceCache) {
+            const inputValueUSD = getTokenValueUSD(tokenIn, amountIn, priceCache)
+            if (inputValueUSD !== null) {
+              totalValueInUSD += inputValueUSD
+              // Calculate USD value of consumed portion for this token
+              const consumedAmount = result.consumed.reduce((sum, e) => sum + e.amount, 0n)
+              const consumedTokenValueUSD = getTokenValueUSD(tokenIn, consumedAmount, priceCache)
+              if (consumedTokenValueUSD !== null) {
+                consumedValueUSD += consumedTokenValueUSD
+              }
+            } else {
+              hasAllPrices = false
+            }
+          }
         }
       }
 
@@ -664,7 +806,21 @@ export function buildSubAccountState(
           if (totalConsumed > 0n && fromNonAcquired > 0n) {
             // Mixed case: proportionally split the output
             // Acquired portion inherits oldest timestamp, non-acquired portion is newly acquired
-            const acquiredRatio = (totalConsumed * 10000n) / totalAmountIn // basis points
+
+            // Use USD-weighted ratio if we have prices for all input tokens
+            // This correctly handles multi-token inputs with different values (e.g., 1 WETH + 1000 USDC)
+            let acquiredRatio: bigint
+            let useUSDWeighting = false
+
+            if (priceCache && hasAllPrices && totalValueInUSD > 0n) {
+              // USD-weighted ratio: based on actual value, not raw amounts
+              acquiredRatio = (consumedValueUSD * 10000n) / totalValueInUSD
+              useUSDWeighting = true
+            } else {
+              // Fallback: amount-weighted ratio (original behavior)
+              acquiredRatio = (totalConsumed * 10000n) / totalAmountIn
+            }
+
             const outputFromAcquired = (amountOut * acquiredRatio) / 10000n
             const outputFromNonAcquired = amountOut - outputFromAcquired
 
@@ -675,8 +831,12 @@ export function buildSubAccountState(
             )
 
             const opName = OperationType[event.opType]
-            log(`  ${opName}: mixed input - ${totalConsumed} acquired + ${fromNonAcquired} non-acquired`)
-            log(`    ${outputFromAcquired} ${tokenOut} inherits timestamp ${oldestTimestamp}`)
+            if (useUSDWeighting) {
+              log(`  ${opName}: mixed input (USD-weighted) - $${formatUnits(consumedValueUSD, 18)} acquired + $${formatUnits(totalValueInUSD - consumedValueUSD, 18)} non-acquired`)
+            } else {
+              log(`  ${opName}: mixed input - ${totalConsumed} acquired + ${fromNonAcquired} non-acquired`)
+            }
+            log(`    ${outputFromAcquired} ${tokenOut} inherits timestamp ${oldestTimestamp} (${acquiredRatio / 100n}% acquired)`)
             log(`    ${outputFromNonAcquired} ${tokenOut} newly acquired at ${event.timestamp}`)
 
             addToQueue(outputQueue, outputFromAcquired, oldestTimestamp)
@@ -1205,8 +1365,28 @@ async function processSubaccount(subAccount: Address, currentBlock?: bigint) {
     queryTransferEvents(extendedFromBlock, blockNumber, subAccount),
   ])
 
-  // Build state
-  const state = buildSubAccountState(protocolEvents, transferEvents, subAccount, currentTimestamp, windowDuration)
+  // Collect all unique tokens from events for price cache
+  const tokensToPrice = new Set<Address>()
+  for (const event of protocolEvents) {
+    for (const token of event.tokensIn) {
+      tokensToPrice.add(token.toLowerCase() as Address)
+    }
+    for (const token of event.tokensOut) {
+      tokensToPrice.add(token.toLowerCase() as Address)
+    }
+  }
+  for (const event of transferEvents) {
+    tokensToPrice.add(event.token.toLowerCase() as Address)
+  }
+
+  // Build price cache for USD-weighted ratio calculations
+  const priceCache = await buildTokenPriceCache(tokensToPrice)
+  if (priceCache.size > 0) {
+    log(`Built price cache for ${priceCache.size} tokens`)
+  }
+
+  // Build state with price cache for accurate ratio calculations
+  const state = buildSubAccountState(protocolEvents, transferEvents, subAccount, currentTimestamp, windowDuration, priceCache)
 
   // Calculate allowance
   const newAllowance = await calculateSpendingAllowance(subAccount, state)

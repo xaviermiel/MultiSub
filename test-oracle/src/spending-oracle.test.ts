@@ -19,10 +19,12 @@ import {
   getValidQueueBalance,
   pruneExpiredEntries,
   buildSubAccountState,
+  getTokenValueUSD,
   type AcquiredBalanceQueue,
   type AcquiredBalanceEntry,
   type ProtocolExecutionEvent,
   type TransferExecutedEvent,
+  type TokenPriceCache,
 } from './spending-oracle.js'
 
 // ============ Test Constants ============
@@ -1304,6 +1306,119 @@ describe('Complex real-world scenarios', () => {
       // Withdrawn tokens should be acquired
       expect(state.acquiredBalances.get(TOKEN_USDC.toLowerCase() as Address)).toBe(1000n)
       expect(state.acquiredBalances.get(TOKEN_WETH.toLowerCase() as Address)).toBe(1n)
+    })
+  })
+
+  describe('USD-weighted ratio calculation', () => {
+    it('should use USD-weighted ratio for mixed multi-token swaps', () => {
+      // Scenario: Swap with 1 WETH ($3000) + 1000 USDC ($1000) where WETH is acquired
+      // Without USD weighting: acquiredRatio = 1/1001 ≈ 0.1%
+      // With USD weighting: acquiredRatio = 3000/4000 = 75%
+
+      // First acquire some WETH via a swap
+      const events = [
+        // Acquire 1 WETH
+        createProtocolEvent({
+          opType: OperationType.SWAP,
+          tokensIn: [TOKEN_LINK],
+          amountsIn: [100n],
+          tokensOut: [TOKEN_WETH],
+          amountsOut: [parseUnits('1', 18)], // 1 WETH
+          spendingCost: 0n,
+          timestamp: HOUR_AGO,
+          blockNumber: 1000n,
+        }),
+        // Multi-token swap: 1 WETH (acquired) + 1000 USDC (original) → 4000 OUTPUT tokens
+        createProtocolEvent({
+          opType: OperationType.SWAP,
+          tokensIn: [TOKEN_WETH, TOKEN_USDC],
+          amountsIn: [parseUnits('1', 18), parseUnits('1000', 6)], // 1 WETH + 1000 USDC
+          tokensOut: [TOKEN_LINK],
+          amountsOut: [4000n], // 4000 output tokens
+          spendingCost: 0n,
+          timestamp: NOW,
+          blockNumber: 1001n,
+        }),
+      ]
+
+      // Create price cache with realistic prices
+      // WETH: $3000, USDC: $1
+      const priceCache: TokenPriceCache = new Map([
+        [TOKEN_WETH.toLowerCase() as Address, { priceUSD: parseUnits('3000', 18), decimals: 18 }],
+        [TOKEN_USDC.toLowerCase() as Address, { priceUSD: parseUnits('1', 18), decimals: 6 }],
+      ])
+
+      const state = buildSubAccountState(events, [], SUB_ACCOUNT, NOW, WINDOW_DURATION, priceCache)
+
+      // With USD weighting:
+      // - WETH value: 1 * $3000 = $3000 (acquired)
+      // - USDC value: 1000 * $1 = $1000 (original)
+      // - Total: $4000
+      // - Acquired ratio: 3000/4000 = 75%
+      // - Output from acquired: 4000 * 75% = 3000
+      // - Output newly acquired: 4000 * 25% = 1000
+
+      const linkBalance = state.acquiredBalances.get(TOKEN_LINK.toLowerCase() as Address) ?? 0n
+      expect(linkBalance).toBe(4000n) // Total output
+
+      // Check that the inherited portion is ~75% (3000 tokens with old timestamp)
+      // The LINK queue should have two entries: 3000 with old timestamp, 1000 with new timestamp
+      const linkQueue = state.acquiredQueues.get(TOKEN_LINK.toLowerCase() as Address)
+      expect(linkQueue).toBeDefined()
+      expect(linkQueue!.length).toBe(2)
+
+      // First entry should be ~75% with inherited timestamp (from WETH acquisition)
+      expect(linkQueue![0].amount).toBe(3000n)
+      expect(linkQueue![0].originalTimestamp).toBe(HOUR_AGO) // Inherited from WETH
+
+      // Second entry should be ~25% with new timestamp
+      expect(linkQueue![1].amount).toBe(1000n)
+      expect(linkQueue![1].originalTimestamp).toBe(NOW) // Newly acquired
+    })
+
+    it('should fall back to amount-weighted ratio when price cache is empty', () => {
+      // Same scenario but without price cache - should use amount-weighted ratio
+
+      const events = [
+        // Acquire 1 WETH
+        createProtocolEvent({
+          opType: OperationType.SWAP,
+          tokensIn: [TOKEN_LINK],
+          amountsIn: [100n],
+          tokensOut: [TOKEN_WETH],
+          amountsOut: [parseUnits('1', 18)],
+          spendingCost: 0n,
+          timestamp: HOUR_AGO,
+          blockNumber: 1000n,
+        }),
+        // Multi-token swap without price info
+        createProtocolEvent({
+          opType: OperationType.SWAP,
+          tokensIn: [TOKEN_WETH, TOKEN_USDC],
+          amountsIn: [parseUnits('1', 18), parseUnits('1000', 6)],
+          tokensOut: [TOKEN_LINK],
+          amountsOut: [4000n],
+          spendingCost: 0n,
+          timestamp: NOW,
+          blockNumber: 1001n,
+        }),
+      ]
+
+      // No price cache - should fall back to amount-weighted
+      const state = buildSubAccountState(events, [], SUB_ACCOUNT, NOW, WINDOW_DURATION)
+
+      const linkQueue = state.acquiredQueues.get(TOKEN_LINK.toLowerCase() as Address)
+      expect(linkQueue).toBeDefined()
+      expect(linkQueue!.length).toBe(2)
+
+      // Without USD weighting, ratio is based on raw amounts:
+      // WETH amount: 1e18, USDC amount: 1e9 (1000 * 1e6)
+      // Total: 1e18 + 1e9 ≈ 1e18 (WETH dominates)
+      // Acquired ratio ≈ 1e18 / (1e18 + 1e9) ≈ 99.9%
+      // This is the "wrong" result that USD weighting fixes
+
+      // The first entry should be almost all of the output (amount-weighted favors WETH)
+      expect(linkQueue![0].amount).toBeGreaterThan(3900n) // Almost all 4000
     })
   })
 
