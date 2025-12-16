@@ -179,6 +179,10 @@ const CONTRACT_ERRORS: Record<string, { description: string; solution: string }>
     description: 'Module transaction execution failed on the Safe',
     solution: 'Check if the module is enabled on the Safe',
   },
+  NonPayableFunctionWithValue: {
+    description: 'Called a non-payable function with ETH value attached',
+    solution: 'Use the payable version of the function (e.g., executeOnProtocolWithValue instead of executeOnProtocol)',
+  },
   // Common protocol errors
   'ERC20: insufficient allowance': {
     description: 'Token allowance is insufficient for the transfer',
@@ -224,6 +228,11 @@ const ERROR_ABI = parseAbi([
   'error UnsupportedSelector()',
   'error Panic(uint256 code)',
 ])
+
+// Non-payable functions that have payable counterparts
+const NON_PAYABLE_WITH_VALUE_COUNTERPART: Record<string, string> = {
+  executeOnProtocol: 'executeOnProtocolWithValue',
+}
 
 // DeFiInteractorModule function signatures for decoding
 const MODULE_ABI = parseAbi([
@@ -1155,6 +1164,41 @@ async function analyzeFailedTx(txHash: string): Promise<AnalysisResult> {
     console.log(`│  Raw selector: ${input.slice(0, 10)}`)
   }
   console.log('└───────────────────────────────────────────────────────────────────┘')
+
+  // Check for non-payable function called with ETH value
+  const txValue = BigInt(tx.value)
+  if (decoded && txValue > 0n && NON_PAYABLE_WITH_VALUE_COUNTERPART[decoded.name]) {
+    const correctFunction = NON_PAYABLE_WITH_VALUE_COUNTERPART[decoded.name]
+    const errorInfo = CONTRACT_ERRORS['NonPayableFunctionWithValue']
+
+    result.error = {
+      name: 'NonPayableFunctionWithValue',
+      args: {
+        calledFunction: decoded.name,
+        correctFunction: correctFunction,
+        ethValue: formatEther(txValue),
+      },
+      description: `${errorInfo.description}. Called '${decoded.name}' with ${formatEther(txValue)} ETH, but this function is not payable.`,
+      solution: `Use '${correctFunction}' instead of '${decoded.name}' when sending ETH value.`,
+    }
+
+    console.log('\n┌─ 3. ERROR DETECTED (Pre-simulation) ─────────────────────────────┐')
+    console.log(`│  ⚠ NON-PAYABLE FUNCTION CALLED WITH ETH VALUE`)
+    console.log(`│`)
+    console.log(`│  Called:    ${decoded.name}`)
+    console.log(`│  ETH Value: ${formatEther(txValue)} ETH`)
+    console.log(`│  Problem:   This function does not accept ETH (not payable)`)
+    console.log(`│`)
+    console.log(`│  Solution:  Use '${correctFunction}' instead`)
+    console.log('└───────────────────────────────────────────────────────────────────┘')
+
+    // Skip simulation since we already know the error
+    console.log(`\n${'═'.repeat(70)}`)
+    console.log('  Analysis complete')
+    console.log(`${'═'.repeat(70)}\n`)
+
+    return result
+  }
 
   // If transaction failed, simulate to get error
   if (result.status === 'failed') {
