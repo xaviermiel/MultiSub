@@ -751,36 +751,68 @@ export function buildSubAccountState(
         // For multi-token LP deposits (N inputs → 1 output), we need to divide the output
         // proportionally among input tokens to avoid double-counting remainingOutputAmount
         const validInputCount = event.tokensIn.filter((_, i) => event.amountsIn[i] > 0n).length
+        const validOutputCount = event.tokensOut.filter((_, i) => event.amountsOut[i] > 0n).length
         const isMultiInputSingleOutput = validInputCount > 1 && event.tokensOut.length === 1
+        const isSingleInputMultiOutput = validInputCount === 1 && validOutputCount > 1
 
-        for (let i = 0; i < event.tokensIn.length; i++) {
-          const tokenIn = event.tokensIn[i]
-          const amountIn = event.amountsIn[i]
-          if (amountIn <= 0n) continue
+        if (isSingleInputMultiOutput) {
+          // Single input → multiple outputs: create a deposit record for each output
+          // Divide the input amount equally among output records
+          const tokenIn = event.tokensIn.find((_, i) => event.amountsIn[i] > 0n)!
+          const amountIn = event.amountsIn.find(a => a > 0n)!
+          const inputSharePerOutput = amountIn / BigInt(validOutputCount)
 
-          // Find corresponding output token (same index if available, otherwise first output)
-          const tokenOut = event.tokensOut[i] || event.tokensOut[0] || ('0x' as Address)
-          let amountOut = event.amountsOut[i] || event.amountsOut[0] || 0n
+          for (let i = 0; i < event.tokensOut.length; i++) {
+            const tokenOut = event.tokensOut[i]
+            const amountOut = event.amountsOut[i]
+            if (amountOut <= 0n) continue
 
-          // For multi-input → single-output LP deposits, divide output equally among inputs
-          // This prevents double-counting: if 2 tokens deposit into 1 LP, each record gets 50% of LP
-          if (isMultiInputSingleOutput && amountOut > 0n) {
-            amountOut = amountOut / BigInt(validInputCount)
-            log(`  DEPOSIT: multi-input LP detected, allocating ${amountOut} ${tokenOut} to ${tokenIn} input (1/${validInputCount} share)`)
+            log(`  DEPOSIT: single-input multi-output detected, allocating ${inputSharePerOutput} ${tokenIn} to ${tokenOut} output (1/${validOutputCount} share)`)
+
+            state.depositRecords.push({
+              subAccount: event.subAccount,
+              target: event.target,
+              tokenIn: tokenIn,
+              amountIn: inputSharePerOutput, // Each output gets proportional share of input
+              remainingAmount: inputSharePerOutput,
+              tokenOut: tokenOut,
+              amountOut: amountOut,
+              remainingOutputAmount: amountOut,
+              timestamp: event.timestamp,
+              originalAcquisitionTimestamp,
+            })
           }
+        } else {
+          // Standard case: loop over inputs
+          for (let i = 0; i < event.tokensIn.length; i++) {
+            const tokenIn = event.tokensIn[i]
+            const amountIn = event.amountsIn[i]
+            if (amountIn <= 0n) continue
 
-          state.depositRecords.push({
-            subAccount: event.subAccount,
-            target: event.target,
-            tokenIn: tokenIn,
-            amountIn: amountIn,
-            remainingAmount: amountIn,
-            tokenOut: tokenOut,
-            amountOut: amountOut,
-            remainingOutputAmount: amountOut,
-            timestamp: event.timestamp,
-            originalAcquisitionTimestamp,
-          })
+            // Find corresponding output token (same index if available, otherwise first output)
+            const tokenOut = event.tokensOut[i] || event.tokensOut[0] || ('0x' as Address)
+            let amountOut = event.amountsOut[i] || event.amountsOut[0] || 0n
+
+            // For multi-input → single-output LP deposits, divide output equally among inputs
+            // This prevents double-counting: if 2 tokens deposit into 1 LP, each record gets 50% of LP
+            if (isMultiInputSingleOutput && amountOut > 0n) {
+              amountOut = amountOut / BigInt(validInputCount)
+              log(`  DEPOSIT: multi-input LP detected, allocating ${amountOut} ${tokenOut} to ${tokenIn} input (1/${validInputCount} share)`)
+            }
+
+            state.depositRecords.push({
+              subAccount: event.subAccount,
+              target: event.target,
+              tokenIn: tokenIn,
+              amountIn: amountIn,
+              remainingAmount: amountIn,
+              tokenOut: tokenOut,
+              amountOut: amountOut,
+              remainingOutputAmount: amountOut,
+              timestamp: event.timestamp,
+              originalAcquisitionTimestamp,
+            })
+          }
         }
       }
 
@@ -1069,6 +1101,7 @@ const lastUpdateTimestamp = new Map<Address, bigint>()
 interface PendingTransaction {
   hash: `0x${string}`
   subAccount: Address
+  timestamp: bigint // Timestamp to set on successful confirmation
 }
 
 let pendingTransactions: PendingTransaction[] = []
@@ -1088,7 +1121,7 @@ async function prepareBatchUpdate(
   subAccount: Address,
   newAllowance: bigint,
   acquiredBalances: Map<Address, bigint>
-): Promise<{ tokens: Address[]; balances: bigint[]; allowanceChanged: boolean } | null> {
+): Promise<{ tokens: Address[]; balances: bigint[]; allowanceChanged: boolean; timestamp: bigint } | null> {
   // Get current on-chain values
   const onChainAllowance = await getOnChainSpendingAllowance(subAccount)
   const currentTimestamp = BigInt(Math.floor(Date.now() / 1000))
@@ -1178,10 +1211,8 @@ async function prepareBatchUpdate(
   log(`  Allowance: ${formatUnits(onChainAllowance, 18)} -> ${formatUnits(newAllowance, 18)}`)
   log(`  Tokens: ${tokens.length}`)
 
-  // Update last update timestamp (will be set after successful tx)
-  lastUpdateTimestamp.set(subAccountKey, currentTimestamp)
-
-  return { tokens, balances, allowanceChanged }
+  // Return timestamp to be set after successful tx confirmation (not before)
+  return { tokens, balances, allowanceChanged, timestamp: currentTimestamp }
 }
 
 /**
@@ -1239,9 +1270,21 @@ async function waitForPendingTransactions(): Promise<void> {
     })
   )
 
-  // Log summary
-  const successful = results.filter(r => r.status === 'fulfilled').length
-  const failed = results.filter(r => r.status === 'rejected').length
+  // Log summary and update timestamps for successful transactions
+  let successful = 0
+  let failed = 0
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i]
+    const tx = pendingTransactions[i]
+    if (result.status === 'fulfilled') {
+      successful++
+      // Only update timestamp after successful confirmation (not before TX submission)
+      const subAccountKey = tx.subAccount.toLowerCase() as Address
+      lastUpdateTimestamp.set(subAccountKey, tx.timestamp)
+    } else {
+      failed++
+    }
+  }
   log(`Transaction results: ${successful} confirmed, ${failed} failed`)
 
   // Clear pending transactions
@@ -1276,8 +1319,8 @@ async function pushBatchUpdate(
   // Increment nonce for next transaction
   currentNonce++
 
-  // Track pending transaction
-  pendingTransactions.push({ hash, subAccount })
+  // Track pending transaction with timestamp to set on success
+  pendingTransactions.push({ hash, subAccount, timestamp: prepared.timestamp })
 
   return hash
 }

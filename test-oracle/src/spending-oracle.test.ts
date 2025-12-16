@@ -1355,6 +1355,102 @@ describe('Complex real-world scenarios', () => {
       expect(state.acquiredBalances.get(TOKEN_USDC.toLowerCase() as Address)).toBe(1000n)
       expect(state.acquiredBalances.get(TOKEN_WETH.toLowerCase() as Address)).toBe(1n)
     })
+
+    it('should handle single-input multi-output deposits with separate deposit records', () => {
+      // Scenario: 1 input → 2 outputs (e.g., some protocols give back multiple receipt tokens)
+      // This tests the fix where only output[0] would get a deposit record, leaving output[1] orphaned
+      const TOKEN_RECEIPT_A = '0x7777777777777777777777777777777777777777' as Address
+      const TOKEN_RECEIPT_B = '0x8888888888888888888888888888888888888888' as Address
+
+      const events = [
+        // Single input → multiple outputs
+        createProtocolEvent({
+          opType: OperationType.DEPOSIT,
+          target: TARGET_AAVE,
+          tokensIn: [TOKEN_LINK],
+          amountsIn: [100n],
+          tokensOut: [TOKEN_RECEIPT_A, TOKEN_RECEIPT_B],
+          amountsOut: [50n, 30n],
+          spendingCost: 10n,
+          timestamp: HOUR_AGO,
+          blockNumber: 1000n,
+        }),
+      ]
+
+      const state = buildSubAccountState(events, [], SUB_ACCOUNT, NOW, WINDOW_DURATION)
+
+      // Should have 2 deposit records (one per output token)
+      expect(state.depositRecords.length).toBe(2)
+
+      // Each record should track its corresponding output, with input divided equally
+      const recordA = state.depositRecords.find(r => r.tokenOut.toLowerCase() === TOKEN_RECEIPT_A.toLowerCase())
+      const recordB = state.depositRecords.find(r => r.tokenOut.toLowerCase() === TOKEN_RECEIPT_B.toLowerCase())
+
+      expect(recordA).toBeDefined()
+      expect(recordB).toBeDefined()
+
+      // Input is divided equally among outputs (100 / 2 = 50 each)
+      expect(recordA!.amountIn).toBe(50n)
+      expect(recordB!.amountIn).toBe(50n)
+      expect(recordA!.remainingAmount).toBe(50n)
+      expect(recordB!.remainingAmount).toBe(50n)
+
+      // Each record tracks its own output amount
+      expect(recordA!.amountOut).toBe(50n)
+      expect(recordB!.amountOut).toBe(30n)
+      expect(recordA!.remainingOutputAmount).toBe(50n)
+      expect(recordB!.remainingOutputAmount).toBe(30n)
+
+      // Both output tokens should be in acquired balance
+      expect(state.acquiredBalances.get(TOKEN_RECEIPT_A.toLowerCase() as Address)).toBe(50n)
+      expect(state.acquiredBalances.get(TOKEN_RECEIPT_B.toLowerCase() as Address)).toBe(30n)
+    })
+
+    it('should correctly match withdrawals to single-input multi-output deposit records', () => {
+      // Full cycle: single-input multi-output deposit → withdraw each output
+      const TOKEN_RECEIPT_A = '0x7777777777777777777777777777777777777777' as Address
+      const TOKEN_RECEIPT_B = '0x8888888888888888888888888888888888888888' as Address
+
+      const events = [
+        // Deposit: 100 LINK → 50 RECEIPT_A + 30 RECEIPT_B
+        createProtocolEvent({
+          opType: OperationType.DEPOSIT,
+          target: TARGET_AAVE,
+          tokensIn: [TOKEN_LINK],
+          amountsIn: [100n],
+          tokensOut: [TOKEN_RECEIPT_A, TOKEN_RECEIPT_B],
+          amountsOut: [50n, 30n],
+          spendingCost: 10n,
+          timestamp: HOUR_AGO,
+          blockNumber: 1000n,
+        }),
+        // Withdraw using RECEIPT_A as input (simulating burning receipt token)
+        createProtocolEvent({
+          opType: OperationType.WITHDRAW,
+          target: TARGET_AAVE,
+          tokensIn: [],
+          amountsIn: [],
+          tokensOut: [TOKEN_LINK],
+          amountsOut: [50n], // Get back 50 LINK (proportional to the 50 input share)
+          spendingCost: 0n,
+          timestamp: NOW - 60n,
+          blockNumber: 1001n,
+        }),
+      ]
+
+      const state = buildSubAccountState(events, [], SUB_ACCOUNT, NOW, WINDOW_DURATION)
+
+      // First deposit record (for RECEIPT_A) should be fully consumed by the withdrawal
+      const recordA = state.depositRecords.find(r => r.tokenOut.toLowerCase() === TOKEN_RECEIPT_A.toLowerCase())
+      expect(recordA!.remainingAmount).toBe(0n) // 50 - 50 = 0 consumed
+
+      // Second deposit record (for RECEIPT_B) should be untouched
+      const recordB = state.depositRecords.find(r => r.tokenOut.toLowerCase() === TOKEN_RECEIPT_B.toLowerCase())
+      expect(recordB!.remainingAmount).toBe(50n) // Still has its 50 input share
+
+      // LINK should be acquired (withdrawn amount)
+      expect(state.acquiredBalances.get(TOKEN_LINK.toLowerCase() as Address)).toBe(50n)
+    })
   })
 
   describe('USD-weighted ratio calculation', () => {
