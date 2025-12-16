@@ -1168,6 +1168,112 @@ describe('Complex real-world scenarios', () => {
       expect(state.depositRecords[0].remainingAmount).toBe(0n) // First deposit fully consumed
       expect(state.depositRecords[1].remainingAmount).toBe(45n) // Second deposit partially consumed
     })
+
+    it('should handle multi-token LP deposits without double-counting output', () => {
+      // Scenario: LP deposit with 2 tokens IN → 1 LP token OUT
+      // This tests the fix for the double-counting bug where both deposit records
+      // would have the full amountOut, causing 2x remainingOutputAmount
+      const TOKEN_LP = '0x6666666666666666666666666666666666666666' as Address
+
+      const events = [
+        // LP Deposit: 1000 USDC + 1 WETH → 500 LP tokens
+        createProtocolEvent({
+          opType: OperationType.DEPOSIT,
+          target: TARGET_UNISWAP,
+          tokensIn: [TOKEN_USDC, TOKEN_WETH],
+          amountsIn: [1000n, 1n],
+          tokensOut: [TOKEN_LP],
+          amountsOut: [500n],
+          spendingCost: 100n,
+          timestamp: HOUR_AGO,
+          blockNumber: 1000n,
+        }),
+      ]
+
+      const state = buildSubAccountState(events, [], SUB_ACCOUNT, NOW, WINDOW_DURATION)
+
+      // Should have 2 deposit records (one per input token)
+      expect(state.depositRecords.length).toBe(2)
+
+      // Each record should have HALF of the LP output (250 each, not 500 each)
+      const usdcRecord = state.depositRecords.find(r => r.tokenIn.toLowerCase() === TOKEN_USDC.toLowerCase())
+      const wethRecord = state.depositRecords.find(r => r.tokenIn.toLowerCase() === TOKEN_WETH.toLowerCase())
+
+      expect(usdcRecord).toBeDefined()
+      expect(wethRecord).toBeDefined()
+      expect(usdcRecord!.amountOut).toBe(250n) // 500 / 2
+      expect(wethRecord!.amountOut).toBe(250n) // 500 / 2
+      expect(usdcRecord!.remainingOutputAmount).toBe(250n)
+      expect(wethRecord!.remainingOutputAmount).toBe(250n)
+
+      // Total remainingOutputAmount across all records should equal actual LP tokens (500)
+      const totalRemainingOutput = state.depositRecords.reduce((sum, r) => sum + r.remainingOutputAmount, 0n)
+      expect(totalRemainingOutput).toBe(500n) // Not 1000n (the bug)
+
+      // LP token should be in acquired balance
+      expect(state.acquiredBalances.get(TOKEN_LP.toLowerCase() as Address)).toBe(500n)
+    })
+
+    it('should correctly consume LP tokens on withdrawal after multi-token deposit', () => {
+      // Full cycle: multi-token deposit → withdrawal should not over-consume
+      const TOKEN_LP = '0x6666666666666666666666666666666666666666' as Address
+
+      const events = [
+        // LP Deposit: 1000 USDC + 1 WETH → 500 LP tokens
+        createProtocolEvent({
+          opType: OperationType.DEPOSIT,
+          target: TARGET_UNISWAP,
+          tokensIn: [TOKEN_USDC, TOKEN_WETH],
+          amountsIn: [1000n, 1n],
+          tokensOut: [TOKEN_LP],
+          amountsOut: [500n],
+          spendingCost: 100n,
+          timestamp: HOUR_AGO,
+          blockNumber: 1000n,
+        }),
+        // Withdraw USDC (full amount)
+        createProtocolEvent({
+          opType: OperationType.WITHDRAW,
+          target: TARGET_UNISWAP,
+          tokensIn: [],
+          amountsIn: [],
+          tokensOut: [TOKEN_USDC],
+          amountsOut: [1000n],
+          spendingCost: 0n,
+          timestamp: NOW - 60n,
+          blockNumber: 1001n,
+        }),
+        // Withdraw WETH (full amount)
+        createProtocolEvent({
+          opType: OperationType.WITHDRAW,
+          target: TARGET_UNISWAP,
+          tokensIn: [],
+          amountsIn: [],
+          tokensOut: [TOKEN_WETH],
+          amountsOut: [1n],
+          spendingCost: 0n,
+          timestamp: NOW,
+          blockNumber: 1002n,
+        }),
+      ]
+
+      const state = buildSubAccountState(events, [], SUB_ACCOUNT, NOW, WINDOW_DURATION)
+
+      // After full withdrawal, LP token acquired balance should be 0 or undefined
+      // (250 consumed by USDC withdrawal + 250 consumed by WETH withdrawal = 500 total)
+      const lpBalance = state.acquiredBalances.get(TOKEN_LP.toLowerCase() as Address) ?? 0n
+      expect(lpBalance).toBe(0n)
+
+      // Both deposit records should be fully consumed
+      expect(state.depositRecords[0].remainingAmount).toBe(0n)
+      expect(state.depositRecords[1].remainingAmount).toBe(0n)
+      expect(state.depositRecords[0].remainingOutputAmount).toBe(0n)
+      expect(state.depositRecords[1].remainingOutputAmount).toBe(0n)
+
+      // Withdrawn tokens should be acquired
+      expect(state.acquiredBalances.get(TOKEN_USDC.toLowerCase() as Address)).toBe(1000n)
+      expect(state.acquiredBalances.get(TOKEN_WETH.toLowerCase() as Address)).toBe(1n)
+    })
   })
 
   describe('Transfer scenarios', () => {

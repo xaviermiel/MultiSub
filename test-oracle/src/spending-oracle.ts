@@ -595,6 +595,12 @@ export function buildSubAccountState(
 
         // Create a deposit record linking input token to output token
         // This allows us to consume the output token (e.g., aLINK) when withdrawing the input token (LINK)
+
+        // For multi-token LP deposits (N inputs → 1 output), we need to divide the output
+        // proportionally among input tokens to avoid double-counting remainingOutputAmount
+        const validInputCount = event.tokensIn.filter((_, i) => event.amountsIn[i] > 0n).length
+        const isMultiInputSingleOutput = validInputCount > 1 && event.tokensOut.length === 1
+
         for (let i = 0; i < event.tokensIn.length; i++) {
           const tokenIn = event.tokensIn[i]
           const amountIn = event.amountsIn[i]
@@ -602,7 +608,14 @@ export function buildSubAccountState(
 
           // Find corresponding output token (same index if available, otherwise first output)
           const tokenOut = event.tokensOut[i] || event.tokensOut[0] || ('0x' as Address)
-          const amountOut = event.amountsOut[i] || event.amountsOut[0] || 0n
+          let amountOut = event.amountsOut[i] || event.amountsOut[0] || 0n
+
+          // For multi-input → single-output LP deposits, divide output equally among inputs
+          // This prevents double-counting: if 2 tokens deposit into 1 LP, each record gets 50% of LP
+          if (isMultiInputSingleOutput && amountOut > 0n) {
+            amountOut = amountOut / BigInt(validInputCount)
+            log(`  DEPOSIT: multi-input LP detected, allocating ${amountOut} ${tokenOut} to ${tokenIn} input (1/${validInputCount} share)`)
+          }
 
           state.depositRecords.push({
             subAccount: event.subAccount,
