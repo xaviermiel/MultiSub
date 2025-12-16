@@ -148,80 +148,92 @@ function log(message: string) {
   console.log(`[SpendingOracle ${new Date().toISOString()}] ${message}`)
 }
 
-// ============ Contract Read Functions ============
+// ============ Retry Helper ============
 
-async function getSafeValue(): Promise<bigint> {
+/**
+ * Retry an async operation once on failure, then throw
+ */
+async function retryOnce<T>(
+  operation: () => Promise<T>,
+  operationName: string
+): Promise<T> {
   try {
-    const [totalValueUSD] = await publicClient.readContract({
-      address: config.moduleAddress,
-      abi: DeFiInteractorModuleABI,
-      functionName: 'getSafeValue',
-    })
-    return totalValueUSD
-  } catch (error) {
-    log(`Error getting safe value: ${error}`)
-    return 0n
+    return await operation()
+  } catch (firstError) {
+    log(`${operationName} failed, retrying once: ${firstError}`)
+    try {
+      return await operation()
+    } catch (secondError) {
+      log(`${operationName} failed after retry: ${secondError}`)
+      throw secondError
+    }
   }
 }
 
+// ============ Contract Read Functions ============
+
+async function getSafeValue(): Promise<bigint> {
+  const [totalValueUSD] = await retryOnce(
+    () => publicClient.readContract({
+      address: config.moduleAddress,
+      abi: DeFiInteractorModuleABI,
+      functionName: 'getSafeValue',
+    }),
+    'getSafeValue'
+  )
+  return totalValueUSD
+}
+
 async function getSubAccountLimits(subAccount: Address): Promise<{ maxSpendingBps: bigint; windowDuration: bigint }> {
-  try {
-    const [maxSpendingBps, windowDuration] = await publicClient.readContract({
+  const [maxSpendingBps, windowDuration] = await retryOnce(
+    () => publicClient.readContract({
       address: config.moduleAddress,
       abi: DeFiInteractorModuleABI,
       functionName: 'getSubAccountLimits',
       args: [subAccount],
-    })
-    return { maxSpendingBps, windowDuration }
-  } catch (error) {
-    log(`Error getting sub-account limits: ${error}`)
-    return { maxSpendingBps: 500n, windowDuration: 86400n }
-  }
+    }),
+    `getSubAccountLimits(${subAccount})`
+  )
+  return { maxSpendingBps, windowDuration }
 }
 
 async function getActiveSubaccounts(): Promise<Address[]> {
-  try {
-    const subaccounts = await publicClient.readContract({
+  const subaccounts = await retryOnce(
+    () => publicClient.readContract({
       address: config.moduleAddress,
       abi: DeFiInteractorModuleABI,
       functionName: 'getSubaccountsByRole',
       args: [1], // DEFI_EXECUTE_ROLE
-    })
-    return subaccounts as Address[]
-  } catch (error) {
-    log(`Error getting subaccounts: ${error}`)
-    return []
-  }
+    }),
+    'getActiveSubaccounts'
+  )
+  return subaccounts as Address[]
 }
 
 async function getOnChainSpendingAllowance(subAccount: Address): Promise<bigint> {
-  try {
-    const allowance = await publicClient.readContract({
+  const allowance = await retryOnce(
+    () => publicClient.readContract({
       address: config.moduleAddress,
       abi: DeFiInteractorModuleABI,
       functionName: 'getSpendingAllowance',
       args: [subAccount],
-    })
-    return allowance as bigint
-  } catch (error) {
-    log(`Error getting on-chain spending allowance: ${error}`)
-    return 0n
-  }
+    }),
+    `getOnChainSpendingAllowance(${subAccount})`
+  )
+  return allowance as bigint
 }
 
 async function getOnChainAcquiredBalance(subAccount: Address, token: Address): Promise<bigint> {
-  try {
-    const balance = await publicClient.readContract({
+  const balance = await retryOnce(
+    () => publicClient.readContract({
       address: config.moduleAddress,
       abi: DeFiInteractorModuleABI,
       functionName: 'getAcquiredBalance',
       args: [subAccount, token],
-    })
-    return balance as bigint
-  } catch (error) {
-    log(`Error getting on-chain acquired balance: ${error}`)
-    return 0n
-  }
+    }),
+    `getOnChainAcquiredBalance(${subAccount}, ${token})`
+  )
+  return balance as bigint
 }
 
 // ============ Event Parsing ============
@@ -286,84 +298,92 @@ function parseTransferExecutedLog(log: Log): TransferExecutedEvent {
 
 // ============ Event Queries ============
 
+/**
+ * Fetch block timestamps with retry logic
+ * Throws if any block timestamp cannot be fetched after retry
+ */
+async function fetchBlockTimestamps(blockNumbers: bigint[]): Promise<Map<bigint, bigint>> {
+  const blockTimestamps = new Map<bigint, bigint>()
+
+  await Promise.all(
+    blockNumbers.map(async (blockNum) => {
+      const block = await retryOnce(
+        () => publicClient.getBlock({ blockNumber: blockNum }),
+        `getBlock(${blockNum})`
+      )
+      blockTimestamps.set(blockNum, block.timestamp)
+    })
+  )
+
+  return blockTimestamps
+}
+
 async function queryProtocolExecutionEvents(fromBlock: bigint, toBlock: bigint, subAccount?: Address): Promise<ProtocolExecutionEvent[]> {
-  try {
-    const logs = await publicClient.getLogs({
+  const logs = await retryOnce(
+    () => publicClient.getLogs({
       address: config.moduleAddress,
       event: PROTOCOL_EXECUTION_EVENT,
       fromBlock,
       toBlock,
       args: subAccount ? { subAccount } : undefined,
-    })
+    }),
+    'queryProtocolExecutionEvents'
+  )
 
-    const events = logs.map(parseProtocolExecutionLog)
+  const events = logs.map(parseProtocolExecutionLog)
 
-    // Fetch block timestamps for accurate window calculations
-    const uniqueBlocks = [...new Set(events.map(e => e.blockNumber))]
-    const blockTimestamps = new Map<bigint, bigint>()
-
-    await Promise.all(
-      uniqueBlocks.map(async (blockNum) => {
-        try {
-          const block = await publicClient.getBlock({ blockNumber: blockNum })
-          blockTimestamps.set(blockNum, block.timestamp)
-        } catch (err) {
-          // Fallback to current time if block fetch fails
-          blockTimestamps.set(blockNum, BigInt(Math.floor(Date.now() / 1000)))
-        }
-      })
-    )
-
-    // Update event timestamps
-    for (const event of events) {
-      event.timestamp = blockTimestamps.get(event.blockNumber) || BigInt(Math.floor(Date.now() / 1000))
-    }
-
+  if (events.length === 0) {
     return events
-  } catch (error) {
-    log(`Error querying protocol execution events: ${error}`)
-    return []
   }
+
+  // Fetch block timestamps for accurate window calculations
+  const uniqueBlocks = [...new Set(events.map(e => e.blockNumber))]
+  const blockTimestamps = await fetchBlockTimestamps(uniqueBlocks)
+
+  // Update event timestamps - all blocks must have timestamps at this point
+  for (const event of events) {
+    const timestamp = blockTimestamps.get(event.blockNumber)
+    if (timestamp === undefined) {
+      throw new Error(`Missing timestamp for block ${event.blockNumber}`)
+    }
+    event.timestamp = timestamp
+  }
+
+  return events
 }
 
 async function queryTransferEvents(fromBlock: bigint, toBlock: bigint, subAccount?: Address): Promise<TransferExecutedEvent[]> {
-  try {
-    const logs = await publicClient.getLogs({
+  const logs = await retryOnce(
+    () => publicClient.getLogs({
       address: config.moduleAddress,
       event: TRANSFER_EXECUTED_EVENT,
       fromBlock,
       toBlock,
       args: subAccount ? { subAccount } : undefined,
-    })
+    }),
+    'queryTransferEvents'
+  )
 
-    const events = logs.map(parseTransferExecutedLog)
+  const events = logs.map(parseTransferExecutedLog)
 
-    // Fetch block timestamps for accurate window calculations
-    const uniqueBlocks = [...new Set(events.map(e => e.blockNumber))]
-    const blockTimestamps = new Map<bigint, bigint>()
-
-    await Promise.all(
-      uniqueBlocks.map(async (blockNum) => {
-        try {
-          const block = await publicClient.getBlock({ blockNumber: blockNum })
-          blockTimestamps.set(blockNum, block.timestamp)
-        } catch (err) {
-          // Fallback to current time if block fetch fails
-          blockTimestamps.set(blockNum, BigInt(Math.floor(Date.now() / 1000)))
-        }
-      })
-    )
-
-    // Update event timestamps
-    for (const event of events) {
-      event.timestamp = blockTimestamps.get(event.blockNumber) || BigInt(Math.floor(Date.now() / 1000))
-    }
-
+  if (events.length === 0) {
     return events
-  } catch (error) {
-    log(`Error querying transfer events: ${error}`)
-    return []
   }
+
+  // Fetch block timestamps for accurate window calculations
+  const uniqueBlocks = [...new Set(events.map(e => e.blockNumber))]
+  const blockTimestamps = await fetchBlockTimestamps(uniqueBlocks)
+
+  // Update event timestamps - all blocks must have timestamps at this point
+  for (const event of events) {
+    const timestamp = blockTimestamps.get(event.blockNumber)
+    if (timestamp === undefined) {
+      throw new Error(`Missing timestamp for block ${event.blockNumber}`)
+    }
+    event.timestamp = timestamp
+  }
+
+  return events
 }
 
 /**
@@ -374,27 +394,29 @@ async function queryTransferEvents(fromBlock: bigint, toBlock: bigint, subAccoun
 async function queryHistoricalAcquiredTokens(subAccount: Address): Promise<Set<Address>> {
   const tokens = new Set<Address>()
 
-  try {
-    // Query from a reasonable lookback - use extended range to catch all historical tokens
-    const currentBlock = await publicClient.getBlockNumber()
-    const fromBlock = currentBlock - BigInt(config.blocksToLookBack * 2)
+  // Query from a reasonable lookback - use extended range to catch all historical tokens
+  const currentBlock = await retryOnce(
+    () => publicClient.getBlockNumber(),
+    'getBlockNumber'
+  )
+  const fromBlock = currentBlock - BigInt(config.blocksToLookBack * 2)
 
-    const logs = await publicClient.getLogs({
+  const logs = await retryOnce(
+    () => publicClient.getLogs({
       address: config.moduleAddress,
       event: ACQUIRED_BALANCE_UPDATED_EVENT,
       fromBlock,
       toBlock: currentBlock,
       args: { subAccount },
-    })
+    }),
+    `queryHistoricalAcquiredTokens(${subAccount})`
+  )
 
-    for (const log of logs) {
-      const token = log.args.token as Address
-      if (token) {
-        tokens.add(token.toLowerCase() as Address)
-      }
+  for (const logEntry of logs) {
+    const token = logEntry.args.token as Address
+    if (token) {
+      tokens.add(token.toLowerCase() as Address)
     }
-  } catch (error) {
-    log(`Error querying historical acquired tokens: ${error}`)
   }
 
   return tokens
