@@ -1202,6 +1202,54 @@ describe('Complex real-world scenarios', () => {
       expect(state.depositRecords[1].remainingAmount).toBe(45n) // Second deposit partially consumed
     })
 
+    it('should handle withdrawal when output tokens have expired', () => {
+      // Scenario: Deposit aTokens, wait for them to expire, then withdraw
+      // The deposit record should only reduce by actual consumed amount from queue
+      const events = [
+        // Deposit 100 LINK → get 100 aLINK (2 days ago, outside window)
+        createProtocolEvent({
+          opType: OperationType.DEPOSIT,
+          target: TARGET_AAVE,
+          tokensIn: [TOKEN_LINK],
+          amountsIn: [100n],
+          tokensOut: [TOKEN_ALINK],
+          amountsOut: [100n],
+          spendingCost: 0n,
+          timestamp: TWO_DAYS_AGO, // Outside window, aLINK will be expired
+          blockNumber: 1000n,
+        }),
+        // Withdraw 50 LINK
+        createProtocolEvent({
+          opType: OperationType.WITHDRAW,
+          target: TARGET_AAVE,
+          tokensIn: [],
+          amountsIn: [],
+          tokensOut: [TOKEN_LINK],
+          amountsOut: [50n],
+          spendingCost: 0n,
+          timestamp: NOW,
+          blockNumber: 1001n,
+        }),
+      ]
+
+      const state = buildSubAccountState(events, [], SUB_ACCOUNT, NOW, WINDOW_DURATION)
+
+      // The deposit was matched (remainingAmount reduced)
+      expect(state.depositRecords[0].remainingAmount).toBe(50n)
+
+      // The aLINK was expired, so actual queue consumption was 0
+      // remainingOutputAmount should only be reduced by actual consumption (0), not calculated (50)
+      // This tests the fix where we update based on actual queue consumption
+      expect(state.depositRecords[0].remainingOutputAmount).toBe(100n) // Unchanged because aLINK expired
+
+      // Withdrawn LINK should be acquired (inherits deposit timestamp, which is expired)
+      // Since it inherits TWO_DAYS_AGO timestamp, it's also expired
+      expect(state.acquiredBalances.get(TOKEN_LINK.toLowerCase() as Address) ?? 0n).toBe(0n)
+
+      // aLINK should have 0 acquired balance (all expired)
+      expect(state.acquiredBalances.get(TOKEN_ALINK.toLowerCase() as Address) ?? 0n).toBe(0n)
+    })
+
     it('should handle multi-token LP deposits without double-counting output', () => {
       // Scenario: LP deposit with 2 tokens IN → 1 LP token OUT
       // This tests the fix for the double-counting bug where both deposit records

@@ -871,7 +871,8 @@ export function buildSubAccountState(
           let matchedOriginalTimestamp: bigint | null = null
 
           // Track output tokens to consume from acquired queue (e.g., aLINK when withdrawing LINK)
-          const outputTokensToConsume: { token: Address; amount: bigint }[] = []
+          // We track the deposit reference so we can update remainingOutputAmount after actual queue consumption
+          const outputTokensToConsume: { token: Address; amount: bigint; deposit: DepositRecord }[] = []
 
           for (const deposit of state.depositRecords) {
             if (remainingToMatch <= 0n) break
@@ -890,20 +891,22 @@ export function buildSubAccountState(
 
               // Calculate proportional output token consumption (e.g., aLINK)
               // If we're withdrawing 50% of the deposited amount, consume 50% of the output token
+              // NOTE: We don't reduce remainingOutputAmount here - we do it after actual queue consumption
+              // to handle cases where queue entries have expired
               if (deposit.tokenOut && deposit.tokenOut !== '0x' && deposit.remainingOutputAmount > 0n) {
                 const ratio = (consumeAmount * 10000n) / deposit.amountIn
                 const outputToConsume = (deposit.amountOut * ratio) / 10000n
-                const actualConsume = outputToConsume > deposit.remainingOutputAmount
+                const maxConsume = outputToConsume > deposit.remainingOutputAmount
                   ? deposit.remainingOutputAmount
                   : outputToConsume
 
-                if (actualConsume > 0n) {
-                  deposit.remainingOutputAmount -= actualConsume
+                if (maxConsume > 0n) {
                   outputTokensToConsume.push({
                     token: deposit.tokenOut.toLowerCase() as Address,
-                    amount: actualConsume
+                    amount: maxConsume,
+                    deposit: deposit
                   })
-                  log(`  ${OperationType[event.opType]} will consume ${actualConsume} ${deposit.tokenOut} (deposit output token)`)
+                  log(`  ${OperationType[event.opType]} will consume up to ${maxConsume} ${deposit.tokenOut} (deposit output token)`)
                 }
               }
 
@@ -920,11 +923,16 @@ export function buildSubAccountState(
 
           // Consume the deposit's output tokens (e.g., aLINK) from the acquired queue
           // These tokens were added when depositing and should be removed when withdrawing
-          for (const { token, amount } of outputTokensToConsume) {
+          // We update deposit.remainingOutputAmount based on actual consumption (not calculated)
+          // to handle cases where queue entries have expired
+          for (const { token, amount, deposit } of outputTokensToConsume) {
             const outputTokenQueue = getQueue(token)
             tokensWithAcquiredHistory.add(token)
             const { consumed } = consumeFromQueue(outputTokenQueue, amount, event.timestamp, windowDuration)
             const totalConsumed = consumed.reduce((sum, e) => sum + e.amount, 0n)
+
+            // Update deposit record with actual amount consumed (may be less than requested if expired)
+            deposit.remainingOutputAmount -= totalConsumed
             log(`  ${OperationType[event.opType]} consumed ${totalConsumed} ${token} from acquired queue (deposit receipt token)`)
           }
 
