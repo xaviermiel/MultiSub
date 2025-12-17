@@ -29,10 +29,16 @@ contract UniversalRouterParser is ICalldataParser {
     // Command types
     uint8 public constant V3_SWAP_EXACT_IN = 0x00;
     uint8 public constant V3_SWAP_EXACT_OUT = 0x01;
+    uint8 public constant SWEEP = 0x04;
+    uint8 public constant PAY_PORTION = 0x06;
     uint8 public constant V2_SWAP_EXACT_IN = 0x08;
     uint8 public constant V2_SWAP_EXACT_OUT = 0x09;
     uint8 public constant WRAP_ETH = 0x0b;
     uint8 public constant UNWRAP_WETH = 0x0c;
+
+    // Universal Router special address constants (resolved at runtime)
+    address public constant MSG_SENDER = address(1);
+    address public constant ADDRESS_THIS = address(2);
 
     // WETH address on Sepolia (also used to represent native ETH in paths)
     address public constant WETH = 0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14;
@@ -219,23 +225,41 @@ contract UniversalRouterParser is ICalldataParser {
 
         (bytes memory commands, bytes[] memory inputs,) = abi.decode(data[4:], (bytes, bytes[], uint256));
 
-        // Find first swap or wrap/unwrap command to get recipient
-        for (uint256 i = 0; i < commands.length && i < inputs.length; i++) {
-            uint8 command = uint8(commands[i]) & 0x3f; // Mask off flag bits
+        // Universal Router uses special address constants:
+        // - address(1) = MSG_SENDER: resolved to msg.sender at runtime
+        // - address(2) = ADDRESS_THIS: resolved to router address at runtime (intermediate)
+        //
+        // Strategy: Look for final recipient in order of priority:
+        // 1. SWEEP command (always sends to final recipient)
+        // 2. UNWRAP_WETH (if recipient is not ADDRESS_THIS)
+        // 3. Swap commands (if recipient is not ADDRESS_THIS)
+        // 4. Default to Safe address
 
-            if (command == WRAP_ETH) {
-                // WRAP_ETH params: (address recipient, uint256 amount)
-                bytes memory wrapInput = inputs[i];
-                if (wrapInput.length >= 64) {
-                    (recipient,) = abi.decode(wrapInput, (address, uint256));
-                    return recipient;
+        // First pass: look for SWEEP which always has the final recipient
+        for (uint256 i = 0; i < commands.length && i < inputs.length; i++) {
+            uint8 command = uint8(commands[i]) & 0x3f;
+            if (command == SWEEP) {
+                // SWEEP params: (address token, address recipient, uint256 amountMin)
+                bytes memory sweepInput = inputs[i];
+                if (sweepInput.length >= 64) {
+                    (, recipient) = abi.decode(sweepInput, (address, address));
+                    return _resolveRecipient(recipient, defaultRecipient);
                 }
-            } else if (command == UNWRAP_WETH) {
+            }
+        }
+
+        // Second pass: look for UNWRAP_WETH or swaps with non-intermediate recipient
+        for (uint256 i = 0; i < commands.length && i < inputs.length; i++) {
+            uint8 command = uint8(commands[i]) & 0x3f;
+
+            if (command == UNWRAP_WETH) {
                 // UNWRAP_WETH params: (address recipient, uint256 amountMin)
                 bytes memory unwrapInput = inputs[i];
                 if (unwrapInput.length >= 64) {
                     (recipient,) = abi.decode(unwrapInput, (address, uint256));
-                    return recipient;
+                    if (recipient != ADDRESS_THIS) {
+                        return _resolveRecipient(recipient, defaultRecipient);
+                    }
                 }
             } else if (command == V3_SWAP_EXACT_IN || command == V3_SWAP_EXACT_OUT ||
                        command == V2_SWAP_EXACT_IN || command == V2_SWAP_EXACT_OUT) {
@@ -243,13 +267,26 @@ contract UniversalRouterParser is ICalldataParser {
                 bytes memory swapInput = inputs[i];
                 if (swapInput.length >= 32) {
                     recipient = abi.decode(swapInput, (address));
-                    return recipient;
+                    if (recipient != ADDRESS_THIS) {
+                        return _resolveRecipient(recipient, defaultRecipient);
+                    }
                 }
             }
         }
 
-        // No explicit recipient found, use default (Safe address)
+        // No explicit final recipient found, use default (Safe address)
         return defaultRecipient;
+    }
+
+    /// @notice Resolve special Universal Router address constants
+    /// @param recipient The recipient address from calldata
+    /// @param defaultRecipient The Safe address to use for MSG_SENDER
+    /// @return The resolved recipient address
+    function _resolveRecipient(address recipient, address defaultRecipient) internal pure returns (address) {
+        if (recipient == MSG_SENDER) {
+            return defaultRecipient; // MSG_SENDER = Safe address
+        }
+        return recipient;
     }
 
     /// @inheritdoc ICalldataParser
