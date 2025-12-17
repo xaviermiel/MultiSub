@@ -32,6 +32,7 @@ contract ConfigureSubaccount is Script, SafeTxHelper {
     address constant UNISWAP_V4_POSITION_MANAGER = 0x429ba70129df741B2Ca2a85BC3A2a3328e5c09b4;
     address constant UNIVERSAL_ROUTER = 0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD;
     address constant PANCAKESWAP_UNIVERSAL_ROUTER = 0x55D32fa7Da7290838347bc97cb7fAD4992672255;
+    address constant UNISWAP_UNIVERSAL_ROUTER_V2 = 0x3A9D48AB9751398BbFa63ad67599Bb04e4BdF98b;
     address constant MERKL_DISTRIBUTOR = 0x3Ef3D8bA38EBe18DB133cEc108f4D14CE00Dd9Ae;
 
     function run() external {
@@ -88,7 +89,7 @@ contract ConfigureSubaccount is Script, SafeTxHelper {
 
         // 4. Whitelist protocol addresses
         console.log("\n4. Whitelisting protocol addresses...");
-        address[] memory protocols = new address[](8);
+        address[] memory protocols = new address[](9);
         protocols[0] = AAVE_V3_POOL;
         protocols[1] = AAVE_V3_REWARDS;
         protocols[2] = UNISWAP_V3_ROUTER;
@@ -96,7 +97,8 @@ contract ConfigureSubaccount is Script, SafeTxHelper {
         protocols[4] = UNISWAP_V4_POSITION_MANAGER;
         protocols[5] = UNIVERSAL_ROUTER;
         protocols[6] = PANCAKESWAP_UNIVERSAL_ROUTER;
-        protocols[7] = MERKL_DISTRIBUTOR;
+        protocols[7] = UNISWAP_UNIVERSAL_ROUTER_V2;
+        protocols[8] = MERKL_DISTRIBUTOR;
 
         _executeSafeTx(safe, module, abi.encodeWithSignature(
             "setAllowedAddresses(address,address[],bool)",

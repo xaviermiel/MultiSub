@@ -35,6 +35,8 @@ contract UpdateParser is Script, SafeTxHelper {
     address constant NONFUNGIBLE_POSITION_MANAGER = 0x1238536071E1c677A632429e3655c799b22cDA52;
     address constant UNISWAP_V4_POSITION_MANAGER = 0x429ba70129df741B2Ca2a85BC3A2a3328e5c09b4;
     address constant UNIVERSAL_ROUTER = 0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD;
+    address constant PANCAKESWAP_UNIVERSAL_ROUTER = 0x55D32fa7Da7290838347bc97cb7fAD4992672255;
+    address constant UNISWAP_UNIVERSAL_ROUTER_V2 = 0x3A9D48AB9751398BbFa63ad67599Bb04e4BdF98b;
     address constant MERKL_DISTRIBUTOR = 0x3Ef3D8bA38EBe18DB133cEc108f4D14CE00Dd9Ae;
 
     address safe;
@@ -157,6 +159,16 @@ contract UpdateParser is Script, SafeTxHelper {
         console.log("Registering for Universal Router...");
         _executeSafeTx(safe, module, abi.encodeWithSignature(
             "registerParser(address,address)", UNIVERSAL_ROUTER, address(parser)
+        ), deployerPrivateKey);
+
+        console.log("Registering for PancakeSwap Universal Router...");
+        _executeSafeTx(safe, module, abi.encodeWithSignature(
+            "registerParser(address,address)", PANCAKESWAP_UNIVERSAL_ROUTER, address(parser)
+        ), deployerPrivateKey);
+
+        console.log("Registering for Uniswap Universal Router V2...");
+        _executeSafeTx(safe, module, abi.encodeWithSignature(
+            "registerParser(address,address)", UNISWAP_UNIVERSAL_ROUTER_V2, address(parser)
         ), deployerPrivateKey);
 
         if (extraProtocol != address(0)) {
