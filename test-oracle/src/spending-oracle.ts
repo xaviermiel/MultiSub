@@ -859,7 +859,7 @@ export function buildSubAccountState(
 
           if (totalConsumed > 0n && fromNonAcquired > 0n) {
             // Mixed case: proportionally split the output
-            // Acquired portion inherits oldest timestamp, non-acquired portion is newly acquired
+            // Acquired portion inherits timestamps proportionally, non-acquired portion is newly acquired
 
             // Use USD-weighted ratio if we have prices for all input tokens
             // This correctly handles multi-token inputs with different values (e.g., 1 WETH + 1000 USDC)
@@ -878,32 +878,40 @@ export function buildSubAccountState(
             const outputFromAcquired = (amountOut * acquiredRatio) / 10000n
             const outputFromNonAcquired = amountOut - outputFromAcquired
 
-            // Find oldest timestamp from consumed entries
-            const oldestTimestamp = consumedEntries.reduce(
-              (oldest, entry) => entry.originalTimestamp < oldest ? entry.originalTimestamp : oldest,
-              consumedEntries[0].originalTimestamp
-            )
-
             const opName = OperationType[event.opType]
             if (useUSDWeighting) {
               log(`  ${opName}: mixed input (USD-weighted) - $${formatUnits(consumedValueUSD, 18)} acquired + $${formatUnits(totalValueInUSD - consumedValueUSD, 18)} non-acquired`)
             } else {
               log(`  ${opName}: mixed input - ${totalConsumed} acquired + ${fromNonAcquired} non-acquired`)
             }
-            log(`    ${outputFromAcquired} ${tokenOut} inherits timestamp ${oldestTimestamp} (${acquiredRatio / 100n}% acquired)`)
-            log(`    ${outputFromNonAcquired} ${tokenOut} newly acquired at ${event.timestamp}`)
 
-            addToQueue(outputQueue, outputFromAcquired, oldestTimestamp)
+            // Proportionally split the acquired output among consumed entries by their amounts
+            // Each consumed entry's portion of the output inherits that entry's timestamp
+            for (const entry of consumedEntries) {
+              const entryRatio = (entry.amount * 10000n) / totalConsumed
+              const entryOutput = (outputFromAcquired * entryRatio) / 10000n
+              if (entryOutput > 0n) {
+                log(`    ${entryOutput} ${tokenOut} inherits timestamp ${entry.originalTimestamp}`)
+                addToQueue(outputQueue, entryOutput, entry.originalTimestamp)
+              }
+            }
+
+            log(`    ${outputFromNonAcquired} ${tokenOut} newly acquired at ${event.timestamp}`)
             addToQueue(outputQueue, outputFromNonAcquired, event.timestamp)
           } else if (totalConsumed > 0n) {
-            // Entire input was acquired - output inherits oldest timestamp
-            const oldestTimestamp = consumedEntries.reduce(
-              (oldest, entry) => entry.originalTimestamp < oldest ? entry.originalTimestamp : oldest,
-              consumedEntries[0].originalTimestamp
-            )
+            // Entire input was acquired - output inherits timestamps proportionally from consumed entries
             const opName = OperationType[event.opType]
-            log(`  ${opName}: ${amountOut} ${tokenOut} inherits timestamp ${oldestTimestamp} from consumed acquired tokens`)
-            addToQueue(outputQueue, amountOut, oldestTimestamp)
+
+            // Proportionally split the output among consumed entries by their amounts
+            // Each consumed entry's portion of the output inherits that entry's timestamp
+            for (const entry of consumedEntries) {
+              const entryRatio = (entry.amount * 10000n) / totalConsumed
+              const entryOutput = (amountOut * entryRatio) / 10000n
+              if (entryOutput > 0n) {
+                log(`  ${opName}: ${entryOutput} ${tokenOut} inherits timestamp ${entry.originalTimestamp}`)
+                addToQueue(outputQueue, entryOutput, entry.originalTimestamp)
+              }
+            }
           } else {
             // No acquired input - output is newly acquired
             const opName = OperationType[event.opType]
@@ -928,7 +936,6 @@ export function buildSubAccountState(
           const outputTokensToConsume: { token: Address; amount: bigint; deposit: DepositRecord }[] = []
 
           // Track matched amounts per timestamp - each deposit portion inherits its own timestamp
-          // This fixes the bug where all matched amounts inherited the oldest timestamp
           const matchedByTimestamp: { amount: bigint; timestamp: bigint }[] = []
 
           for (const deposit of state.depositRecords) {
