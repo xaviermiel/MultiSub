@@ -680,6 +680,35 @@ function decodeContractError(errorData: Hex): { name: string; args?: Record<stri
   }
 }
 
+// ============ Tenderly Trace Fetching ============
+async function fetchTenderlyTrace(
+  txHash: string,
+  chainId: number = 11155111 // Sepolia
+): Promise<{ errorData?: Hex; error?: string } | null> {
+  try {
+    const response = await fetch(
+      `https://api.tenderly.co/api/v1/public-contract/${chainId}/trace/${txHash}`
+    )
+
+    if (!response.ok) {
+      return null
+    }
+
+    const data = await response.json()
+
+    if (data.call_trace?.error_hex_data) {
+      return {
+        errorData: data.call_trace.error_hex_data as Hex,
+        error: data.call_trace.error,
+      }
+    }
+
+    return null
+  } catch {
+    return null
+  }
+}
+
 // ============ Simulation with Trace Support ============
 async function simulateWithTrace(
   client: PublicClient,
@@ -878,6 +907,28 @@ async function lookupRichContext(
       if (result.innerCall?.decoded?.args) {
         const tokenAddress = result.innerCall.target
         const symbol = await getTokenSymbol(client, tokenAddress)
+        const decimals = await getTokenDecimals(client, tokenAddress)
+
+        // For ApprovalExceedsLimit, show spender info and whitelist status
+        if (result.error?.name === 'ApprovalExceedsLimit' && result.innerCall.decoded.args.spender) {
+          const spender = result.innerCall.decoded.args.spender as Address
+          const spenderName = getProtocolName(spender) || `${spender.slice(0, 10)}...${spender.slice(-8)}`
+          context['Spender'] = `${spenderName} (${spender})`
+
+          // Check if spender is whitelisted
+          try {
+            const isAllowed = await client.readContract({
+              address: moduleAddress,
+              abi: MODULE_VIEW_ABI,
+              functionName: 'allowedAddresses',
+              args: [result.from, spender],
+              blockNumber,
+            })
+            context['Spender Whitelisted'] = isAllowed ? 'Yes' : 'No (could also be SpenderNotAllowed)'
+          } catch {
+            // Whitelist check failed
+          }
+        }
 
         // Get acquired balance for this token
         const acquired = await client.readContract({
@@ -887,7 +938,6 @@ async function lookupRichContext(
           args: [result.from, tokenAddress],
           blockNumber,
         })
-        const decimals = await getTokenDecimals(client, tokenAddress)
         context[`Acquired ${symbol}`] = formatAmount(acquired, decimals, symbol)
 
         // Get Safe's token balance
@@ -899,6 +949,12 @@ async function lookupRichContext(
           blockNumber,
         })
         context[`Safe ${symbol} Balance`] = formatAmount(balance, decimals, symbol)
+
+        // Show the approval amount being requested
+        if (result.innerCall.decoded.args.amount) {
+          const amount = result.innerCall.decoded.args.amount as bigint
+          context['Approval Amount'] = formatAmount(amount, decimals, symbol)
+        }
 
         // Try to get token price
         try {
@@ -1242,8 +1298,46 @@ async function analyzeFailedTx(txHash: string): Promise<AnalysisResult> {
         const isEchoedCalldata = inputSelector === errorSelector && simResult.errorData.length > 100
 
         if (isEchoedCalldata) {
-          console.log(`│  Note: RPC returned calldata as error (no archive state for block ${result.blockNumber})`)
-          console.log(`│  Cannot determine exact error from this RPC`)
+          console.log(`│  Note: RPC lacks archive state for block ${result.blockNumber}`)
+
+          // Try Tenderly's public API for actual error data
+          console.log(`│  Fetching trace from Tenderly...`)
+          const tenderlyTrace = await fetchTenderlyTrace(txHash)
+
+          if (tenderlyTrace?.errorData) {
+            console.log(`│  ✓ Got error from Tenderly: ${tenderlyTrace.errorData}`)
+
+            const decodedError = decodeContractError(tenderlyTrace.errorData)
+            if (decodedError) {
+              const errorInfo = CONTRACT_ERRORS[decodedError.name]
+
+              result.error = {
+                name: decodedError.name,
+                args: decodedError.args,
+                description: errorInfo?.description || 'Unknown error',
+                solution: errorInfo?.solution || 'Check contract source for error details',
+                rawData: tenderlyTrace.errorData,
+              }
+            }
+          } else {
+            console.log(`│  Could not fetch trace from Tenderly`)
+
+            // Fall back to inferring from call type
+            if (result.innerCall?.decoded?.functionName === 'approve') {
+              console.log(`│`)
+              console.log(`│  ⚠ Detected failed approve() call - likely errors:`)
+              console.log(`│    • ApprovalExceedsLimit - approval amount exceeds spending allowance`)
+              console.log(`│    • SpenderNotAllowed - spender address not whitelisted`)
+
+              // Set a likely error for context lookup
+              result.error = {
+                name: 'ApprovalExceedsLimit',
+                description: CONTRACT_ERRORS['ApprovalExceedsLimit'].description,
+                solution: CONTRACT_ERRORS['ApprovalExceedsLimit'].solution,
+                rawData: simResult.errorData,
+              }
+            }
+          }
         } else {
           console.log(`│  Error data: ${simResult.errorData}`)
 
@@ -1322,17 +1416,36 @@ async function analyzeFailedTx(txHash: string): Promise<AnalysisResult> {
     // Rich context lookup
     const moduleAddress = process.env.MODULE_ADDRESS as Address
     if (moduleAddress) {
-      console.log('\n┌─ 5. STATE CONTEXT (at block before tx) ─────────────────────────┐')
-      const context = await lookupRichContext(
+      // Try historical state first, fall back to current state if unavailable
+      let context = await lookupRichContext(
         client,
         result,
         moduleAddress,
         BigInt(tx.blockNumber) - 1n
       )
+
+      let usingCurrentState = false
+      if (context['Context Error']) {
+        // Historical state unavailable, try current state
+        console.log('\n┌─ 5. STATE CONTEXT (current - historical unavailable) ──────────┐')
+        console.log('│  ⚠ Note: Showing CURRENT state, may differ from tx time')
+        context = await lookupRichContext(
+          client,
+          result,
+          moduleAddress,
+          undefined as unknown as bigint // Use latest block
+        )
+        usingCurrentState = true
+      } else {
+        console.log('\n┌─ 5. STATE CONTEXT (at block before tx) ─────────────────────────┐')
+      }
+
       result.context = context
 
       Object.entries(context).forEach(([key, value]) => {
-        console.log(`│  ${key}: ${value}`)
+        if (key !== 'Context Error' || !usingCurrentState) {
+          console.log(`│  ${key}: ${value}`)
+        }
       })
       console.log('└───────────────────────────────────────────────────────────────────┘')
     }
