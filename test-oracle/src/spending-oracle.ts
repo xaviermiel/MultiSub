@@ -922,11 +922,14 @@ export function buildSubAccountState(
 
           // Find matching deposits
           let remainingToMatch = amountOut
-          let matchedOriginalTimestamp: bigint | null = null
 
           // Track output tokens to consume from acquired queue (e.g., aLINK when withdrawing LINK)
           // We track the deposit reference so we can update remainingOutputAmount after actual queue consumption
           const outputTokensToConsume: { token: Address; amount: bigint; deposit: DepositRecord }[] = []
+
+          // Track matched amounts per timestamp - each deposit portion inherits its own timestamp
+          // This fixes the bug where all matched amounts inherited the oldest timestamp
+          const matchedByTimestamp: { amount: bigint; timestamp: bigint }[] = []
 
           for (const deposit of state.depositRecords) {
             if (remainingToMatch <= 0n) break
@@ -964,12 +967,12 @@ export function buildSubAccountState(
                 }
               }
 
-              // Track the original acquisition timestamp for inheritance (not the deposit timestamp)
-              // This ensures the full chain of acquired status is preserved:
-              // Original swap → deposit → withdrawal all share the same original timestamp
-              if (matchedOriginalTimestamp === null || deposit.originalAcquisitionTimestamp < matchedOriginalTimestamp) {
-                matchedOriginalTimestamp = deposit.originalAcquisitionTimestamp
-              }
+              // Track this matched portion with its own timestamp (not the oldest across all deposits)
+              // This ensures each deposit's portion inherits its correct original acquisition timestamp
+              matchedByTimestamp.push({
+                amount: consumeAmount,
+                timestamp: deposit.originalAcquisitionTimestamp
+              })
 
               log(`  ${OperationType[event.opType]} consuming ${consumeAmount} from deposit (original acquisition: ${deposit.originalAcquisitionTimestamp})`)
             }
@@ -990,15 +993,17 @@ export function buildSubAccountState(
             log(`  ${OperationType[event.opType]} consumed ${totalConsumed} ${token} from acquired queue (deposit receipt token)`)
           }
 
-          const matchedAmount = amountOut - remainingToMatch
-          if (matchedAmount > 0n) {
+          // Add each matched portion to the queue with its own inherited timestamp
+          // This correctly preserves timestamp granularity from different deposits
+          const totalMatched = matchedByTimestamp.reduce((sum, m) => sum + m.amount, 0n)
+          if (totalMatched > 0n) {
             tokensWithAcquiredHistory.add(tokenOutLower)
             const outputQueue = getQueue(tokenOutLower)
 
-            // Withdrawal inherits the original acquisition timestamp (not deposit timestamp)
-            const outputTimestamp = matchedOriginalTimestamp || event.timestamp
-            log(`  ${OperationType[event.opType]} matched: ${matchedAmount} inherits original timestamp ${outputTimestamp}`)
-            addToQueue(outputQueue, matchedAmount, outputTimestamp)
+            for (const { amount, timestamp } of matchedByTimestamp) {
+              log(`  ${OperationType[event.opType]} matched: ${amount} inherits original timestamp ${timestamp}`)
+              addToQueue(outputQueue, amount, timestamp)
+            }
           }
 
           // Handle unmatched amount
