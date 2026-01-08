@@ -1159,11 +1159,16 @@ async function prepareBatchUpdate(
   const allowanceIncreased = newAllowance > onChainAllowance
 
   // Check if increase exceeds 2% threshold
+  // Also consider any increase from 0 as significant
   let significantIncrease = false
-  if (allowanceIncreased && onChainAllowance > 0n) {
-    const increaseAmount = newAllowance - onChainAllowance
-    const threshold = (onChainAllowance * ALLOWANCE_INCREASE_THRESHOLD_BPS) / 10000n
-    significantIncrease = increaseAmount > threshold
+  if (allowanceIncreased) {
+    if (onChainAllowance > 0n) {
+      const increaseAmount = newAllowance - onChainAllowance
+      const threshold = (onChainAllowance * ALLOWANCE_INCREASE_THRESHOLD_BPS) / 10000n
+      significantIncrease = increaseAmount > threshold
+    } else {
+      significantIncrease = newAllowance > 0n
+    }
   }
 
   // Determine if allowance update is needed based on rules:
