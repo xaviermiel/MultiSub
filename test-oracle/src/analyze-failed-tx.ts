@@ -179,6 +179,14 @@ const CONTRACT_ERRORS: Record<string, { description: string; solution: string }>
     description: 'Module transaction execution failed on the Safe',
     solution: 'Check if the module is enabled on the Safe',
   },
+  UnsupportedSelector: {
+    description: 'The function selector is not supported by the parser',
+    solution: 'Use a supported function or register a new selector',
+  },
+  Panic: {
+    description: 'Solidity panic error (assertion failure, overflow, division by zero, etc.)',
+    solution: 'Check panic code: 0x01=assert, 0x11=overflow, 0x12=div-by-zero, 0x21=invalid enum, 0x31=pop empty array, 0x32=out-of-bounds, 0x41=too much memory, 0x51=zero-init function pointer',
+  },
   NonPayableFunctionWithValue: {
     description: 'Called a non-payable function with ETH value attached',
     solution: 'Use the payable version of the function (e.g., executeOnProtocolWithValue instead of executeOnProtocol)',
