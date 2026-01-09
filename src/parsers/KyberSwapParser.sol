@@ -32,7 +32,18 @@ contract KyberSwapParser is ICalldataParser {
 
     // swap(SwapExecutionParams execution)
     // SwapExecutionParams: (address callTarget, address approveTarget, bytes targetData, SwapDescription desc, bytes clientData)
-    // SwapDescription: (address srcToken, address dstToken, address[] srcReceivers, uint256[] srcAmounts, address[] feeReceivers, uint256[] feeAmounts, address dstReceiver, uint256 amount, uint256 minReturnAmount, uint256 flags, bytes permit)
+    // SwapDescription struct layout (ABI-encoded head - dynamic types store offset pointers):
+    //   Slot 0 (offset 0):   srcToken (address)
+    //   Slot 1 (offset 32):  dstToken (address)
+    //   Slot 2 (offset 64):  srcReceivers offset (pointer to address[] data)
+    //   Slot 3 (offset 96):  srcAmounts offset (pointer to uint256[] data)
+    //   Slot 4 (offset 128): feeReceivers offset (pointer to address[] data)
+    //   Slot 5 (offset 160): feeAmounts offset (pointer to uint256[] data)
+    //   Slot 6 (offset 192): dstReceiver (address)
+    //   Slot 7 (offset 224): amount (uint256)
+    //   Slot 8 (offset 256): minReturnAmount (uint256)
+    //   Slot 9 (offset 288): flags (uint256)
+    //   Slot 10 (offset 320): permit offset (pointer to bytes data)
     bytes4 public constant SWAP_SELECTOR = 0xe21fd0e9;
 
     // swapSimpleMode(address caller, SwapDescription desc, bytes executorData, bytes clientData)
@@ -95,15 +106,14 @@ contract KyberSwapParser is ICalldataParser {
         if (selector == SWAP_SELECTOR || selector == SWAP_GENERIC_SELECTOR) {
             // Bounds check for SWAP calldata
             if (data.length < MIN_SWAP_LENGTH) revert InvalidCalldata();
-            // SwapDescription.amount is at offset 224 (7 * 32) after srcToken, dstToken, srcReceivers, srcAmounts, feeReceivers, feeAmounts, dstReceiver
-            // But srcReceivers, srcAmounts, etc. are dynamic - need to read amount field directly
-            // amount is 8th field in SwapDescription
+            // SwapDescription.amount is at slot 7 (offset 224)
+            // Dynamic arrays (srcReceivers, etc.) store offset pointers in the head,
+            // so amount remains at a fixed offset regardless of array contents
             assembly {
                 let execOffset := add(add(data.offset, 4), calldataload(add(data.offset, 4)))
                 let descRelOffset := calldataload(add(execOffset, 96))
                 let descOffset := add(execOffset, descRelOffset)
-                // amount is at offset 224 (7 * 32) - but arrays are dynamic offsets
-                // Let's read the 8th slot which should be amount
+                // amount is at slot 7 (offset 224) - see struct layout in SWAP_SELECTOR comment
                 amount := calldataload(add(descOffset, 224))
             }
             amounts = new uint256[](1);
@@ -112,9 +122,9 @@ contract KyberSwapParser is ICalldataParser {
         } else if (selector == SWAP_SIMPLE_MODE_SELECTOR) {
             // Bounds check for SWAP_SIMPLE_MODE calldata
             if (data.length < MIN_SWAP_SIMPLE_LENGTH) revert InvalidCalldata();
+            // Same SwapDescription struct layout - amount at slot 7 (offset 224)
             assembly {
                 let descOffset := add(add(data.offset, 4), calldataload(add(data.offset, 36)))
-                // amount at offset 224
                 amount := calldataload(add(descOffset, 224))
             }
             amounts = new uint256[](1);
@@ -169,12 +179,12 @@ contract KyberSwapParser is ICalldataParser {
         if (selector == SWAP_SELECTOR || selector == SWAP_GENERIC_SELECTOR) {
             // Bounds check for SWAP calldata
             if (data.length < MIN_SWAP_LENGTH) revert InvalidCalldata();
-            // SwapDescription.dstReceiver is 7th field (offset 192)
+            // SwapDescription.dstReceiver is at slot 6 (offset 192)
             assembly {
                 let execOffset := add(add(data.offset, 4), calldataload(add(data.offset, 4)))
                 let descRelOffset := calldataload(add(execOffset, 96))
                 let descOffset := add(execOffset, descRelOffset)
-                // dstReceiver at offset 192 (6 * 32) - mask to 160 bits
+                // dstReceiver at slot 6 (offset 192) - mask to 160 bits
                 recipient := and(calldataload(add(descOffset, 192)), ADDRESS_MASK)
             }
             if (recipient == address(0)) {
@@ -183,9 +193,9 @@ contract KyberSwapParser is ICalldataParser {
         } else if (selector == SWAP_SIMPLE_MODE_SELECTOR) {
             // Bounds check for SWAP_SIMPLE_MODE calldata
             if (data.length < MIN_SWAP_SIMPLE_LENGTH) revert InvalidCalldata();
+            // Same SwapDescription struct layout - dstReceiver at slot 6 (offset 192)
             assembly {
                 let descOffset := add(add(data.offset, 4), calldataload(add(data.offset, 36)))
-                // dstReceiver - mask to 160 bits
                 recipient := and(calldataload(add(descOffset, 192)), ADDRESS_MASK)
             }
             if (recipient == address(0)) {
