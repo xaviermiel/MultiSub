@@ -29,8 +29,8 @@ contract ParaswapParser is ICalldataParser {
     uint256 private constant MIN_UNISWAP_SWAP_LENGTH = 260;
     // SIMPLE_SWAP: selector(4) + dataOffset(32) + SimpleData(320 min for beneficiary at 288) = 356
     uint256 private constant MIN_SIMPLE_SWAP_LENGTH = 356;
-    // MULTI_SWAP/MEGA_SWAP: selector(4) + dataOffset(32) + data(96 min for fromAmount at 64) = 132
-    uint256 private constant MIN_MULTI_SWAP_LENGTH = 132;
+    // MULTI_SWAP/MEGA_SWAP: selector(4) + dataOffset(32) + data(160 min for beneficiary at 128) = 196
+    uint256 private constant MIN_MULTI_SWAP_LENGTH = 196;
 
     // ============ AugustusSwapper V6 Selectors ============
 
@@ -280,8 +280,17 @@ contract ParaswapParser is ICalldataParser {
                 recipient = defaultRecipient;
             }
         } else if (selector == MULTI_SWAP_SELECTOR || selector == MEGA_SWAP_SELECTOR) {
-            // beneficiary field - use default for complex structs
-            recipient = defaultRecipient;
+            // Bounds check
+            if (data.length < MIN_MULTI_SWAP_LENGTH) revert InvalidCalldata();
+            // MultiSwapData/MegaSwapData.beneficiary is 5th field (offset 128)
+            // Struct: (fromToken, fromAmount, toAmount, expectedAmount, beneficiary, ...)
+            assembly {
+                let dataOffset := add(add(data.offset, 4), calldataload(add(data.offset, 4)))
+                recipient := calldataload(add(dataOffset, 128))
+            }
+            if (recipient == address(0)) {
+                recipient = defaultRecipient;
+            }
         } else {
             revert UnsupportedSelector();
         }
