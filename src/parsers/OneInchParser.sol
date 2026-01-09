@@ -152,9 +152,16 @@ contract OneInchParser is ICalldataParser {
             tokens[0] = token;
             return tokens;
         } else if (selector == UNOSWAP_TO_SELECTOR) {
-            // Output token is encoded in the last pool
-            // For now, return empty - actual output tracked by balance diff
-            return new address[](0);
+            // unoswapTo(address to, address srcToken, uint256 amount, uint256 minReturn, uint256[] pools)
+            // Output token is encoded in the last pool's lower 160 bits
+            (,,,, uint256[] memory pools) = abi.decode(data[4:], (address, address, uint256, uint256, uint256[]));
+            if (pools.length > 0) {
+                // Extract token from last pool (lower 160 bits)
+                token = address(uint160(pools[pools.length - 1]));
+            }
+            tokens = new address[](1);
+            tokens[0] = token;
+            return tokens;
         } else if (selector == UNISWAP_V3_SWAP_TO_SELECTOR) {
             // dstToken is encoded in the last pool
             (,,, uint256[] memory pools) = abi.decode(data[4:], (address, uint256, uint256, uint256[]));
