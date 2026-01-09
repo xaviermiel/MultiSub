@@ -22,6 +22,7 @@ import {ICalldataParser} from "../interfaces/ICalldataParser.sol";
  */
 contract UniversalRouterParser is ICalldataParser {
     error UnsupportedSelector();
+    error InvalidCalldata();
 
     // Universal Router function selector
     bytes4 public constant EXECUTE_SELECTOR = 0x3593564c; // execute(bytes,bytes[],uint256)
@@ -45,6 +46,7 @@ contract UniversalRouterParser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function extractInputTokens(address, bytes calldata data) external pure override returns (address[] memory tokens) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         if (selector != EXECUTE_SELECTOR) revert UnsupportedSelector();
 
@@ -109,6 +111,7 @@ contract UniversalRouterParser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function extractInputAmounts(address, bytes calldata data) external pure override returns (uint256[] memory amounts) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         if (selector != EXECUTE_SELECTOR) revert UnsupportedSelector();
 
@@ -162,6 +165,7 @@ contract UniversalRouterParser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function extractOutputTokens(address, bytes calldata data) external pure override returns (address[] memory tokens) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         if (selector != EXECUTE_SELECTOR) revert UnsupportedSelector();
 
@@ -220,6 +224,7 @@ contract UniversalRouterParser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function extractRecipient(address, bytes calldata data, address defaultRecipient) external pure override returns (address recipient) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         if (selector != EXECUTE_SELECTOR) revert UnsupportedSelector();
 
@@ -300,6 +305,7 @@ contract UniversalRouterParser is ICalldataParser {
      * @return opType 1=SWAP
      */
     function getOperationType(bytes calldata data) external pure override returns (uint8 opType) {
+        if (data.length < 4) revert InvalidCalldata();
         return 1; // SWAP
     }
 }

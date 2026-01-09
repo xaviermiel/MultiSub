@@ -39,6 +39,7 @@ interface IV4PositionManager {
  */
 contract UniswapV4Parser is ICalldataParser {
     error UnsupportedSelector();
+    error InvalidCalldata();
 
     // Uniswap V4 PositionManager selector
     bytes4 public constant MODIFY_LIQUIDITIES_SELECTOR = 0xdd46508f; // modifyLiquidities(bytes,uint256)
@@ -61,6 +62,7 @@ contract UniswapV4Parser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function extractInputTokens(address target, bytes calldata data) external view override returns (address[] memory tokens) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         if (selector != MODIFY_LIQUIDITIES_SELECTOR) revert UnsupportedSelector();
 
@@ -121,6 +123,7 @@ contract UniswapV4Parser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function extractInputAmounts(address, bytes calldata data) external pure override returns (uint256[] memory amounts) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         if (selector != MODIFY_LIQUIDITIES_SELECTOR) revert UnsupportedSelector();
 
@@ -196,6 +199,7 @@ contract UniswapV4Parser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function extractOutputTokens(address target, bytes calldata data) external view override returns (address[] memory tokens) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         if (selector != MODIFY_LIQUIDITIES_SELECTOR) revert UnsupportedSelector();
 
@@ -249,6 +253,7 @@ contract UniswapV4Parser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function extractRecipient(address, bytes calldata data, address defaultRecipient) external pure override returns (address recipient) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         if (selector != MODIFY_LIQUIDITIES_SELECTOR) revert UnsupportedSelector();
 
@@ -295,6 +300,7 @@ contract UniswapV4Parser is ICalldataParser {
      * @return opType 1=SWAP, 2=DEPOSIT, 3=WITHDRAW, 4=CLAIM, 5=APPROVE
      */
     function getOperationType(bytes calldata data) external pure override returns (uint8 opType) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         if (selector != MODIFY_LIQUIDITIES_SELECTOR) return 0;
 

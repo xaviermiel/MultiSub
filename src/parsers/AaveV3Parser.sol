@@ -16,6 +16,7 @@ import {IAavePool} from "../interfaces/IAavePool.sol";
  */
 contract AaveV3Parser is ICalldataParser {
     error UnsupportedSelector();
+    error InvalidCalldata();
 
     // Aave V3 Pool function selectors
     bytes4 public constant SUPPLY_SELECTOR = 0x617ba037;      // supply(address,uint256,address,uint16)
@@ -31,6 +32,7 @@ contract AaveV3Parser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function extractInputTokens(address, bytes calldata data) external pure override returns (address[] memory tokens) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == SUPPLY_SELECTOR || selector == REPAY_SELECTOR) {
@@ -48,6 +50,7 @@ contract AaveV3Parser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function extractInputAmounts(address, bytes calldata data) external pure override returns (uint256[] memory amounts) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == SUPPLY_SELECTOR || selector == REPAY_SELECTOR) {
@@ -65,6 +68,7 @@ contract AaveV3Parser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function extractOutputTokens(address target, bytes calldata data) external view override returns (address[] memory tokens) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == SUPPLY_SELECTOR) {
@@ -108,6 +112,7 @@ contract AaveV3Parser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function extractRecipient(address, bytes calldata data, address defaultRecipient) external pure override returns (address recipient) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == SUPPLY_SELECTOR) {
@@ -163,6 +168,7 @@ contract AaveV3Parser is ICalldataParser {
      *      - Subaccounts should be free to repay debt without spending checks
      */
     function getOperationType(bytes calldata data) external pure override returns (uint8 opType) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         if (selector == SUPPLY_SELECTOR) {
             return 2; // DEPOSIT - costs spending for original tokens

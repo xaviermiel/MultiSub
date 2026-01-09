@@ -28,6 +28,7 @@ import {ICalldataParser} from "../interfaces/ICalldataParser.sol";
  */
 contract MorphoBlueParser is ICalldataParser {
     error UnsupportedSelector();
+    error InvalidCalldata();
 
     // Morpho Blue function selectors
     // supply((address,address,address,address,uint256),uint256,uint256,address,bytes)
@@ -62,6 +63,7 @@ contract MorphoBlueParser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function extractInputTokens(address, bytes calldata data) external pure override returns (address[] memory tokens) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == SUPPLY_SELECTOR || selector == REPAY_SELECTOR) {
@@ -84,6 +86,7 @@ contract MorphoBlueParser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function extractInputAmounts(address, bytes calldata data) external pure override returns (uint256[] memory amounts) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == SUPPLY_SELECTOR || selector == REPAY_SELECTOR) {
@@ -106,6 +109,7 @@ contract MorphoBlueParser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function extractOutputTokens(address, bytes calldata data) external pure override returns (address[] memory tokens) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == WITHDRAW_SELECTOR) {
@@ -128,6 +132,7 @@ contract MorphoBlueParser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function extractRecipient(address, bytes calldata data, address defaultRecipient) external pure override returns (address recipient) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == SUPPLY_SELECTOR || selector == REPAY_SELECTOR) {
@@ -170,6 +175,7 @@ contract MorphoBlueParser is ICalldataParser {
      * @dev BORROW_SELECTOR returns 0 (UNKNOWN) as it is not supported
      */
     function getOperationType(bytes calldata data) external pure override returns (uint8 opType) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == SUPPLY_SELECTOR ||

@@ -13,6 +13,7 @@ import {IMorphoVault} from "../interfaces/IMorphoVault.sol";
  */
 contract MorphoParser is ICalldataParser {
     error UnsupportedSelector();
+    error InvalidCalldata();
 
     // ERC4626 function selectors
     bytes4 public constant DEPOSIT_SELECTOR = 0x6e553f65;   // deposit(uint256,address)
@@ -22,6 +23,7 @@ contract MorphoParser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function extractInputTokens(address target, bytes calldata data) external view override returns (address[] memory tokens) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == DEPOSIT_SELECTOR || selector == MINT_SELECTOR) {
@@ -38,6 +40,7 @@ contract MorphoParser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function extractInputAmounts(address target, bytes calldata data) external view override returns (uint256[] memory amounts) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == DEPOSIT_SELECTOR) {
@@ -61,6 +64,7 @@ contract MorphoParser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function extractOutputTokens(address target, bytes calldata data) external view override returns (address[] memory tokens) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == DEPOSIT_SELECTOR || selector == MINT_SELECTOR) {
@@ -79,6 +83,7 @@ contract MorphoParser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function extractRecipient(address, bytes calldata data, address) external pure override returns (address recipient) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == DEPOSIT_SELECTOR || selector == MINT_SELECTOR) {
@@ -110,6 +115,7 @@ contract MorphoParser is ICalldataParser {
      * @return opType 1=SWAP, 2=DEPOSIT, 3=WITHDRAW, 4=CLAIM, 5=APPROVE
      */
     function getOperationType(bytes calldata data) external pure override returns (uint8 opType) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         if (selector == DEPOSIT_SELECTOR || selector == MINT_SELECTOR) {
             return 2; // DEPOSIT

@@ -11,6 +11,7 @@ import {ICalldataParser} from "../interfaces/ICalldataParser.sol";
  */
 contract MerklParser is ICalldataParser {
     error UnsupportedSelector();
+    error InvalidCalldata();
 
     // Merkl Distributor function selector
     // claim(address[] users, address[] tokens, uint256[] amounts, bytes32[][] proofs)
@@ -18,6 +19,7 @@ contract MerklParser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function extractInputTokens(address, bytes calldata data) external pure override returns (address[] memory) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == CLAIM_SELECTOR) {
@@ -29,6 +31,7 @@ contract MerklParser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function extractInputAmounts(address, bytes calldata data) external pure override returns (uint256[] memory) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == CLAIM_SELECTOR) {
@@ -40,6 +43,7 @@ contract MerklParser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function extractOutputTokens(address, bytes calldata data) external pure override returns (address[] memory tokens) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == CLAIM_SELECTOR) {
@@ -53,6 +57,7 @@ contract MerklParser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function extractRecipient(address, bytes calldata data, address) external pure override returns (address recipient) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == CLAIM_SELECTOR) {
@@ -80,6 +85,7 @@ contract MerklParser is ICalldataParser {
      * @return opType 1=SWAP, 2=DEPOSIT, 3=WITHDRAW, 4=CLAIM, 5=APPROVE
      */
     function getOperationType(bytes calldata data) external pure override returns (uint8 opType) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         if (selector == CLAIM_SELECTOR) {
             return 4; // CLAIM
@@ -93,6 +99,7 @@ contract MerklParser is ICalldataParser {
      * @return tokens Array of token addresses being claimed
      */
     function extractAllClaimTokens(bytes calldata data) external pure returns (address[] memory tokens) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == CLAIM_SELECTOR) {
@@ -108,6 +115,7 @@ contract MerklParser is ICalldataParser {
      * @return amounts Array of cumulative amounts being claimed
      */
     function extractAllClaimAmounts(bytes calldata data) external pure returns (uint256[] memory amounts) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == CLAIM_SELECTOR) {

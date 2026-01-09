@@ -41,6 +41,7 @@ interface INonfungiblePositionManager {
  */
 contract UniswapV3Parser is ICalldataParser {
     error UnsupportedSelector();
+    error InvalidCalldata();
     error InvalidPath();
 
     // ============ SwapRouter Selectors ============
@@ -70,6 +71,7 @@ contract UniswapV3Parser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function extractInputTokens(address target, bytes calldata data) external view override returns (address[] memory tokens) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         address token;
 
@@ -159,6 +161,7 @@ contract UniswapV3Parser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function extractInputAmounts(address, bytes calldata data) external pure override returns (uint256[] memory amounts) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         uint256 amount;
 
@@ -229,6 +232,7 @@ contract UniswapV3Parser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function extractOutputTokens(address target, bytes calldata data) external view override returns (address[] memory tokens) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         address token;
 
@@ -315,6 +319,7 @@ contract UniswapV3Parser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function extractRecipient(address, bytes calldata data, address defaultRecipient) external pure override returns (address recipient) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
         // ============ SwapRouter Functions ============
@@ -369,6 +374,7 @@ contract UniswapV3Parser is ICalldataParser {
      * @return opType 1=SWAP, 2=DEPOSIT, 3=WITHDRAW, 4=CLAIM, 5=APPROVE
      */
     function getOperationType(bytes calldata data) external pure override returns (uint8 opType) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         // Swap operations
         if (selector == EXACT_INPUT_SINGLE_SELECTOR ||

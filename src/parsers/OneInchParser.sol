@@ -18,6 +18,7 @@ import {ICalldataParser} from "../interfaces/ICalldataParser.sol";
  */
 contract OneInchParser is ICalldataParser {
     error UnsupportedSelector();
+    error InvalidCalldata();
 
     // ============ 1inch AggregationRouterV6 Selectors ============
 
@@ -37,6 +38,7 @@ contract OneInchParser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function extractInputTokens(address, bytes calldata data) external pure override returns (address[] memory tokens) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         address token;
 
@@ -85,6 +87,7 @@ contract OneInchParser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function extractInputAmounts(address, bytes calldata data) external pure override returns (uint256[] memory amounts) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         uint256 amount;
 
@@ -124,6 +127,7 @@ contract OneInchParser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function extractOutputTokens(address, bytes calldata data) external pure override returns (address[] memory tokens) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         address token;
 
@@ -165,6 +169,7 @@ contract OneInchParser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function extractRecipient(address, bytes calldata data, address defaultRecipient) external pure override returns (address recipient) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == SWAP_SELECTOR) {
@@ -203,6 +208,7 @@ contract OneInchParser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function getOperationType(bytes calldata data) external pure override returns (uint8 opType) {
+        if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
         // All 1inch functions are swaps
