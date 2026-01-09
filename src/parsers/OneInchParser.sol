@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import {ICalldataParser} from "../interfaces/ICalldataParser.sol";
+import {IUniswapV2Pair} from "../interfaces/IUniswapV2Pair.sol";
 
 /**
  * @title OneInchParser
@@ -33,10 +34,19 @@ contract OneInchParser is ICalldataParser {
     bytes4 public constant SWAP_SELECTOR = 0x12aa3caf;
 
     // unoswapTo(address to, address srcToken, uint256 amount, uint256 minReturn, uint256[] pools)
+    // Pool encoding for unoswapTo (Uniswap V2 style):
+    //   Bits 0-159:   Pool (pair) address (NOT token address)
+    //   Bits 160-161: Pool type (0=UniswapV2, 1=Curve, etc.)
+    //   Bit 255:      Direction flag
+    // Note: Output token cannot be extracted from pools - it requires on-chain pool query
     bytes4 public constant UNOSWAP_TO_SELECTOR = 0xf78dc253;
 
     // uniswapV3SwapTo(address recipient, uint256 amount, uint256 minReturn, uint256[] pools)
-    // Note: srcToken is encoded in the first pool, dstToken in the last pool
+    // Pool encoding for uniswapV3SwapTo:
+    //   Bits 0-159:   Token address (the token being swapped TO in this hop)
+    //   Bits 160-183: Fee tier (e.g., 500, 3000, 10000)
+    //   Bit 255:      Direction flag (zeroForOne)
+    // Note: First pool contains input token, last pool contains output token
     bytes4 public constant UNISWAP_V3_SWAP_TO_SELECTOR = 0xbc80f1a8;
 
     // clipperSwapTo(address clipperExchange, address recipient, address srcToken, address dstToken, uint256 inputAmount, uint256 outputAmount, uint256 goodUntil, bytes32 r, bytes32 vs)
@@ -72,13 +82,14 @@ contract OneInchParser is ICalldataParser {
             tokens[0] = token;
             return tokens;
         } else if (selector == UNISWAP_V3_SWAP_TO_SELECTOR) {
-            // uniswapV3SwapTo(address recipient, uint256 amount, uint256 minReturn, uint256[] pools)
-            // srcToken is encoded in the first pool's lower 160 bits
+            // uniswapV3SwapTo pools contain token addresses in lower 160 bits
+            // First pool contains the input token
             (,,, uint256[] memory pools) = abi.decode(data[4:], (address, uint256, uint256, uint256[]));
-            if (pools.length > 0) {
-                // Extract token from first pool (lower 160 bits)
-                token = address(uint160(pools[0]));
+            if (pools.length == 0) {
+                return new address[](0);
             }
+            // Extract input token from first pool (lower 160 bits)
+            token = address(uint160(pools[0]));
             tokens = new address[](1);
             tokens[0] = token;
             return tokens;
@@ -136,7 +147,7 @@ contract OneInchParser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractOutputTokens(address, bytes calldata data) external pure override returns (address[] memory tokens) {
+    function extractOutputTokens(address, bytes calldata data) external view override returns (address[] memory tokens) {
         if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         address token;
@@ -155,23 +166,36 @@ contract OneInchParser is ICalldataParser {
             tokens[0] = token;
             return tokens;
         } else if (selector == UNOSWAP_TO_SELECTOR) {
-            // unoswapTo(address to, address srcToken, uint256 amount, uint256 minReturn, uint256[] pools)
-            // Output token is encoded in the last pool's lower 160 bits
+            // unoswapTo pools contain V2 pair addresses with direction flags
+            // Query the last pool on-chain to determine output token
             (,,,, uint256[] memory pools) = abi.decode(data[4:], (address, address, uint256, uint256, uint256[]));
-            if (pools.length > 0) {
-                // Extract token from last pool (lower 160 bits)
-                token = address(uint160(pools[pools.length - 1]));
+            if (pools.length == 0) {
+                return new address[](0);
             }
+            // Last pool determines output token
+            uint256 lastPool = pools[pools.length - 1];
+            address poolAddress = address(uint160(lastPool));
+            // Bit 255: direction flag (0 = token0->token1, 1 = token1->token0)
+            bool zeroForOne = (lastPool >> 255) == 0;
+
+            // Query pool for token addresses
+            address token0 = IUniswapV2Pair(poolAddress).token0();
+            address token1 = IUniswapV2Pair(poolAddress).token1();
+
+            // Output token depends on swap direction
+            token = zeroForOne ? token1 : token0;
             tokens = new address[](1);
             tokens[0] = token;
             return tokens;
         } else if (selector == UNISWAP_V3_SWAP_TO_SELECTOR) {
-            // dstToken is encoded in the last pool
+            // uniswapV3SwapTo pools contain token addresses in lower 160 bits
+            // Last pool contains the output token
             (,,, uint256[] memory pools) = abi.decode(data[4:], (address, uint256, uint256, uint256[]));
-            if (pools.length > 0) {
-                // Extract token from last pool (lower 160 bits)
-                token = address(uint160(pools[pools.length - 1]));
+            if (pools.length == 0) {
+                return new address[](0);
             }
+            // Extract output token from last pool (lower 160 bits)
+            token = address(uint160(pools[pools.length - 1]));
             tokens = new address[](1);
             tokens[0] = token;
             return tokens;
