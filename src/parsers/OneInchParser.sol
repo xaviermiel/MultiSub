@@ -20,6 +20,9 @@ contract OneInchParser is ICalldataParser {
     error UnsupportedSelector();
     error InvalidCalldata();
 
+    // Minimum calldata length for SWAP: selector(4) + executor(32) + descOffset(32) + SwapDescription(224 min) = 292
+    uint256 private constant MIN_SWAP_LENGTH = 292;
+
     // ============ 1inch AggregationRouterV6 Selectors ============
 
     // swap(address executor, SwapDescription desc, bytes data, bytes permit)
@@ -43,6 +46,8 @@ contract OneInchParser is ICalldataParser {
         address token;
 
         if (selector == SWAP_SELECTOR) {
+            // Bounds check for SWAP calldata
+            if (data.length < MIN_SWAP_LENGTH) revert InvalidCalldata();
             // swap(address executor, SwapDescription desc, bytes data, bytes permit)
             // SwapDescription starts at offset 32 (after executor)
             // srcToken is first field of SwapDescription struct
@@ -92,6 +97,8 @@ contract OneInchParser is ICalldataParser {
         uint256 amount;
 
         if (selector == SWAP_SELECTOR) {
+            // Bounds check for SWAP calldata
+            if (data.length < MIN_SWAP_LENGTH) revert InvalidCalldata();
             // SwapDescription.amount is at offset 4 (5th field: srcToken, dstToken, srcReceiver, dstReceiver, amount)
             assembly {
                 let descOffset := add(add(data.offset, 4), 32)
@@ -132,6 +139,8 @@ contract OneInchParser is ICalldataParser {
         address token;
 
         if (selector == SWAP_SELECTOR) {
+            // Bounds check for SWAP calldata
+            if (data.length < MIN_SWAP_LENGTH) revert InvalidCalldata();
             // SwapDescription.dstToken is 2nd field
             assembly {
                 let descOffset := add(add(data.offset, 4), 32)
@@ -173,6 +182,8 @@ contract OneInchParser is ICalldataParser {
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == SWAP_SELECTOR) {
+            // Bounds check for SWAP calldata
+            if (data.length < MIN_SWAP_LENGTH) revert InvalidCalldata();
             // SwapDescription.dstReceiver is 4th field
             assembly {
                 let descOffset := add(add(data.offset, 4), 32)

@@ -19,6 +19,12 @@ contract KyberSwapParser is ICalldataParser {
     error UnsupportedSelector();
     error InvalidCalldata();
 
+    // Minimum calldata lengths for bounds checking
+    // SWAP/SWAP_GENERIC: selector(4) + execOffset(32) + execStruct(128 min) + descStruct(256 min) = 420
+    uint256 private constant MIN_SWAP_LENGTH = 420;
+    // SWAP_SIMPLE_MODE: selector(4) + caller(32) + descOffset(32) + descStruct(256 min) = 324
+    uint256 private constant MIN_SWAP_SIMPLE_LENGTH = 324;
+
     // ============ KyberSwap MetaAggregationRouterV2 Selectors ============
 
     // swap(SwapExecutionParams execution)
@@ -39,6 +45,8 @@ contract KyberSwapParser is ICalldataParser {
         address token;
 
         if (selector == SWAP_SELECTOR || selector == SWAP_GENERIC_SELECTOR) {
+            // Bounds check for SWAP calldata
+            if (data.length < MIN_SWAP_LENGTH) revert InvalidCalldata();
             // swap(SwapExecutionParams execution)
             // SwapExecutionParams is a struct with desc at offset 3 (after callTarget, approveTarget, targetData)
             // We need to navigate to SwapDescription.srcToken
@@ -56,6 +64,8 @@ contract KyberSwapParser is ICalldataParser {
             tokens[0] = token;
             return tokens;
         } else if (selector == SWAP_SIMPLE_MODE_SELECTOR) {
+            // Bounds check for SWAP_SIMPLE_MODE calldata
+            if (data.length < MIN_SWAP_SIMPLE_LENGTH) revert InvalidCalldata();
             // swapSimpleMode(address caller, SwapDescription desc, bytes executorData, bytes clientData)
             // desc is second parameter
             assembly {
@@ -80,6 +90,8 @@ contract KyberSwapParser is ICalldataParser {
         uint256 amount;
 
         if (selector == SWAP_SELECTOR || selector == SWAP_GENERIC_SELECTOR) {
+            // Bounds check for SWAP calldata
+            if (data.length < MIN_SWAP_LENGTH) revert InvalidCalldata();
             // SwapDescription.amount is at offset 224 (7 * 32) after srcToken, dstToken, srcReceivers, srcAmounts, feeReceivers, feeAmounts, dstReceiver
             // But srcReceivers, srcAmounts, etc. are dynamic - need to read amount field directly
             // amount is 8th field in SwapDescription
@@ -95,6 +107,8 @@ contract KyberSwapParser is ICalldataParser {
             amounts[0] = amount;
             return amounts;
         } else if (selector == SWAP_SIMPLE_MODE_SELECTOR) {
+            // Bounds check for SWAP_SIMPLE_MODE calldata
+            if (data.length < MIN_SWAP_SIMPLE_LENGTH) revert InvalidCalldata();
             assembly {
                 let descOffset := add(add(data.offset, 4), calldataload(add(data.offset, 36)))
                 // amount at offset 224
@@ -115,6 +129,8 @@ contract KyberSwapParser is ICalldataParser {
         address token;
 
         if (selector == SWAP_SELECTOR || selector == SWAP_GENERIC_SELECTOR) {
+            // Bounds check for SWAP calldata
+            if (data.length < MIN_SWAP_LENGTH) revert InvalidCalldata();
             // SwapDescription.dstToken is 2nd field
             assembly {
                 let execOffset := add(add(data.offset, 4), calldataload(add(data.offset, 4)))
@@ -127,6 +143,8 @@ contract KyberSwapParser is ICalldataParser {
             tokens[0] = token;
             return tokens;
         } else if (selector == SWAP_SIMPLE_MODE_SELECTOR) {
+            // Bounds check for SWAP_SIMPLE_MODE calldata
+            if (data.length < MIN_SWAP_SIMPLE_LENGTH) revert InvalidCalldata();
             assembly {
                 let descOffset := add(add(data.offset, 4), calldataload(add(data.offset, 36)))
                 token := calldataload(add(descOffset, 32))
@@ -145,6 +163,8 @@ contract KyberSwapParser is ICalldataParser {
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == SWAP_SELECTOR || selector == SWAP_GENERIC_SELECTOR) {
+            // Bounds check for SWAP calldata
+            if (data.length < MIN_SWAP_LENGTH) revert InvalidCalldata();
             // SwapDescription.dstReceiver is 7th field (offset 192)
             assembly {
                 let execOffset := add(add(data.offset, 4), calldataload(add(data.offset, 4)))
@@ -157,6 +177,8 @@ contract KyberSwapParser is ICalldataParser {
                 recipient = defaultRecipient;
             }
         } else if (selector == SWAP_SIMPLE_MODE_SELECTOR) {
+            // Bounds check for SWAP_SIMPLE_MODE calldata
+            if (data.length < MIN_SWAP_SIMPLE_LENGTH) revert InvalidCalldata();
             assembly {
                 let descOffset := add(add(data.offset, 4), calldataload(add(data.offset, 36)))
                 recipient := calldataload(add(descOffset, 192))

@@ -22,6 +22,16 @@ contract ParaswapParser is ICalldataParser {
     error UnsupportedSelector();
     error InvalidCalldata();
 
+    // Minimum calldata lengths for bounds checking
+    // SWAP_EXACT_AMOUNT_IN/OUT: selector(4) + executor(32) + swapDataOffset(32) + SwapData(224 min) = 292
+    uint256 private constant MIN_SWAP_EXACT_LENGTH = 292;
+    // SWAP_EXACT_IN_UNISWAP_V2/V3: selector(4) + swapDataOffset(32) + SwapData(224 min) = 260
+    uint256 private constant MIN_UNISWAP_SWAP_LENGTH = 260;
+    // SIMPLE_SWAP: selector(4) + dataOffset(32) + SimpleData(320 min for beneficiary at 288) = 356
+    uint256 private constant MIN_SIMPLE_SWAP_LENGTH = 356;
+    // MULTI_SWAP/MEGA_SWAP: selector(4) + dataOffset(32) + data(96 min for fromAmount at 64) = 132
+    uint256 private constant MIN_MULTI_SWAP_LENGTH = 132;
+
     // ============ AugustusSwapper V6 Selectors ============
 
     // swapExactAmountIn(address executor, SwapData swapData, PartnerAndFee partnerAndFee, bytes permit, bytes executorData)
@@ -56,6 +66,8 @@ contract ParaswapParser is ICalldataParser {
         address token;
 
         if (selector == SWAP_EXACT_AMOUNT_IN_SELECTOR || selector == SWAP_EXACT_AMOUNT_OUT_SELECTOR) {
+            // Bounds check
+            if (data.length < MIN_SWAP_EXACT_LENGTH) revert InvalidCalldata();
             // swapExactAmountIn/Out(address executor, SwapData swapData, ...)
             // SwapData starts at second parameter (after executor)
             assembly {
@@ -69,6 +81,8 @@ contract ParaswapParser is ICalldataParser {
             tokens[0] = token;
             return tokens;
         } else if (selector == SWAP_EXACT_IN_UNISWAP_V2_SELECTOR || selector == SWAP_EXACT_IN_UNISWAP_V3_SELECTOR) {
+            // Bounds check
+            if (data.length < MIN_UNISWAP_SWAP_LENGTH) revert InvalidCalldata();
             // swapExactAmountInOnUniswapV2/V3(SwapData swapData, ...)
             assembly {
                 // SwapData offset is first parameter
@@ -79,6 +93,8 @@ contract ParaswapParser is ICalldataParser {
             tokens[0] = token;
             return tokens;
         } else if (selector == SIMPLE_SWAP_SELECTOR) {
+            // Bounds check
+            if (data.length < MIN_SIMPLE_SWAP_LENGTH) revert InvalidCalldata();
             // simpleSwap(SimpleData data) - fromToken is first field
             assembly {
                 // SimpleData offset
@@ -89,6 +105,8 @@ contract ParaswapParser is ICalldataParser {
             tokens[0] = token;
             return tokens;
         } else if (selector == MULTI_SWAP_SELECTOR) {
+            // Bounds check
+            if (data.length < MIN_MULTI_SWAP_LENGTH) revert InvalidCalldata();
             // multiSwap - fromToken in path[0].from
             assembly {
                 let dataOffset := add(add(data.offset, 4), calldataload(add(data.offset, 4)))
@@ -98,6 +116,8 @@ contract ParaswapParser is ICalldataParser {
             tokens[0] = token;
             return tokens;
         } else if (selector == MEGA_SWAP_SELECTOR) {
+            // Bounds check
+            if (data.length < MIN_MULTI_SWAP_LENGTH) revert InvalidCalldata();
             // megaSwap - fromToken in path[0][0].from
             assembly {
                 let dataOffset := add(add(data.offset, 4), calldataload(add(data.offset, 4)))
@@ -118,6 +138,8 @@ contract ParaswapParser is ICalldataParser {
         uint256 amount;
 
         if (selector == SWAP_EXACT_AMOUNT_IN_SELECTOR || selector == SWAP_EXACT_AMOUNT_OUT_SELECTOR) {
+            // Bounds check
+            if (data.length < MIN_SWAP_EXACT_LENGTH) revert InvalidCalldata();
             // SwapData.fromAmount is 3rd field (offset 64)
             assembly {
                 let swapDataOffset := add(add(data.offset, 4), calldataload(add(data.offset, 36)))
@@ -127,6 +149,8 @@ contract ParaswapParser is ICalldataParser {
             amounts[0] = amount;
             return amounts;
         } else if (selector == SWAP_EXACT_IN_UNISWAP_V2_SELECTOR || selector == SWAP_EXACT_IN_UNISWAP_V3_SELECTOR) {
+            // Bounds check
+            if (data.length < MIN_UNISWAP_SWAP_LENGTH) revert InvalidCalldata();
             // SwapData.fromAmount is 3rd field
             assembly {
                 let swapDataOffset := add(add(data.offset, 4), calldataload(add(data.offset, 4)))
@@ -136,6 +160,8 @@ contract ParaswapParser is ICalldataParser {
             amounts[0] = amount;
             return amounts;
         } else if (selector == SIMPLE_SWAP_SELECTOR) {
+            // Bounds check
+            if (data.length < MIN_SIMPLE_SWAP_LENGTH) revert InvalidCalldata();
             // SimpleData.fromAmount is 3rd field
             assembly {
                 let dataOffset := add(add(data.offset, 4), calldataload(add(data.offset, 4)))
@@ -145,6 +171,8 @@ contract ParaswapParser is ICalldataParser {
             amounts[0] = amount;
             return amounts;
         } else if (selector == MULTI_SWAP_SELECTOR || selector == MEGA_SWAP_SELECTOR) {
+            // Bounds check
+            if (data.length < MIN_MULTI_SWAP_LENGTH) revert InvalidCalldata();
             // fromAmount is 3rd field
             assembly {
                 let dataOffset := add(add(data.offset, 4), calldataload(add(data.offset, 4)))
@@ -165,6 +193,8 @@ contract ParaswapParser is ICalldataParser {
         address token;
 
         if (selector == SWAP_EXACT_AMOUNT_IN_SELECTOR || selector == SWAP_EXACT_AMOUNT_OUT_SELECTOR) {
+            // Bounds check
+            if (data.length < MIN_SWAP_EXACT_LENGTH) revert InvalidCalldata();
             // SwapData.destToken is 2nd field (offset 32)
             assembly {
                 let swapDataOffset := add(add(data.offset, 4), calldataload(add(data.offset, 36)))
@@ -174,6 +204,8 @@ contract ParaswapParser is ICalldataParser {
             tokens[0] = token;
             return tokens;
         } else if (selector == SWAP_EXACT_IN_UNISWAP_V2_SELECTOR || selector == SWAP_EXACT_IN_UNISWAP_V3_SELECTOR) {
+            // Bounds check
+            if (data.length < MIN_UNISWAP_SWAP_LENGTH) revert InvalidCalldata();
             // SwapData.destToken is 2nd field
             assembly {
                 let swapDataOffset := add(add(data.offset, 4), calldataload(add(data.offset, 4)))
@@ -183,6 +215,8 @@ contract ParaswapParser is ICalldataParser {
             tokens[0] = token;
             return tokens;
         } else if (selector == SIMPLE_SWAP_SELECTOR) {
+            // Bounds check
+            if (data.length < MIN_SIMPLE_SWAP_LENGTH) revert InvalidCalldata();
             // SimpleData.toToken is 2nd field
             assembly {
                 let dataOffset := add(add(data.offset, 4), calldataload(add(data.offset, 4)))
@@ -192,6 +226,8 @@ contract ParaswapParser is ICalldataParser {
             tokens[0] = token;
             return tokens;
         } else if (selector == MULTI_SWAP_SELECTOR || selector == MEGA_SWAP_SELECTOR) {
+            // Bounds check
+            if (data.length < MIN_MULTI_SWAP_LENGTH) revert InvalidCalldata();
             // toToken is 2nd field
             assembly {
                 let dataOffset := add(add(data.offset, 4), calldataload(add(data.offset, 4)))
@@ -211,6 +247,8 @@ contract ParaswapParser is ICalldataParser {
         bytes4 selector = bytes4(data[:4]);
 
         if (selector == SWAP_EXACT_AMOUNT_IN_SELECTOR || selector == SWAP_EXACT_AMOUNT_OUT_SELECTOR) {
+            // Bounds check
+            if (data.length < MIN_SWAP_EXACT_LENGTH) revert InvalidCalldata();
             // SwapData.beneficiary is 7th field (offset 192)
             assembly {
                 let swapDataOffset := add(add(data.offset, 4), calldataload(add(data.offset, 36)))
@@ -220,6 +258,8 @@ contract ParaswapParser is ICalldataParser {
                 recipient = defaultRecipient;
             }
         } else if (selector == SWAP_EXACT_IN_UNISWAP_V2_SELECTOR || selector == SWAP_EXACT_IN_UNISWAP_V3_SELECTOR) {
+            // Bounds check
+            if (data.length < MIN_UNISWAP_SWAP_LENGTH) revert InvalidCalldata();
             // SwapData.beneficiary is 7th field
             assembly {
                 let swapDataOffset := add(add(data.offset, 4), calldataload(add(data.offset, 4)))
@@ -229,6 +269,8 @@ contract ParaswapParser is ICalldataParser {
                 recipient = defaultRecipient;
             }
         } else if (selector == SIMPLE_SWAP_SELECTOR) {
+            // Bounds check
+            if (data.length < MIN_SIMPLE_SWAP_LENGTH) revert InvalidCalldata();
             // SimpleData.beneficiary is 10th field (offset 288)
             assembly {
                 let dataOffset := add(add(data.offset, 4), calldataload(add(data.offset, 4)))
