@@ -32,6 +32,9 @@ contract ParaswapParser is ICalldataParser {
     // MULTI_SWAP/MEGA_SWAP: selector(4) + dataOffset(32) + data(160 min for beneficiary at 128) = 196
     uint256 private constant MIN_MULTI_SWAP_LENGTH = 196;
 
+    // Address mask for cleaning upper bits (addresses are 160 bits)
+    uint256 private constant ADDRESS_MASK = 0x00ffffffffffffffffffffffffffffffffffffffff;
+
     // ============ AugustusSwapper V6 Selectors ============
 
     // swapExactAmountIn(address executor, SwapData swapData, PartnerAndFee partnerAndFee, bytes permit, bytes executorData)
@@ -74,8 +77,8 @@ contract ParaswapParser is ICalldataParser {
                 // Skip selector (4) + executor (32) = 36
                 // swapData offset is at position 36
                 let swapDataOffset := add(add(data.offset, 4), calldataload(add(data.offset, 36)))
-                // srcToken is first field of SwapData
-                token := calldataload(swapDataOffset)
+                // srcToken is first field of SwapData - mask to 160 bits
+                token := and(calldataload(swapDataOffset), ADDRESS_MASK)
             }
             tokens = new address[](1);
             tokens[0] = token;
@@ -87,7 +90,8 @@ contract ParaswapParser is ICalldataParser {
             assembly {
                 // SwapData offset is first parameter
                 let swapDataOffset := add(add(data.offset, 4), calldataload(add(data.offset, 4)))
-                token := calldataload(swapDataOffset)
+                // srcToken is first field - mask to 160 bits
+                token := and(calldataload(swapDataOffset), ADDRESS_MASK)
             }
             tokens = new address[](1);
             tokens[0] = token;
@@ -99,7 +103,8 @@ contract ParaswapParser is ICalldataParser {
             assembly {
                 // SimpleData offset
                 let dataOffset := add(add(data.offset, 4), calldataload(add(data.offset, 4)))
-                token := calldataload(dataOffset)
+                // fromToken is first field - mask to 160 bits
+                token := and(calldataload(dataOffset), ADDRESS_MASK)
             }
             tokens = new address[](1);
             tokens[0] = token;
@@ -110,7 +115,8 @@ contract ParaswapParser is ICalldataParser {
             // multiSwap - fromToken in path[0].from
             assembly {
                 let dataOffset := add(add(data.offset, 4), calldataload(add(data.offset, 4)))
-                token := calldataload(dataOffset)
+                // fromToken is first field - mask to 160 bits
+                token := and(calldataload(dataOffset), ADDRESS_MASK)
             }
             tokens = new address[](1);
             tokens[0] = token;
@@ -121,7 +127,8 @@ contract ParaswapParser is ICalldataParser {
             // megaSwap - fromToken in path[0][0].from
             assembly {
                 let dataOffset := add(add(data.offset, 4), calldataload(add(data.offset, 4)))
-                token := calldataload(dataOffset)
+                // fromToken is first field - mask to 160 bits
+                token := and(calldataload(dataOffset), ADDRESS_MASK)
             }
             tokens = new address[](1);
             tokens[0] = token;
@@ -198,7 +205,8 @@ contract ParaswapParser is ICalldataParser {
             // SwapData.destToken is 2nd field (offset 32)
             assembly {
                 let swapDataOffset := add(add(data.offset, 4), calldataload(add(data.offset, 36)))
-                token := calldataload(add(swapDataOffset, 32))
+                // destToken is 2nd field - mask to 160 bits
+                token := and(calldataload(add(swapDataOffset, 32)), ADDRESS_MASK)
             }
             tokens = new address[](1);
             tokens[0] = token;
@@ -209,7 +217,8 @@ contract ParaswapParser is ICalldataParser {
             // SwapData.destToken is 2nd field
             assembly {
                 let swapDataOffset := add(add(data.offset, 4), calldataload(add(data.offset, 4)))
-                token := calldataload(add(swapDataOffset, 32))
+                // destToken is 2nd field - mask to 160 bits
+                token := and(calldataload(add(swapDataOffset, 32)), ADDRESS_MASK)
             }
             tokens = new address[](1);
             tokens[0] = token;
@@ -220,7 +229,8 @@ contract ParaswapParser is ICalldataParser {
             // SimpleData.toToken is 2nd field
             assembly {
                 let dataOffset := add(add(data.offset, 4), calldataload(add(data.offset, 4)))
-                token := calldataload(add(dataOffset, 32))
+                // toToken is 2nd field - mask to 160 bits
+                token := and(calldataload(add(dataOffset, 32)), ADDRESS_MASK)
             }
             tokens = new address[](1);
             tokens[0] = token;
@@ -231,7 +241,8 @@ contract ParaswapParser is ICalldataParser {
             // toToken is 2nd field
             assembly {
                 let dataOffset := add(add(data.offset, 4), calldataload(add(data.offset, 4)))
-                token := calldataload(add(dataOffset, 32))
+                // toToken is 2nd field - mask to 160 bits
+                token := and(calldataload(add(dataOffset, 32)), ADDRESS_MASK)
             }
             tokens = new address[](1);
             tokens[0] = token;
@@ -252,7 +263,8 @@ contract ParaswapParser is ICalldataParser {
             // SwapData.beneficiary is 7th field (offset 192)
             assembly {
                 let swapDataOffset := add(add(data.offset, 4), calldataload(add(data.offset, 36)))
-                recipient := calldataload(add(swapDataOffset, 192))
+                // beneficiary is 7th field - mask to 160 bits
+                recipient := and(calldataload(add(swapDataOffset, 192)), ADDRESS_MASK)
             }
             if (recipient == address(0)) {
                 recipient = defaultRecipient;
@@ -263,7 +275,8 @@ contract ParaswapParser is ICalldataParser {
             // SwapData.beneficiary is 7th field
             assembly {
                 let swapDataOffset := add(add(data.offset, 4), calldataload(add(data.offset, 4)))
-                recipient := calldataload(add(swapDataOffset, 192))
+                // beneficiary is 7th field - mask to 160 bits
+                recipient := and(calldataload(add(swapDataOffset, 192)), ADDRESS_MASK)
             }
             if (recipient == address(0)) {
                 recipient = defaultRecipient;
@@ -274,7 +287,8 @@ contract ParaswapParser is ICalldataParser {
             // SimpleData.beneficiary is 10th field (offset 288)
             assembly {
                 let dataOffset := add(add(data.offset, 4), calldataload(add(data.offset, 4)))
-                recipient := calldataload(add(dataOffset, 288))
+                // beneficiary is 10th field - mask to 160 bits
+                recipient := and(calldataload(add(dataOffset, 288)), ADDRESS_MASK)
             }
             if (recipient == address(0)) {
                 recipient = defaultRecipient;
@@ -286,7 +300,8 @@ contract ParaswapParser is ICalldataParser {
             // Struct: (fromToken, fromAmount, toAmount, expectedAmount, beneficiary, ...)
             assembly {
                 let dataOffset := add(add(data.offset, 4), calldataload(add(data.offset, 4)))
-                recipient := calldataload(add(dataOffset, 128))
+                // beneficiary is 5th field - mask to 160 bits
+                recipient := and(calldataload(add(dataOffset, 128)), ADDRESS_MASK)
             }
             if (recipient == address(0)) {
                 recipient = defaultRecipient;

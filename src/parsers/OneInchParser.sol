@@ -23,6 +23,9 @@ contract OneInchParser is ICalldataParser {
     // Minimum calldata length for SWAP: selector(4) + executor(32) + descOffset(32) + SwapDescription(224 min) = 292
     uint256 private constant MIN_SWAP_LENGTH = 292;
 
+    // Address mask for cleaning upper bits (addresses are 160 bits)
+    uint256 private constant ADDRESS_MASK = 0x00ffffffffffffffffffffffffffffffffffffffff;
+
     // ============ 1inch AggregationRouterV6 Selectors ============
 
     // swap(address executor, SwapDescription desc, bytes data, bytes permit)
@@ -57,7 +60,7 @@ contract OneInchParser is ICalldataParser {
                 // desc.srcToken is at offset 0 of the struct
                 let descOffset := add(add(data.offset, 4), 32) // offset to desc
                 let structOffset := add(add(data.offset, 4), calldataload(descOffset))
-                token := calldataload(structOffset)
+                token := and(calldataload(structOffset), ADDRESS_MASK)
             }
             tokens = new address[](1);
             tokens[0] = token;
@@ -145,8 +148,8 @@ contract OneInchParser is ICalldataParser {
             assembly {
                 let descOffset := add(add(data.offset, 4), 32)
                 let structOffset := add(add(data.offset, 4), calldataload(descOffset))
-                // dstToken is 2nd field = offset 32
-                token := calldataload(add(structOffset, 32))
+                // dstToken is 2nd field = offset 32 - mask to 160 bits
+                token := and(calldataload(add(structOffset, 32)), ADDRESS_MASK)
             }
             tokens = new address[](1);
             tokens[0] = token;
@@ -195,8 +198,8 @@ contract OneInchParser is ICalldataParser {
             assembly {
                 let descOffset := add(add(data.offset, 4), 32)
                 let structOffset := add(add(data.offset, 4), calldataload(descOffset))
-                // dstReceiver is 4th field = offset 96 (3 * 32)
-                recipient := calldataload(add(structOffset, 96))
+                // dstReceiver is 4th field = offset 96 (3 * 32) - mask to 160 bits
+                recipient := and(calldataload(add(structOffset, 96)), ADDRESS_MASK)
             }
             // If dstReceiver is address(0), use default
             if (recipient == address(0)) {

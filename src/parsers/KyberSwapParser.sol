@@ -25,6 +25,9 @@ contract KyberSwapParser is ICalldataParser {
     // SWAP_SIMPLE_MODE: selector(4) + caller(32) + descOffset(32) + descStruct(256 min) = 324
     uint256 private constant MIN_SWAP_SIMPLE_LENGTH = 324;
 
+    // Address mask for cleaning upper bits (addresses are 160 bits)
+    uint256 private constant ADDRESS_MASK = 0x00ffffffffffffffffffffffffffffffffffffffff;
+
     // ============ KyberSwap MetaAggregationRouterV2 Selectors ============
 
     // swap(SwapExecutionParams execution)
@@ -57,8 +60,8 @@ contract KyberSwapParser is ICalldataParser {
                 // callTarget: 32, approveTarget: 32, targetData offset: 32, desc offset: at 96
                 let descRelOffset := calldataload(add(execOffset, 96))
                 let descOffset := add(execOffset, descRelOffset)
-                // srcToken is first field of SwapDescription
-                token := calldataload(descOffset)
+                // srcToken is first field of SwapDescription - mask to 160 bits
+                token := and(calldataload(descOffset), ADDRESS_MASK)
             }
             tokens = new address[](1);
             tokens[0] = token;
@@ -72,8 +75,8 @@ contract KyberSwapParser is ICalldataParser {
                 // Skip selector (4) + caller (32) = 36
                 // desc offset at position 36
                 let descOffset := add(add(data.offset, 4), calldataload(add(data.offset, 36)))
-                // srcToken is first field
-                token := calldataload(descOffset)
+                // srcToken is first field - mask to 160 bits
+                token := and(calldataload(descOffset), ADDRESS_MASK)
             }
             tokens = new address[](1);
             tokens[0] = token;
@@ -136,8 +139,8 @@ contract KyberSwapParser is ICalldataParser {
                 let execOffset := add(add(data.offset, 4), calldataload(add(data.offset, 4)))
                 let descRelOffset := calldataload(add(execOffset, 96))
                 let descOffset := add(execOffset, descRelOffset)
-                // dstToken at offset 32
-                token := calldataload(add(descOffset, 32))
+                // dstToken at offset 32 - mask to 160 bits
+                token := and(calldataload(add(descOffset, 32)), ADDRESS_MASK)
             }
             tokens = new address[](1);
             tokens[0] = token;
@@ -147,7 +150,8 @@ contract KyberSwapParser is ICalldataParser {
             if (data.length < MIN_SWAP_SIMPLE_LENGTH) revert InvalidCalldata();
             assembly {
                 let descOffset := add(add(data.offset, 4), calldataload(add(data.offset, 36)))
-                token := calldataload(add(descOffset, 32))
+                // dstToken - mask to 160 bits
+                token := and(calldataload(add(descOffset, 32)), ADDRESS_MASK)
             }
             tokens = new address[](1);
             tokens[0] = token;
@@ -170,8 +174,8 @@ contract KyberSwapParser is ICalldataParser {
                 let execOffset := add(add(data.offset, 4), calldataload(add(data.offset, 4)))
                 let descRelOffset := calldataload(add(execOffset, 96))
                 let descOffset := add(execOffset, descRelOffset)
-                // dstReceiver at offset 192 (6 * 32)
-                recipient := calldataload(add(descOffset, 192))
+                // dstReceiver at offset 192 (6 * 32) - mask to 160 bits
+                recipient := and(calldataload(add(descOffset, 192)), ADDRESS_MASK)
             }
             if (recipient == address(0)) {
                 recipient = defaultRecipient;
@@ -181,7 +185,8 @@ contract KyberSwapParser is ICalldataParser {
             if (data.length < MIN_SWAP_SIMPLE_LENGTH) revert InvalidCalldata();
             assembly {
                 let descOffset := add(add(data.offset, 4), calldataload(add(data.offset, 36)))
-                recipient := calldataload(add(descOffset, 192))
+                // dstReceiver - mask to 160 bits
+                recipient := and(calldataload(add(descOffset, 192)), ADDRESS_MASK)
             }
             if (recipient == address(0)) {
                 recipient = defaultRecipient;
