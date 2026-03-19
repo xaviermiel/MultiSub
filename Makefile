@@ -84,16 +84,6 @@ deploy-base-sepolia-factory:
 		--verify --verifier-url https://api-sepolia.basescan.org/api \
 		-vvvv
 
-# Deploy AgentVaultFactory on Base Sepolia (requires REGISTRY_ADDRESS)
-deploy-base-sepolia-vault-factory:
-	@echo "Deploying AgentVaultFactory to Base Sepolia..."
-	forge script script/DeployAgentVaultFactory.s.sol \
-		--rpc-url $(BASE_SEPOLIA_RPC_URL) \
-		--broadcast \
-		--private-key $(DEPLOYER_PRIVATE_KEY) \
-		--verify --verifier-url https://api-sepolia.basescan.org/api \
-		-vvvv
-
 # Deploy module via Factory on Base Sepolia (requires FACTORY_ADDRESS, SAFE_ADDRESS, AUTHORIZED_UPDATER)
 deploy-base-sepolia-module:
 	@echo "Deploying Module via Factory on Base Sepolia..."
@@ -104,8 +94,8 @@ deploy-base-sepolia-module:
 		--verify --verifier-url https://api-sepolia.basescan.org/api \
 		-vvvv
 
-# Full Base Sepolia stack: Registry → Factory → AgentVaultFactory
-deploy-base-sepolia: deploy-base-sepolia-registry deploy-base-sepolia-factory deploy-base-sepolia-vault-factory
+# Full Base Sepolia stack: Registry → Factory
+deploy-base-sepolia: deploy-base-sepolia-registry deploy-base-sepolia-factory
 	@echo "Base Sepolia deployment complete."
 	@echo "Next: deploy a module with make deploy-base-sepolia-module"
 
@@ -129,16 +119,7 @@ deploy-base-factory:
 		--verify \
 		-vvvv
 
-deploy-base-vault-factory:
-	@echo "Deploying AgentVaultFactory to Base..."
-	forge script script/DeployAgentVaultFactory.s.sol \
-		--rpc-url $(BASE_RPC_URL) \
-		--broadcast \
-		--private-key $(DEPLOYER_PRIVATE_KEY) \
-		--verify \
-		-vvvv
-
-deploy-base: deploy-base-registry deploy-base-factory deploy-base-vault-factory
+deploy-base: deploy-base-registry deploy-base-factory
 	@echo "Base mainnet deployment complete."
 
 # ============ Configuration ============
@@ -197,7 +178,6 @@ help:
 	@echo "  make deploy-base-sepolia          - Deploy full stack (Registry + Factory + VaultFactory)"
 	@echo "  make deploy-base-sepolia-registry - Deploy Registry only"
 	@echo "  make deploy-base-sepolia-factory  - Deploy ModuleFactory only"
-	@echo "  make deploy-base-sepolia-vault-factory - Deploy AgentVaultFactory only"
 	@echo "  make deploy-base-sepolia-module   - Deploy module for a Safe via Factory"
 	@echo ""
 	@echo "  Base Mainnet:"
