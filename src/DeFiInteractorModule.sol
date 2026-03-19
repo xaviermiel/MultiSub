@@ -5,11 +5,15 @@ import {Module} from "./base/Module.sol";
 import {ISafe} from "./interfaces/ISafe.sol";
 import {ICalldataParser} from "./interfaces/ICalldataParser.sol";
 import {AggregatorV3Interface} from "./interfaces/AggregatorV3Interface.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {
+    ReentrancyGuard
+} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {
+    IERC20Metadata
+} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 /**
  * @title DeFiInteractorModule
@@ -94,9 +98,11 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
     // ============ Sub-Account Configuration ============
 
-    /// @notice Configuration for sub-account limits
+    /// @notice Configuration for sub-account limits (dual-mode: BPS or fixed USD)
+    /// @dev Exactly one of maxSpendingBps or maxSpendingUSD must be non-zero
     struct SubAccountLimits {
-        uint256 maxSpendingBps; // Maximum spending in basis points
+        uint256 maxSpendingBps; // Maximum spending in basis points (% of Safe value)
+        uint256 maxSpendingUSD; // Maximum spending in USD (18 decimals, fixed amount)
         uint256 windowDuration; // Time window duration in seconds
         bool isConfigured; // Whether limits have been explicitly set
     }
@@ -126,9 +132,18 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     event RoleAssigned(address indexed member, uint16 indexed roleId);
     event RoleRevoked(address indexed member, uint16 indexed roleId);
 
-    event SubAccountLimitsSet(address indexed subAccount, uint256 maxSpendingBps, uint256 windowDuration);
+    event SubAccountLimitsSet(
+        address indexed subAccount,
+        uint256 maxSpendingBps,
+        uint256 maxSpendingUSD,
+        uint256 windowDuration
+    );
 
-    event AllowedAddressesSet(address indexed subAccount, address[] targets, bool allowed);
+    event AllowedAddressesSet(
+        address indexed subAccount,
+        address[] targets,
+        bool allowed
+    );
 
     /// @notice Emitted on every protocol interaction (for oracle consumption)
     event ProtocolExecution(
@@ -153,9 +168,16 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     event SafeValueUpdated(uint256 totalValueUSD, uint256 updateCount);
     event OracleUpdated(address indexed oldOracle, address indexed newOracle);
 
-    event SpendingAllowanceUpdated(address indexed subAccount, uint256 newAllowance);
+    event SpendingAllowanceUpdated(
+        address indexed subAccount,
+        uint256 newAllowance
+    );
 
-    event AcquiredBalanceUpdated(address indexed subAccount, address indexed token, uint256 newBalance);
+    event AcquiredBalanceUpdated(
+        address indexed subAccount,
+        address indexed token,
+        uint256 newBalance
+    );
 
     event SelectorRegistered(bytes4 indexed selector, OperationType opType);
     event SelectorUnregistered(bytes4 indexed selector);
@@ -192,6 +214,8 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     error CannotBeOracle(address account);
     error CannotWhitelistCoreAddress(address account);
     error CannotRegisterParserForCoreAddress(address account);
+    error BothLimitModesSet();
+    error NeitherLimitModeSet();
 
     // ============ Modifiers ============
 
@@ -208,7 +232,11 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
      * @param _owner The owner address (typically the Safe itself)
      * @param _authorizedOracle The Chainlink CRE address authorized to update state
      */
-    constructor(address _avatar, address _owner, address _authorizedOracle) Module(_avatar, _avatar, _owner) {
+    constructor(
+        address _avatar,
+        address _owner,
+        address _authorizedOracle
+    ) Module(_avatar, _avatar, _owner) {
         if (_authorizedOracle == address(0)) revert InvalidOracleAddress();
         authorizedOracle = _authorizedOracle;
     }
@@ -230,7 +258,8 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     function grantRole(address member, uint16 roleId) external onlyOwner {
         if (member == address(0)) revert InvalidAddress();
         // Prevent Safe, Module, and Oracle from being subaccounts
-        if (member == avatar || member == address(this)) revert CannotBeSubaccount(member);
+        if (member == avatar || member == address(this))
+            revert CannotBeSubaccount(member);
         if (member == authorizedOracle) revert CannotBeSubaccount(member);
         if (!subAccountRoles[member][roleId]) {
             subAccountRoles[member][roleId] = true;
@@ -248,7 +277,10 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         }
     }
 
-    function _removeFromSubaccountArray(uint16 roleId, address member) internal {
+    function _removeFromSubaccountArray(
+        uint16 roleId,
+        address member
+    ) internal {
         address[] storage accounts = subaccounts[roleId];
         uint256 length = accounts.length;
         for (uint256 i = 0; i < length; i++) {
@@ -264,7 +296,9 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         return subAccountRoles[member][roleId];
     }
 
-    function getSubaccountsByRole(uint16 roleId) external view returns (address[] memory) {
+    function getSubaccountsByRole(
+        uint16 roleId
+    ) external view returns (address[] memory) {
         return subaccounts[roleId];
     }
 
@@ -279,7 +313,10 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
      * @param selector The function selector (first 4 bytes of calldata)
      * @param opType The operation type classification
      */
-    function registerSelector(bytes4 selector, OperationType opType) external onlyOwner {
+    function registerSelector(
+        bytes4 selector,
+        OperationType opType
+    ) external onlyOwner {
         if (opType == OperationType.UNKNOWN) revert CannotRegisterUnknown();
         selectorType[selector] = opType;
         emit SelectorRegistered(selector, opType);
@@ -299,64 +336,115 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
      * @param protocol The protocol address
      * @param parser The parser contract address
      */
-    function registerParser(address protocol, address parser) external onlyOwner {
+    function registerParser(
+        address protocol,
+        address parser
+    ) external onlyOwner {
         // Prevent registering parser for Safe or Module (could enable self-calls)
-        if (protocol == avatar || protocol == address(this)) revert CannotRegisterParserForCoreAddress(protocol);
+        if (protocol == avatar || protocol == address(this))
+            revert CannotRegisterParserForCoreAddress(protocol);
         protocolParsers[protocol] = ICalldataParser(parser);
         emit ParserRegistered(protocol, parser);
     }
 
     // ============ Sub-Account Configuration ============
 
-    function setSubAccountLimits(address subAccount, uint256 maxSpendingBps, uint256 windowDuration)
-        external
-        onlyOwner
-    {
+    /// @notice Set spending limits for a sub-account (dual-mode: BPS or fixed USD)
+    /// @dev Exactly one of maxSpendingBps or maxSpendingUSD must be non-zero.
+    ///      BPS mode: limit = percentage of Safe value. USD mode: limit = fixed dollar amount.
+    /// @param subAccount The sub-account address
+    /// @param maxSpendingBps Maximum spending in basis points (0 to use USD mode)
+    /// @param maxSpendingUSD Maximum spending in USD with 18 decimals (0 to use BPS mode)
+    /// @param windowDuration Time window duration in seconds (minimum 1 hour)
+    function setSubAccountLimits(
+        address subAccount,
+        uint256 maxSpendingBps,
+        uint256 maxSpendingUSD,
+        uint256 windowDuration
+    ) external onlyOwner {
         if (subAccount == address(0)) revert InvalidAddress();
-        // Prevent Safe and Module from being subaccounts
-        if (subAccount == avatar || subAccount == address(this)) revert CannotBeSubaccount(subAccount);
+        if (subAccount == avatar || subAccount == address(this))
+            revert CannotBeSubaccount(subAccount);
+        if (maxSpendingBps > 0 && maxSpendingUSD > 0)
+            revert BothLimitModesSet();
+        if (maxSpendingBps == 0 && maxSpendingUSD == 0)
+            revert NeitherLimitModeSet();
         if (maxSpendingBps > 10000 || windowDuration < 1 hours) {
             revert InvalidLimitConfiguration();
         }
 
-        subAccountLimits[subAccount] =
-            SubAccountLimits({maxSpendingBps: maxSpendingBps, windowDuration: windowDuration, isConfigured: true});
+        subAccountLimits[subAccount] = SubAccountLimits({
+            maxSpendingBps: maxSpendingBps,
+            maxSpendingUSD: maxSpendingUSD,
+            windowDuration: windowDuration,
+            isConfigured: true
+        });
 
         // Cap spending allowance to new maximum if it exceeds it
-        // - If remaining > new max: cap to new max (can't keep more than allowed)
-        // - If remaining <= new max: keep as is (don't auto-increase)
         // Only cap if Safe value is fresh (stale value could be dangerously outdated)
         if (
-            safeValue.totalValueUSD > 0 && safeValue.lastUpdated > 0
-                && block.timestamp - safeValue.lastUpdated <= maxSafeValueAge
+            safeValue.totalValueUSD > 0 &&
+            safeValue.lastUpdated > 0 &&
+            block.timestamp - safeValue.lastUpdated <= maxSafeValueAge
         ) {
-            uint256 newMaxAllowance = (safeValue.totalValueUSD * maxSpendingBps) / 10000;
+            uint256 newMaxAllowance;
+            if (maxSpendingUSD > 0) {
+                newMaxAllowance = maxSpendingUSD;
+            } else {
+                newMaxAllowance =
+                    (safeValue.totalValueUSD * maxSpendingBps) /
+                    10000;
+            }
             if (spendingAllowance[subAccount] > newMaxAllowance) {
                 spendingAllowance[subAccount] = newMaxAllowance;
                 emit SpendingAllowanceUpdated(subAccount, newMaxAllowance);
             }
         }
 
-        emit SubAccountLimitsSet(subAccount, maxSpendingBps, windowDuration);
+        emit SubAccountLimitsSet(
+            subAccount,
+            maxSpendingBps,
+            maxSpendingUSD,
+            windowDuration
+        );
     }
 
-    function getSubAccountLimits(address subAccount)
+    /// @notice Get the spending limits for a sub-account
+    /// @return maxSpendingBps Basis points limit (0 if in USD mode)
+    /// @return maxSpendingUSD Fixed USD limit with 18 decimals (0 if in BPS mode)
+    /// @return windowDuration Time window in seconds
+    function getSubAccountLimits(
+        address subAccount
+    )
         public
         view
-        returns (uint256 maxSpendingBps, uint256 windowDuration)
+        returns (
+            uint256 maxSpendingBps,
+            uint256 maxSpendingUSD,
+            uint256 windowDuration
+        )
     {
         SubAccountLimits memory limits = subAccountLimits[subAccount];
         if (limits.isConfigured) {
-            return (limits.maxSpendingBps, limits.windowDuration);
+            return (
+                limits.maxSpendingBps,
+                limits.maxSpendingUSD,
+                limits.windowDuration
+            );
         }
-        return (DEFAULT_MAX_SPENDING_BPS, DEFAULT_WINDOW_DURATION);
+        return (DEFAULT_MAX_SPENDING_BPS, 0, DEFAULT_WINDOW_DURATION);
     }
 
-    function setAllowedAddresses(address subAccount, address[] calldata targets, bool allowed) external onlyOwner {
+    function setAllowedAddresses(
+        address subAccount,
+        address[] calldata targets,
+        bool allowed
+    ) external onlyOwner {
         if (subAccount == address(0)) revert InvalidAddress();
         for (uint256 i = 0; i < targets.length; i++) {
             // Prevent whitelisting Safe or Module as targets
-            if (targets[i] == avatar || targets[i] == address(this)) revert CannotWhitelistCoreAddress(targets[i]);
+            if (targets[i] == avatar || targets[i] == address(this))
+                revert CannotWhitelistCoreAddress(targets[i]);
             if (targets[i] == address(0)) revert InvalidAddress();
             allowedAddresses[subAccount][targets[i]] = allowed;
         }
@@ -371,12 +459,10 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
      * @param data The calldata to execute
      * @dev Token and amount are extracted from calldata via registered parsers
      */
-    function executeOnProtocol(address target, bytes calldata data)
-        external
-        nonReentrant
-        whenNotPaused
-        returns (bytes memory)
-    {
+    function executeOnProtocol(
+        address target,
+        bytes calldata data
+    ) external nonReentrant whenNotPaused returns (bytes memory) {
         // 1. Classify operation first (needed to determine which role to check)
         OperationType opType = _classifyOperation(target, data);
 
@@ -385,7 +471,8 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             // REPAY uses its own role — does not require DEFI_EXECUTE_ROLE
             if (!hasRole(msg.sender, DEFI_REPAY_ROLE)) revert Unauthorized();
             _requireFreshOracle(msg.sender);
-            if (!allowedAddresses[msg.sender][target]) revert AddressNotAllowed();
+            if (!allowedAddresses[msg.sender][target])
+                revert AddressNotAllowed();
             return _executeRepay(msg.sender, target, data);
         }
 
@@ -407,8 +494,11 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
         if (opType == OperationType.WITHDRAW || opType == OperationType.CLAIM) {
             return _executeNoSpendingCheck(msg.sender, target, data, opType, 0);
-        } else if (opType == OperationType.DEPOSIT || opType == OperationType.SWAP) {
-            return _executeWithSpendingCheck(msg.sender, target, data, opType, 0);
+        } else if (
+            opType == OperationType.DEPOSIT || opType == OperationType.SWAP
+        ) {
+            return
+                _executeWithSpendingCheck(msg.sender, target, data, opType, 0);
         }
 
         revert UnknownSelector(bytes4(data[:4]));
@@ -422,12 +512,11 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
      * @dev The value parameter instructs the Safe to send ETH from its own balance.
      *      This function is NOT payable — do not send ETH to the module.
      */
-    function executeOnProtocolWithValue(address target, bytes calldata data, uint256 value)
-        external
-        nonReentrant
-        whenNotPaused
-        returns (bytes memory)
-    {
+    function executeOnProtocolWithValue(
+        address target,
+        bytes calldata data,
+        uint256 value
+    ) external nonReentrant whenNotPaused returns (bytes memory) {
         // 1. Classify operation first (needed to determine which role to check)
         OperationType opType = _classifyOperation(target, data);
 
@@ -435,7 +524,8 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         if (opType == OperationType.REPAY) {
             if (!hasRole(msg.sender, DEFI_REPAY_ROLE)) revert Unauthorized();
             _requireFreshOracle(msg.sender);
-            if (!allowedAddresses[msg.sender][target]) revert AddressNotAllowed();
+            if (!allowedAddresses[msg.sender][target])
+                revert AddressNotAllowed();
             return _executeRepay(msg.sender, target, data);
         }
 
@@ -454,9 +544,25 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         if (!allowedAddresses[msg.sender][target]) revert AddressNotAllowed();
 
         if (opType == OperationType.WITHDRAW || opType == OperationType.CLAIM) {
-            return _executeNoSpendingCheck(msg.sender, target, data, opType, value);
-        } else if (opType == OperationType.DEPOSIT || opType == OperationType.SWAP) {
-            return _executeWithSpendingCheck(msg.sender, target, data, opType, value);
+            return
+                _executeNoSpendingCheck(
+                    msg.sender,
+                    target,
+                    data,
+                    opType,
+                    value
+                );
+        } else if (
+            opType == OperationType.DEPOSIT || opType == OperationType.SWAP
+        ) {
+            return
+                _executeWithSpendingCheck(
+                    msg.sender,
+                    target,
+                    data,
+                    opType,
+                    value
+                );
         }
 
         revert UnknownSelector(bytes4(data[:4]));
@@ -472,13 +578,18 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
      * @dev Prefers parser-based classification for protocols with dynamic operations (e.g., Uniswap V4).
      *      Falls back to selector-based classification if no parser is registered.
      */
-    function _classifyOperation(address target, bytes calldata data) internal view returns (OperationType) {
+    function _classifyOperation(
+        address target,
+        bytes calldata data
+    ) internal view returns (OperationType) {
         ICalldataParser parser = protocolParsers[target];
 
         // If parser exists, use it for classification (handles dynamic operations like V4)
         if (address(parser) != address(0)) {
             uint8 parserOpType = parser.getOperationType(data);
-            if (parserOpType > 0 && parserOpType <= uint8(OperationType.REPAY)) {
+            if (
+                parserOpType > 0 && parserOpType <= uint8(OperationType.REPAY)
+            ) {
                 return OperationType(parserOpType);
             }
         }
@@ -530,7 +641,9 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         uint256 spendingCost = 0;
         for (uint256 i = 0; i < tokensIn.length; i++) {
             uint256 acquired = acquiredBalance[subAccount][tokensIn[i]];
-            uint256 usedFromAcquired = amountsIn[i] > acquired ? acquired : amountsIn[i];
+            uint256 usedFromAcquired = amountsIn[i] > acquired
+                ? acquired
+                : amountsIn[i];
             uint256 fromOriginal = amountsIn[i] - usedFromAcquired;
             spendingCost += _estimateTokenValueUSD(tokensIn[i], fromOriginal);
             acquiredBalance[subAccount][tokensIn[i]] -= usedFromAcquired;
@@ -548,7 +661,9 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         address[] memory tokensOut = _getOutputTokens(target, data, parser);
         uint256[] memory balancesBefore = new uint256[](tokensOut.length);
         for (uint256 i = 0; i < tokensOut.length; i++) {
-            balancesBefore[i] = tokensOut[i] != address(0) ? IERC20(tokensOut[i]).balanceOf(avatar) : avatar.balance;
+            balancesBefore[i] = tokensOut[i] != address(0)
+                ? IERC20(tokensOut[i]).balanceOf(avatar)
+                : avatar.balance;
         }
 
         // 10. Execute
@@ -560,12 +675,23 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         // due to transfer fees, this will revert with arithmetic underflow.
         uint256[] memory amountsOut = new uint256[](tokensOut.length);
         for (uint256 i = 0; i < tokensOut.length; i++) {
-            uint256 balanceAfter = tokensOut[i] != address(0) ? IERC20(tokensOut[i]).balanceOf(avatar) : avatar.balance;
+            uint256 balanceAfter = tokensOut[i] != address(0)
+                ? IERC20(tokensOut[i]).balanceOf(avatar)
+                : avatar.balance;
             amountsOut[i] = balanceAfter - balancesBefore[i];
         }
 
         // 12. Emit event for oracle
-        emit ProtocolExecution(subAccount, target, opType, tokensIn, amountsIn, tokensOut, amountsOut, spendingCost);
+        emit ProtocolExecution(
+            subAccount,
+            target,
+            opType,
+            tokensIn,
+            amountsIn,
+            tokensOut,
+            amountsOut,
+            spendingCost
+        );
 
         return "";
     }
@@ -595,7 +721,9 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         address[] memory tokensOut = parser.extractOutputTokens(target, data);
         uint256[] memory balancesBefore = new uint256[](tokensOut.length);
         for (uint256 i = 0; i < tokensOut.length; i++) {
-            balancesBefore[i] = tokensOut[i] != address(0) ? IERC20(tokensOut[i]).balanceOf(avatar) : avatar.balance;
+            balancesBefore[i] = tokensOut[i] != address(0)
+                ? IERC20(tokensOut[i]).balanceOf(avatar)
+                : avatar.balance;
         }
 
         // 4. Execute (NO spending check - withdrawals and claims are free)
@@ -605,7 +733,9 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         // 5. Calculate received amounts for all tokens
         uint256[] memory amountsOut = new uint256[](tokensOut.length);
         for (uint256 i = 0; i < tokensOut.length; i++) {
-            uint256 balanceAfter = tokensOut[i] != address(0) ? IERC20(tokensOut[i]).balanceOf(avatar) : avatar.balance;
+            uint256 balanceAfter = tokensOut[i] != address(0)
+                ? IERC20(tokensOut[i]).balanceOf(avatar)
+                : avatar.balance;
             amountsOut[i] = balanceAfter - balancesBefore[i];
         }
 
@@ -633,7 +763,11 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
      *      it has input tokens (the tokens being repaid). We track these in the event
      *      for oracle accounting but do not enforce spending limits.
      */
-    function _executeRepay(address subAccount, address target, bytes calldata data) internal returns (bytes memory) {
+    function _executeRepay(
+        address subAccount,
+        address target,
+        bytes calldata data
+    ) internal returns (bytes memory) {
         // 1. Parser is REQUIRED to extract token/amount from calldata
         ICalldataParser parser = protocolParsers[target];
         if (address(parser) == address(0)) {
@@ -676,10 +810,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         address subAccount,
         address target, // The token contract being approved
         bytes calldata data
-    )
-        internal
-        returns (bytes memory)
-    {
+    ) internal returns (bytes memory) {
         // 1. Extract spender and amount from calldata
         // approve(address spender, uint256 amount) - spender is first arg, amount is second
         address spender;
@@ -704,7 +835,10 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         if (amount > acquired) {
             // Portion from original tokens - must fit in spending allowance
             uint256 originalPortion = amount - acquired;
-            uint256 originalValueUSD = _estimateTokenValueUSD(tokenIn, originalPortion);
+            uint256 originalValueUSD = _estimateTokenValueUSD(
+                tokenIn,
+                originalPortion
+            );
             if (originalValueUSD > spendingAllowance[subAccount]) {
                 revert ApprovalExceedsLimit();
             }
@@ -740,14 +874,14 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     /**
      * @notice Transfer tokens from Safe - acquired tokens are free, non-acquired cost spending
      */
-    function transferToken(address token, address recipient, uint256 amount)
-        external
-        nonReentrant
-        whenNotPaused
-        returns (bool)
-    {
+    function transferToken(
+        address token,
+        address recipient,
+        uint256 amount
+    ) external nonReentrant whenNotPaused returns (bool) {
         if (!hasRole(msg.sender, DEFI_TRANSFER_ROLE)) revert Unauthorized();
-        if (token == address(0) || recipient == address(0)) revert InvalidAddress();
+        if (token == address(0) || recipient == address(0))
+            revert InvalidAddress();
         _requireFreshOracle(msg.sender);
 
         // Calculate spending cost only for non-acquired tokens
@@ -765,12 +899,22 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         acquiredBalance[msg.sender][token] -= usedFromAcquired;
 
         // Execute transfer
-        bytes memory transferData = abi.encodeWithSelector(IERC20.transfer.selector, recipient, amount);
+        bytes memory transferData = abi.encodeWithSelector(
+            IERC20.transfer.selector,
+            recipient,
+            amount
+        );
 
         bool success = exec(token, 0, transferData, ISafe.Operation.Call);
         if (!success) revert TransactionFailed();
 
-        emit TransferExecuted(msg.sender, token, recipient, amount, spendingCost);
+        emit TransferExecuted(
+            msg.sender,
+            token,
+            recipient,
+            amount,
+            spendingCost
+        );
 
         return true;
     }
@@ -785,14 +929,21 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         emit SafeValueUpdated(totalValueUSD, safeValue.updateCount);
     }
 
-    function updateSpendingAllowance(address subAccount, uint256 newAllowance) external onlyOracle {
+    function updateSpendingAllowance(
+        address subAccount,
+        uint256 newAllowance
+    ) external onlyOracle {
         _enforceAllowanceCap(newAllowance);
         spendingAllowance[subAccount] = newAllowance;
         lastOracleUpdate[subAccount] = block.timestamp;
         emit SpendingAllowanceUpdated(subAccount, newAllowance);
     }
 
-    function updateAcquiredBalance(address subAccount, address token, uint256 newBalance) external onlyOracle {
+    function updateAcquiredBalance(
+        address subAccount,
+        address token,
+        uint256 newBalance
+    ) external onlyOracle {
         // Cap acquired balance to Safe's actual token balance (H-01)
         newBalance = _capToSafeBalance(token, newBalance);
         acquiredBalance[subAccount][token] = newBalance;
@@ -829,11 +980,13 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     function setAuthorizedOracle(address newOracle) external onlyOwner {
         if (newOracle == address(0)) revert InvalidOracleAddress();
         // Prevent Safe or Module from being oracle
-        if (newOracle == avatar || newOracle == address(this)) revert CannotBeOracle(newOracle);
+        if (newOracle == avatar || newOracle == address(this))
+            revert CannotBeOracle(newOracle);
         // Prevent subaccounts from being oracle (check all roles)
         if (
-            subAccountRoles[newOracle][DEFI_EXECUTE_ROLE] || subAccountRoles[newOracle][DEFI_TRANSFER_ROLE]
-                || subAccountRoles[newOracle][DEFI_REPAY_ROLE]
+            subAccountRoles[newOracle][DEFI_EXECUTE_ROLE] ||
+            subAccountRoles[newOracle][DEFI_TRANSFER_ROLE] ||
+            subAccountRoles[newOracle][DEFI_REPAY_ROLE]
         ) {
             revert CannotBeOracle(newOracle);
         }
@@ -853,13 +1006,19 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
     // ============ Price Feed Functions ============
 
-    function setTokenPriceFeed(address token, address priceFeed) external onlyOwner {
+    function setTokenPriceFeed(
+        address token,
+        address priceFeed
+    ) external onlyOwner {
         if (token == address(0)) revert InvalidAddress();
         if (priceFeed == address(0)) revert InvalidPriceFeed();
         tokenPriceFeeds[token] = AggregatorV3Interface(priceFeed);
     }
 
-    function setTokenPriceFeeds(address[] calldata tokens, address[] calldata priceFeeds) external onlyOwner {
+    function setTokenPriceFeeds(
+        address[] calldata tokens,
+        address[] calldata priceFeeds
+    ) external onlyOwner {
         if (tokens.length != priceFeeds.length) revert LengthMismatch();
         for (uint256 i = 0; i < tokens.length; i++) {
             // Note: address(0) is valid as it represents native ETH for swaps
@@ -889,7 +1048,10 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
      * @dev Returns 0 for non-contract addresses and tokens that don't implement balanceOf,
      *      since the Safe provably holds 0 of a non-existent token.
      */
-    function _capToSafeBalance(address token, uint256 value) internal view returns (uint256) {
+    function _capToSafeBalance(
+        address token,
+        uint256 value
+    ) internal view returns (uint256) {
         if (token == address(0)) {
             uint256 safeBalance = avatar.balance;
             return value > safeBalance ? safeBalance : value;
@@ -897,7 +1059,9 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         // Check if token is a contract before calling balanceOf
         // Non-contract addresses cannot hold tokens — Safe balance is 0
         uint256 codeSize;
-        assembly { codeSize := extcodesize(token) }
+        assembly {
+            codeSize := extcodesize(token)
+        }
         if (codeSize == 0) return 0;
         try IERC20(token).balanceOf(avatar) returns (uint256 safeBalance) {
             return value > safeBalance ? safeBalance : value;
@@ -908,44 +1072,63 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
     function _enforceAllowanceCap(uint256 newAllowance) internal view {
         _requireFreshSafeValue();
-        uint256 maxAllowance = (safeValue.totalValueUSD * absoluteMaxSpendingBps) / 10000;
+        uint256 maxAllowance = (safeValue.totalValueUSD *
+            absoluteMaxSpendingBps) / 10000;
         if (newAllowance > maxAllowance) {
             revert ExceedsAbsoluteMaxSpending(newAllowance, maxAllowance);
         }
     }
 
-    function _estimateTokenValueUSD(address token, uint256 amount) internal view returns (uint256 valueUSD) {
+    function _estimateTokenValueUSD(
+        address token,
+        uint256 amount
+    ) internal view returns (uint256 valueUSD) {
         if (amount == 0) return 0;
 
         AggregatorV3Interface priceFeed = tokenPriceFeeds[token];
         if (address(priceFeed) == address(0)) revert NoPriceFeedSet();
 
-        (uint80 roundId, int256 answer,, uint256 updatedAt, uint80 answeredInRound) = priceFeed.latestRoundData();
+        (
+            uint80 roundId,
+            int256 answer,
+            ,
+            uint256 updatedAt,
+            uint80 answeredInRound
+        ) = priceFeed.latestRoundData();
 
         if (answer <= 0) revert InvalidPrice();
         if (updatedAt == 0) revert StalePriceFeed();
         if (answeredInRound < roundId) revert StalePriceFeed();
-        if (block.timestamp - updatedAt > maxPriceFeedAge) revert StalePriceFeed();
+        if (block.timestamp - updatedAt > maxPriceFeedAge)
+            revert StalePriceFeed();
 
         uint8 priceDecimals = priceFeed.decimals();
         uint256 price = uint256(answer);
 
         // Native ETH has 18 decimals, otherwise query the token
-        uint8 tokenDecimals = token == address(0) ? 18 : IERC20Metadata(token).decimals();
+        uint8 tokenDecimals = token == address(0)
+            ? 18
+            : IERC20Metadata(token).decimals();
 
         // Calculate USD value with 18 decimals
         // Use mulDiv to avoid amount * price overflow (H-05)
-        valueUSD =
-            Math.mulDiv(amount, price * (10 ** 18), 10 ** uint256(tokenDecimals + priceDecimals), Math.Rounding.Ceil);
+        valueUSD = Math.mulDiv(
+            amount,
+            price * (10 ** 18),
+            10 ** uint256(tokenDecimals + priceDecimals),
+            Math.Rounding.Ceil
+        );
     }
 
-    function _getOutputTokens(address target, bytes calldata data, ICalldataParser parser)
-        internal
-        view
-        returns (address[] memory)
-    {
+    function _getOutputTokens(
+        address target,
+        bytes calldata data,
+        ICalldataParser parser
+    ) internal view returns (address[] memory) {
         if (address(parser) != address(0)) {
-            try parser.extractOutputTokens(target, data) returns (address[] memory tokens) {
+            try parser.extractOutputTokens(target, data) returns (
+                address[] memory tokens
+            ) {
                 return tokens;
             } catch {
                 return new address[](0);
@@ -956,22 +1139,43 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
     // ============ View Functions ============
 
-    function getSafeValue() external view returns (uint256 totalValueUSD, uint256 lastUpdated, uint256 updateCount) {
-        return (safeValue.totalValueUSD, safeValue.lastUpdated, safeValue.updateCount);
+    function getSafeValue()
+        external
+        view
+        returns (
+            uint256 totalValueUSD,
+            uint256 lastUpdated,
+            uint256 updateCount
+        )
+    {
+        return (
+            safeValue.totalValueUSD,
+            safeValue.lastUpdated,
+            safeValue.updateCount
+        );
     }
 
-    function getAcquiredBalance(address subAccount, address token) external view returns (uint256) {
+    function getAcquiredBalance(
+        address subAccount,
+        address token
+    ) external view returns (uint256) {
         return acquiredBalance[subAccount][token];
     }
 
-    function getSpendingAllowance(address subAccount) external view returns (uint256) {
+    function getSpendingAllowance(
+        address subAccount
+    ) external view returns (uint256) {
         return spendingAllowance[subAccount];
     }
 
-    function getTokenBalances(address[] calldata tokens) external view returns (uint256[] memory balances) {
+    function getTokenBalances(
+        address[] calldata tokens
+    ) external view returns (uint256[] memory balances) {
         balances = new uint256[](tokens.length);
         for (uint256 i = 0; i < tokens.length; i++) {
-            balances[i] = tokens[i] == address(0) ? avatar.balance : IERC20(tokens[i]).balanceOf(avatar);
+            balances[i] = tokens[i] == address(0)
+                ? avatar.balance
+                : IERC20(tokens[i]).balanceOf(avatar);
         }
     }
 }
