@@ -29,16 +29,15 @@ Periodic portfolio valuation service that calculates and stores the total USD va
 
 ## Trust Model
 
-The oracle wallet has significant on-chain power:
+The oracle wallet has constrained on-chain power, bounded by cumulative counters it cannot reset:
 
-| Capability                             | Constraint                                                                    |
-| -------------------------------------- | ----------------------------------------------------------------------------- |
-| Set `spendingAllowance` per subaccount | Capped by `absoluteMaxSpendingBps * safeValue` (default 20%)                  |
-| Set `acquiredBalance` per token        | Capped by Safe's actual token balance (`_capToSafeBalance`)                   |
-| Update `safeValue`                     | Affects allowance caps — inflated value raises spending limits                |
-| Compute per-subaccount allowance       | Respects dual-mode limits: BPS (% of Safe value) or fixed USD per sub-account |
+| Capability                             | On-chain constraint                                                                               |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Set `spendingAllowance` per subaccount | `min(absoluteMaxSpendingBps * safeValue, maxSpendingUSD)` — advisory only, real cap is cumulative |
+| Set `acquiredBalance` per token        | `_capToSafeBalance` + cumulative oracle acquired budget (`maxOracleAcquiredBps`, default 20%)     |
+| Update `safeValue`                     | Snapshotted at window start; mid-window inflation has no effect on spending cap                   |
 
-**If the oracle key is compromised**, an attacker can maximize allowances and acquired balances within the on-chain caps. The `absoluteMaxSpendingBps` (default 20%) is the last line of defense.
+**If the oracle key is compromised**, maximum damage per window is capped to `absoluteMaxSpendingBps + maxOracleAcquiredBps` (default 20% + 20% = 40%) — enforced by on-chain cumulative counters. Swap acquired balances are marked trustlessly (Tier 1). See [`ORACLE_SECURITY.md`](./ORACLE_SECURITY.md) for full analysis.
 
 **If the oracle goes down**, all subaccount operations freeze within `maxOracleAge` (default 60 minutes) due to staleness checks.
 
@@ -135,9 +134,9 @@ Recommended alerts:
 
 ## Failure Modes
 
-| Failure                  | Impact                                          | Recovery                                              |
-| ------------------------ | ----------------------------------------------- | ----------------------------------------------------- |
-| Oracle process crashes   | Operations freeze in 60 min                     | Restart process; state rebuilds from events           |
-| RPC endpoint down        | Same as process crash                           | Switch RPC URL, restart                               |
-| Oracle wallet out of gas | Oracle can't update chain                       | Fund the wallet                                       |
-| Oracle key compromised   | Attacker can set max allowances (capped at 20%) | Rotate oracle via `setAuthorizedOracle`, pause module |
+| Failure                  | Impact                                                                               | Recovery                                              |
+| ------------------------ | ------------------------------------------------------------------------------------ | ----------------------------------------------------- |
+| Oracle process crashes   | Operations freeze in 60 min                                                          | Restart process; state rebuilds from events           |
+| RPC endpoint down        | Same as process crash                                                                | Switch RPC URL, restart                               |
+| Oracle wallet out of gas | Oracle can't update chain                                                            | Fund the wallet                                       |
+| Oracle key compromised   | Max damage: `absoluteMaxSpendingBps + maxOracleAcquiredBps` per window (default 40%) | Rotate oracle via `setAuthorizedOracle`, pause module |

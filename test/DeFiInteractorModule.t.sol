@@ -282,14 +282,14 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         balances[0] = 500 * 10 ** 18;
         balances[1] = 1000 * 10 ** 18;
 
-        // Ensure Safe holds enough tokens for the acquired balance cap (H-01)
+        // Ensure Safe holds enough tokens for the acquired balance cap
         token.mint(address(safe), 500 * 10 ** 18);
 
         module.batchUpdate(subAccount1, 10000 * 10 ** 18, tokens, balances);
 
         assertEq(module.getSpendingAllowance(subAccount1), 10000 * 10 ** 18);
         assertEq(module.getAcquiredBalance(subAccount1, tokens[0]), 500 * 10 ** 18);
-        // token2 is an EOA (no balanceOf), so acquired balance is capped to 0 (N-M-01)
+        // token2 is an EOA (no balanceOf), so acquired balance is capped to 0
         assertEq(module.getAcquiredBalance(subAccount1, tokens[1]), 0);
     }
 
@@ -781,7 +781,7 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         module.updateSpendingAllowance(subAccount1, 200001e18);
     }
 
-    // ============ Solution 1: On-chain cumulative spending tracker ============
+    // ============ On-chain cumulative spending tracker ============
 
     function testCumulativeSpendingTracked() public {
         _setupSubAccount(subAccount1);
@@ -881,7 +881,7 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         module.executeOnProtocol(address(protocol), depositData2);
     }
 
-    // ============ Solution 6, Tier 1: On-chain swap marking ============
+    // ============  Tier 1: On-chain swap marking ============
 
     function testSwapExecutesWithSwapOpType() public {
         // Register SWAP selector — verifies the swap marking code path doesn't revert
@@ -939,7 +939,7 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         assertEq(acquiredAfter, acquiredBefore, "Deposit should not auto-mark acquired");
     }
 
-    // ============ Solution 6, Tier 2: Oracle acquired budget ============
+    // ============ Oracle acquired budget ============
 
     function testOracleAcquiredBudgetLimit() public {
         module.setSubAccountLimits(subAccount1, 500, 0, 1 days);

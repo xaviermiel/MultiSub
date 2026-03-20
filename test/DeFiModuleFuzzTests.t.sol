@@ -323,7 +323,7 @@ contract DeFiModuleFuzzTests is Test {
         uint256 maxAllowance = 200_000 * 10 ** 18;
         module.updateSpendingAllowance(subAccount, maxAllowance);
 
-        // Set Safe's token balance BEFORE acquired balance (H-01 cap)
+        // Set Safe's token balance BEFORE acquired balance
         // Safe needs max(amount, acquired) so acquired isn't capped
         uint256 safeBalance = amount > acquired ? amount : acquired;
         token.setBalance(address(safe), safeBalance);
@@ -364,7 +364,7 @@ contract DeFiModuleFuzzTests is Test {
         uint256 maxAllowance = 200_000 * 10 ** 18;
         module.updateSpendingAllowance(subAccount, maxAllowance);
 
-        // Set Safe's token balance BEFORE acquired balance (H-01 cap)
+        // Set Safe's token balance BEFORE acquired balance
         token.setBalance(address(safe), amount);
         module.updateAcquiredBalance(subAccount, address(token), amount);
 
@@ -397,7 +397,7 @@ contract DeFiModuleFuzzTests is Test {
         uint256 maxAllowance = 200_000 * 10 ** 18;
         module.updateSpendingAllowance(subAccount, maxAllowance);
 
-        // Set Safe's token balance BEFORE acquired balance (H-01 cap)
+        // Set Safe's token balance BEFORE acquired balance
         token.setBalance(address(safe), acquired);
         module.updateAcquiredBalance(subAccount, address(token), acquired);
 
@@ -437,7 +437,7 @@ contract DeFiModuleFuzzTests is Test {
         uint256 maxAllowance = 200_000 * 10 ** 18;
         module.updateSpendingAllowance(subAccount, maxAllowance);
 
-        // Set Safe's token balances BEFORE acquired balances (H-01 cap)
+        // Set Safe's token balances BEFORE acquired balances
         uint256 safeBalance0 = amount0 > acquired0 ? amount0 : acquired0;
         uint256 safeBalance1 = amount1 > acquired1 ? amount1 : acquired1;
         token.setBalance(address(safe), safeBalance0);
@@ -578,7 +578,7 @@ contract DeFiModuleFuzzTests is Test {
         module.batchUpdate(subAccount, allowance, tokens, balances);
 
         assertEq(module.getSpendingAllowance(subAccount), allowance);
-        // Non-contract token addresses are capped to 0 by _capToSafeBalance (N-M-01 fix)
+        // Non-contract token addresses are capped to 0 by _capToSafeBalance
         for (uint256 i = 0; i < numTokens; i++) {
             assertEq(module.getAcquiredBalance(subAccount, tokens[i]), 0);
         }

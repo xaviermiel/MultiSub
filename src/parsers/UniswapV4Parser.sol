@@ -146,7 +146,7 @@ contract UniswapV4Parser is ICalldataParser {
 
         // Pass 1: Look for primary liquidity actions with explicit amounts
         // These take priority over settlement actions to prevent SETTLE_PAIR
-        // from returning zero amounts before MINT/INCREASE is checked (C-02)
+        // from returning zero amounts before MINT/INCREASE is checked
         for (uint256 i = 0; i < actions.length; i++) {
             uint8 action = uint8(actions[i]);
 

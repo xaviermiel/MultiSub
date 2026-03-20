@@ -228,7 +228,7 @@ contract FuzzTests is Test {
 
     /**
      * @notice Fuzz test: Standalone SETTLE_PAIR returns tokens but empty amounts
-     * @dev After M-01 fix, standalone SETTLE_PAIR without a liquidity action
+     * @dev Standalone SETTLE_PAIR without a liquidity action
      *      returns empty amounts. This is intentional — the module's getOperationType
      *      returns UNKNOWN for standalone SETTLE_PAIR, so it reverts before spending check.
      */
@@ -247,7 +247,7 @@ contract FuzzTests is Test {
         uint256[] memory amounts = v4Parser.extractInputAmounts(address(mockV4PM), data);
 
         assertEq(tokens.length, 2, "SETTLE_PAIR should return 2 tokens");
-        assertEq(amounts.length, 0, "Standalone SETTLE_PAIR returns empty amounts (M-01 fix)");
+        assertEq(amounts.length, 0, "Standalone SETTLE_PAIR returns empty amounts");
     }
 
     /**

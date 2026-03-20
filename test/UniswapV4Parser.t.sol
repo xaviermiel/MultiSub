@@ -215,7 +215,7 @@ contract UniswapV4ParserTest is Test {
         address[] memory inputTokens = parser.extractInputTokens(V4_POSITION_MANAGER, data);
         uint256[] memory inputAmounts = parser.extractInputAmounts(V4_POSITION_MANAGER, data);
 
-        // SETTLE_PAIR returns tokens but no amounts in Pass 2 (M-01 fix)
+        // SETTLE_PAIR returns tokens but no amounts in Pass 2
         assertEq(inputTokens.length, 2, "Should have 2 tokens from SETTLE_PAIR");
         assertEq(inputAmounts.length, 0, "Standalone SETTLE_PAIR returns empty amounts");
     }

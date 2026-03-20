@@ -106,7 +106,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     /// @notice Per-sub-account limit configuration
     mapping(address => SubAccountLimits) public subAccountLimits;
 
-    // ============ On-Chain Cumulative Spending Tracker (Solution 1) ============
+    // ============ On-Chain Cumulative Spending Tracker ============
 
     /// @notice Start of the current spending window per sub-account
     mapping(address => uint256) public windowStart;
@@ -117,7 +117,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     /// @notice Cumulative spending in current window per sub-account (USD with 18 decimals)
     mapping(address => uint256) public cumulativeSpent;
 
-    // ============ Oracle Acquired Budget (Solution 6, Tier 2) ============
+    // ============ Oracle Acquired Budget ============
 
     /// @notice Start of oracle acquired grant window per sub-account
     mapping(address => uint256) public acquiredGrantWindowStart;
@@ -636,7 +636,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             amountsOut[i] = balanceAfter - balancesBefore[i];
         }
 
-        // 12. Mark swap outputs as acquired on-chain (Solution 6, Tier 1 — trustless)
+        // 12. Mark swap outputs as acquired on-chain
         if (opType == OperationType.SWAP) {
             for (uint256 i = 0; i < tokensOut.length; i++) {
                 if (amountsOut[i] > 0) {
@@ -877,9 +877,9 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     }
 
     function updateAcquiredBalance(address subAccount, address token, uint256 newBalance) external onlyOracle {
-        // Cap acquired balance to Safe's actual token balance (H-01)
+        // Cap acquired balance to Safe's actual token balance
         newBalance = _capToSafeBalance(token, newBalance);
-        // Track oracle-granted acquired increases (Solution 6, Tier 2)
+        // Track oracle-granted acquired increases
         _trackOracleAcquiredGrant(subAccount, token, acquiredBalance[subAccount][token], newBalance);
         acquiredBalance[subAccount][token] = newBalance;
         lastOracleUpdate[subAccount] = block.timestamp;
@@ -903,9 +903,9 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         lastOracleUpdate[subAccount] = block.timestamp;
 
         for (uint256 i = 0; i < tokens.length; i++) {
-            // Cap acquired balance to Safe's actual token balance (H-01)
+            // Cap acquired balance to Safe's actual token balance
             uint256 cappedBalance = _capToSafeBalance(tokens[i], balances[i]);
-            // Track oracle-granted acquired increases (Solution 6, Tier 2)
+            // Track oracle-granted acquired increases
             _trackOracleAcquiredGrant(subAccount, tokens[i], acquiredBalance[subAccount][tokens[i]], cappedBalance);
             acquiredBalance[subAccount][tokens[i]] = cappedBalance;
             emit AcquiredBalanceUpdated(subAccount, tokens[i], cappedBalance);
@@ -1021,7 +1021,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         }
     }
 
-    /// @notice Track cumulative spending per window (Solution 1 — oracle cannot reset)
+    /// @notice Track cumulative spending per window
     /// @param subAccount The sub-account that is spending
     /// @param spendingCost The USD cost of this operation (18 decimals)
     function _trackCumulativeSpending(address subAccount, uint256 spendingCost) internal {
@@ -1060,7 +1060,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         }
     }
 
-    /// @notice Track oracle-granted acquired balance increases (Solution 6, Tier 2)
+    /// @notice Track oracle-granted acquired balance increases
     /// @param subAccount The sub-account receiving acquired balance
     /// @param token The token being marked as acquired
     /// @param oldBalance The previous acquired balance
@@ -1122,7 +1122,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         uint8 tokenDecimals = token == address(0) ? 18 : IERC20Metadata(token).decimals();
 
         // Calculate USD value with 18 decimals
-        // Use mulDiv to avoid amount * price overflow (H-05)
+        // Use mulDiv to avoid amount * price overflow
         valueUSD =
             Math.mulDiv(amount, price * (10 ** 18), 10 ** uint256(tokenDecimals + priceDecimals), Math.Rounding.Ceil);
     }

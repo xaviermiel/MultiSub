@@ -182,9 +182,21 @@ Sub-accounts can only interact with **whitelisted protocols**. Even if compromis
 
 Operations are blocked if oracle data is stale (default: >60 minutes). Prevents operating with outdated allowances.
 
-### 5. Hard Safety Cap
+### 5. On-Chain Cumulative Spending Cap
 
-Oracle cannot set allowances above an absolute maximum (e.g., 20% of portfolio). Prevents oracle bugs from enabling unlimited spending.
+Every spend is tracked by an on-chain cumulative counter (`cumulativeSpent`) that the oracle **cannot reset**. Even if the oracle resets `spendingAllowance`, the cumulative counter blocks spending beyond the per-window limit. `windowSafeValue` is snapshotted at window start, so mid-window `safeValue` inflation has no effect.
+
+### 6. Swap Output Auto-Marking (Tier 1 Acquired)
+
+SWAP outputs are auto-marked as acquired **on-chain** immediately after execution. No oracle involvement — fully trustless for the most common DeFi operation.
+
+### 7. Oracle Acquired Budget (Tier 2)
+
+For WITHDRAW/CLAIM outputs, the oracle can mark tokens as acquired but is bounded by a per-window cumulative budget (`maxOracleAcquiredBps`, default 20% of Safe value). This counter cannot be reset by the oracle.
+
+### 8. Per-Account USD Cap
+
+For sub-accounts using fixed USD limits (`maxSpendingUSD`), the oracle cannot push the allowance above the per-account cap — `_enforceAllowanceCap` takes the minimum of the global BPS cap and the per-account USD limit.
 
 ---
 
@@ -240,9 +252,13 @@ The contract extracts `tokenIn` and `amountIn` from the calldata via registered 
 1. **Sub-accounts get daily spending limits** based on portfolio percentage (BPS mode) or a fixed USD amount (USD mode)
 2. **Operations are classified automatically** from function selectors
 3. **Acquired tokens are free to use** (from swaps, withdrawals) - only exact amounts received
-4. **Acquired status expires after 24h** - tokens become "original" and cost spending again
-5. **Spending is one-way** - once consumed, only resets when 24h window expires
-6. **Oracle uses RPC polling** for event processing + cron for periodic refresh
-7. **FIFO queues track acquired balances** with timestamp inheritance through swaps
-8. **On-chain verification** prevents lying about operations
-9. **Multiple safety layers** protect against compromised sub-accounts
+4. **Swap outputs are auto-marked acquired on-chain** (trustless, no oracle needed)
+5. **Acquired status expires after 24h** - tokens become "original" and cost spending again
+6. **Spending is one-way** - once consumed, only resets when 24h window expires
+7. **On-chain cumulative spending counter** prevents oracle from resetting spent budget
+8. **Oracle acquired budget** caps how much the oracle can grant as acquired per window
+9. **Safe value is snapshotted at window start** - oracle can't inflate mid-window
+10. **Oracle uses RPC polling** for event processing + cron for periodic refresh
+11. **FIFO queues track acquired balances** with timestamp inheritance through swaps
+12. **On-chain verification** prevents lying about operations
+13. **Multiple safety layers** protect against compromised sub-accounts and oracle

@@ -3,7 +3,7 @@
 > A secure self-custody DeFi wallet built as a **custom Zodiac module**, combining Safe multisig security with delegated permission-restricted interactions.
 
 [![Solidity](https://img.shields.io/badge/solidity-0.8.20-blue)]()
-[![Tests](https://img.shields.io/badge/tests-450%2F450%20passing-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-446%20passing-brightgreen)]()
 [![License](https://img.shields.io/badge/license-MIT-blue)]()
 [![Zodiac](https://img.shields.io/badge/zodiac-module-purple)]()
 
@@ -122,10 +122,16 @@ This allows sub-accounts to chain operations (swap → deposit → withdraw) wit
 - **Selector-Based Classification**: Operations classified by function selector
 - **Calldata Verification**: Token/amount extracted from calldata and verified
 - **Allowlist Enforcement**: Sub-accounts can only interact with whitelisted protocols
-- **Oracle Freshness Check**: Operations blocked if oracle data is stale (>15 minutes)
-- **Hard Safety Cap**: Oracle cannot set allowances above absolute maximum
+- **Oracle Freshness Check**: Operations blocked if oracle data is stale (>60 minutes)
+- **Cumulative Spending Cap**: On-chain `cumulativeSpent` counter that the oracle cannot reset — real spending enforcement
+- **Safe Value Snapshot**: `windowSafeValue` frozen at window start — oracle can't inflate mid-window
+- **Swap Auto-Marking (Tier 1)**: Swap outputs auto-marked as acquired on-chain, no oracle needed
+- **Oracle Acquired Budget (Tier 2)**: `cumulativeOracleGrantedUSD` caps oracle's acquired grants per window (default 20%)
+- **Per-Account USD Cap**: `_enforceAllowanceCap` enforces `maxSpendingUSD` for USD-mode sub-accounts
 - Emergency pause mechanism
 - Instant role revocation
+
+**Max oracle compromise damage per window**: `absoluteMaxSpendingBps + maxOracleAcquiredBps` (default 20% + 20% = 40%). See [`oracle/ORACLE_SECURITY.md`](./oracle/ORACLE_SECURITY.md).
 
 ## Default Limits
 

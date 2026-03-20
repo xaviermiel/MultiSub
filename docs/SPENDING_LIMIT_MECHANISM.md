@@ -1522,15 +1522,16 @@ The core use case for this protocol is enabling sub-accounts to manage liquidity
 
 ### 8.2 Responsibility Split
 
-| Responsibility                  | On-Chain                          | Off-Chain Oracle                                  |
-| ------------------------------- | --------------------------------- | ------------------------------------------------- |
-| **Spending limit enforcement**  | Simple check: `cost <= allowance` | Calculate allowance based on complex rules        |
-| **Acquired balance tracking**   | Store values, emit events         | Determine when to add/remove acquired status      |
-| **Window management**           | None (stateless)                  | Track rolling windows, handle expiry              |
-| **Deposit/withdrawal matching** | Emit ProtocolExecution events     | Match deposits to withdrawals for acquired status |
-| **Portfolio valuation**         | Store value, check staleness      | Calculate from token balances + prices            |
-| **Price feeds**                 | None                              | Aggregate from Chainlink, TWAP, etc.              |
-| **Anomaly detection**           | None                              | Detect suspicious patterns, reduce allowance      |
+| Responsibility                  | On-Chain                                                               | Off-Chain Oracle                                  |
+| ------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------- |
+| **Spending limit enforcement**  | `cost <= allowance` + cumulative cap (`cumulativeSpent`)               | Calculate allowance based on complex rules        |
+| **Acquired balance (swaps)**    | Auto-marked on-chain at execution time (Tier 1, trustless)             | Not involved                                      |
+| **Acquired balance (withdraw)** | Store values, enforce oracle budget (`cumulativeOracleGrantedUSD`)     | Match deposits to withdrawals, mark acquired      |
+| **Window management**           | Cumulative counters reset on window expiry, `windowSafeValue` snapshot | Track rolling windows, handle expiry              |
+| **Deposit/withdrawal matching** | Emit ProtocolExecution events                                          | Match deposits to withdrawals for acquired status |
+| **Portfolio valuation**         | Store value, snapshot at window start                                  | Calculate from token balances + prices            |
+| **Price feeds**                 | Chainlink reads for USD valuation                                      | Aggregate from Chainlink, TWAP, etc.              |
+| **Oracle compromise cap**       | `maxSpendingBps + maxOracleAcquiredBps` (default 40%)                  | N/A                                               |
 
 ### 8.3 On-Chain Contract (Simplified)
 

@@ -461,7 +461,7 @@ contract UniversalRouterParser is ICalldataParser {
                 }
             } else if (action == V4_SWAP_EXACT_OUT) {
                 // Multi-hop exact out requires decoding PathKey[] which contains dynamic data
-                // Revert to prevent zero-spending bypass (C-01)
+                // Revert to prevent zero-spending bypass
                 revert UnsupportedV4ExactOutMultiHop();
             }
         }
@@ -527,7 +527,7 @@ contract UniversalRouterParser is ICalldataParser {
                 }
             } else if (action == V4_SWAP_EXACT_OUT) {
                 // Multi-hop exact out requires decoding PathKey[] which contains dynamic data
-                // Revert to prevent zero-spending bypass (C-01)
+                // Revert to prevent zero-spending bypass
                 revert UnsupportedV4ExactOutMultiHop();
             }
         }
