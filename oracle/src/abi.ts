@@ -94,6 +94,7 @@ export const DeFiInteractorModuleABI = [
     inputs: [{ name: "subAccount", type: "address", internalType: "address" }],
     outputs: [
       { name: "maxSpendingBps", type: "uint256", internalType: "uint256" },
+      { name: "maxSpendingUSD", type: "uint256", internalType: "uint256" },
       { name: "windowDuration", type: "uint256", internalType: "uint256" },
     ],
     stateMutability: "view",
