@@ -32,7 +32,7 @@ MultiSub enables **Safe multisig owners** to delegate DeFi operations to **sub-a
 
 Without spending limits, a compromised sub-account could drain the entire Safe. We need:
 
-1. **Cap how much each sub-account can use** (e.g., 5% of portfolio per day)
+1. **Cap how much each sub-account can use** (e.g., 5% of portfolio per day, or a fixed USD amount)
 2. **Allow operational flexibility** (swap, deposit, withdraw without getting stuck)
 3. **Prevent gaming** (can't bypass limits by swapping back and forth)
 
@@ -237,7 +237,7 @@ The contract extracts `tokenIn` and `amountIn` from the calldata via registered 
 
 ## Summary
 
-1. **Sub-accounts get daily spending limits** based on portfolio percentage
+1. **Sub-accounts get daily spending limits** based on portfolio percentage (BPS mode) or a fixed USD amount (USD mode)
 2. **Operations are classified automatically** from function selectors
 3. **Acquired tokens are free to use** (from swaps, withdrawals) - only exact amounts received
 4. **Acquired status expires after 24h** - tokens become "original" and cost spending again

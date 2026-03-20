@@ -23,27 +23,30 @@
 ### 1.1 Problem Statement
 
 Sub-accounts delegated to operate on behalf of a Safe need spending limits to:
+
 - Prevent excessive value extraction by compromised keys
 - Allow operational flexibility within defined boundaries
 - Maintain operational flexibility while enforcing limits
 
 ### 1.2 Design Goals
 
-| Goal | Description |
-|------|-------------|
-| **Portfolio-based limits** | Cap each sub-account to X% of portfolio value per time window |
-| **Operational flexibility** | Allow sub-accounts to use assets they acquired through operations |
-| **Acquired token flexibility** | Tokens from operations (swaps, withdrawals) are free to use |
-| **Value preservation** | Swaps don't "double count" since value stays in Safe |
-| **Simplicity** | Minimize complexity while achieving security goals |
+| Goal                           | Description                                                       |
+| ------------------------------ | ----------------------------------------------------------------- |
+| **Portfolio-based limits**     | Cap each sub-account to X% of portfolio value per time window     |
+| **Operational flexibility**    | Allow sub-accounts to use assets they acquired through operations |
+| **Acquired token flexibility** | Tokens from operations (swaps, withdrawals) are free to use       |
+| **Value preservation**         | Swaps don't "double count" since value stays in Safe              |
+| **Simplicity**                 | Minimize complexity while achieving security goals                |
 
 ### 1.3 Key Insight
 
 The core insight is distinguishing between:
+
 - **Original assets**: Assets in the Safe at window start → using them costs spending
 - **Acquired assets**: Assets received from operations during the window → free to use
 
 This allows sub-accounts to:
+
 1. Swap asset A to B (costs spending)
 2. Continue using B for further operations (free)
 3. Swap back to A if needed (free)
@@ -60,7 +63,8 @@ This allows sub-accounts to:
 │                           SPENDING LIMIT MODEL                              │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│   Daily Limit = Portfolio Value × maxSpendingBps / 10,000                   │
+│   Daily Limit (BPS mode)  = Portfolio Value × maxSpendingBps / 10,000       │
+│   Daily Limit (USD mode)  = maxSpendingUSD (fixed amount, 18 decimals)      │
 │                                                                             │
 │   Net Spending = Σ (Original Assets Used in USD)                            │
 │                  (spending is one-way, no recovery)                         │
@@ -96,15 +100,15 @@ Where:
 
 ### 2.3 Operation Cost Rules
 
-| Operation | Spending Cost | Output Classification |
-|-----------|---------------|----------------------|
-| **Swap A→B** | USD value of A used from Original | B received is Acquired |
-| **Deposit to Protocol** | USD value of token from Original | Tracked for withdrawal matching |
-| **Withdraw from Protocol** | None (FREE) | Conditional* |
-| **Transfer Out of Safe** | USD value of token from Original**** | N/A (leaves Safe) |
-| **Receive External** | None | Acquired |
-| **Claim Rewards** | None | Conditional** |
-| **Approve** | None (capped***) | N/A |
+| Operation                  | Spending Cost                            | Output Classification           |
+| -------------------------- | ---------------------------------------- | ------------------------------- |
+| **Swap A→B**               | USD value of A used from Original        | B received is Acquired          |
+| **Deposit to Protocol**    | USD value of token from Original         | Tracked for withdrawal matching |
+| **Withdraw from Protocol** | None (FREE)                              | Conditional\*                   |
+| **Transfer Out of Safe**   | USD value of token from Original\*\*\*\* | N/A (leaves Safe)               |
+| **Receive External**       | None                                     | Acquired                        |
+| **Claim Rewards**          | None                                     | Conditional\*\*                 |
+| **Approve**                | None (capped\*\*\*)                      | N/A                             |
 
 \* Only if deposit matched by the same subaccount to the same protocol in the time window.
 \*\* Only if deposit matched by the same subaccount to the same protocol in the time window (same rule as withdrawals).
@@ -259,13 +263,13 @@ event SafeValueUpdated(uint256 totalValueUSD, uint256 timestamp);
 
 Operations are classified by their function selector and routed accordingly:
 
-| Type | Costs Spending? | Output Status |
-|------|-----------------|---------------|
-| **SWAP** | Yes (from original) | Acquired |
-| **DEPOSIT** | Yes (from original) | Tracked by oracle |
-| **WITHDRAW** | No (FREE) | Conditional* |
-| **CLAIM** | No (FREE) | Conditional** |
-| **APPROVE** | No (capped***) | N/A |
+| Type         | Costs Spending?     | Output Status     |
+| ------------ | ------------------- | ----------------- |
+| **SWAP**     | Yes (from original) | Acquired          |
+| **DEPOSIT**  | Yes (from original) | Tracked by oracle |
+| **WITHDRAW** | No (FREE)           | Conditional\*     |
+| **CLAIM**    | No (FREE)           | Conditional\*\*   |
+| **APPROVE**  | No (capped\*\*\*)   | N/A               |
 
 \* Only if deposit matched by the same subaccount to the same protocol in the time window.
 \*\* Only if deposit matched by the same subaccount to the same protocol in the time window (same rule as withdrawals).
@@ -489,6 +493,7 @@ function _executeApproveWithCap(
 ```
 
 **Key points:**
+
 - Approve doesn't consume spending allowance (actual spending at execution)
 - Acquired tokens can be approved without limit (e.g., LP tokens for redemption)
 - Original tokens approval is capped by current spending allowance
@@ -544,12 +549,12 @@ The oracle monitors `ProtocolExecution` events and updates:
 
 ```typescript
 // Off-chain oracle logic
-if (event.opType === 'SWAP') {
+if (event.opType === "SWAP") {
   // Add output as acquired
   state.acquiredBalance[event.tokenOut] += event.amountOut;
 }
 
-if (event.opType === 'WITHDRAW') {
+if (event.opType === "WITHDRAW") {
   // Check if withdrawal matches a deposit by this subaccount
   const matchedDeposit = findMatchingDeposit(event.subAccount, event.protocol);
   if (matchedDeposit) {
@@ -722,15 +727,18 @@ This fundamentally undermines the spending limit if volatile assets are involved
 #### 6.1.3 Attack Variations
 
 **Intentional Pump Timing**:
+
 - Sub-account monitors for price pumps
 - Swaps to volatile asset just before pump
 - Gains free spending capacity
 
 **Coordinated Manipulation**:
+
 - If sub-account has external ability to influence price (whale)
 - Could pump price after acquiring tokens
 
 **Volatility Harvesting**:
+
 - Repeatedly swap to volatile assets
 - On pumps: assets become more valuable (free to use)
 - On dumps: swap back and try again
@@ -743,6 +751,7 @@ This fundamentally undermines the spending limit if volatile assets are involved
 #### 6.2.1 The Problem
 
 The system needs to know what type of operation is being executed:
+
 - `executeSwap()` → output is acquired
 - `depositToProtocol()` → tracks for withdrawal matching
 - `withdrawFromProtocol()` → output becomes acquired if matched
@@ -751,21 +760,22 @@ But DeFi operations are diverse and not always clearly categorized.
 
 #### 6.2.2 Classification Challenges
 
-| Operation | Category? | Ambiguity |
-|-----------|-----------|-----------|
-| Uniswap swap | Swap | Clear |
-| Aave deposit | Deposit | Clear |
-| Curve add_liquidity | Deposit? Swap? | LP token returned |
-| Yearn vault deposit | Deposit | Clear |
-| Compound mint cToken | Deposit | Clear |
-| GMX open position | Deposit? | Complex derivative |
-| Convex stake | Deposit | Receipt token |
-| Harvest rewards | Claim | Not deposit/swap |
-| Flash loan | None | Temporary |
+| Operation            | Category?      | Ambiguity          |
+| -------------------- | -------------- | ------------------ |
+| Uniswap swap         | Swap           | Clear              |
+| Aave deposit         | Deposit        | Clear              |
+| Curve add_liquidity  | Deposit? Swap? | LP token returned  |
+| Yearn vault deposit  | Deposit        | Clear              |
+| Compound mint cToken | Deposit        | Clear              |
+| GMX open position    | Deposit?       | Complex derivative |
+| Convex stake         | Deposit        | Receipt token      |
+| Harvest rewards      | Claim          | Not deposit/swap   |
+| Flash loan           | None           | Temporary          |
 
 #### 6.2.3 Generic Execute Problem
 
 If the contract has a generic `executeOnProtocol()` function:
+
 - Can't classify the operation automatically
 - Could bypass typed functions
 - Need to either remove generic execute or add classification
@@ -953,6 +963,7 @@ for (uint256 i = 0; i < 50; i++) {
 #### 6.7.2 Griefing Attack
 
 Malicious sub-account could:
+
 1. Interact with many dust tokens
 2. Bloat `_acquiredTokens` set
 3. Make window reset expensive for themselves
@@ -979,6 +990,7 @@ function _estimateTokenValueUSD(address token, uint256 amount) internal view {
 ```
 
 If prices are stale or manipulated:
+
 - Spending cost could be underestimated
 - Sub-account uses less limit than they should
 - Or overestimated, blocking legitimate operations
@@ -1004,6 +1016,7 @@ If prices are stale or manipulated:
 #### 6.9.1 The Problem
 
 The mechanism has many interacting components:
+
 - Original vs Acquired classification
 - Per-token tracking
 - Per-protocol deposit tracking
@@ -1014,6 +1027,7 @@ The mechanism has many interacting components:
 #### 6.9.2 Mental Model Difficulty
 
 Users may not understand:
+
 - Why some tokens are "free" and others aren't
 - When spending capacity recovers
 - How window resets affect their state
@@ -1021,6 +1035,7 @@ Users may not understand:
 #### 6.9.3 Audit Surface
 
 More code paths = more potential bugs:
+
 - Off-by-one in balance tracking
 - Overflow/underflow in recovery
 - Race conditions in concurrent operations
@@ -1048,6 +1063,7 @@ function executeSwap(...) external {
 ```
 
 If the protocol calls back during step 2:
+
 - State is partially updated
 - Could potentially be exploited
 
@@ -1297,6 +1313,7 @@ function _addAcquiredBalance(address subAccount, address token, uint256 amount) 
 #### 7.4.2 First-Come-First-Served Documentation
 
 Document that acquired balances are "virtual claims":
+
 - Not guaranteed until used
 - Race conditions possible
 - Sub-accounts should not rely on full acquired balance
@@ -1505,15 +1522,15 @@ The core use case for this protocol is enabling sub-accounts to manage liquidity
 
 ### 8.2 Responsibility Split
 
-| Responsibility | On-Chain | Off-Chain Oracle |
-|----------------|----------|------------------|
-| **Spending limit enforcement** | Simple check: `cost <= allowance` | Calculate allowance based on complex rules |
-| **Acquired balance tracking** | Store values, emit events | Determine when to add/remove acquired status |
-| **Window management** | None (stateless) | Track rolling windows, handle expiry |
-| **Deposit/withdrawal matching** | Emit ProtocolExecution events | Match deposits to withdrawals for acquired status |
-| **Portfolio valuation** | Store value, check staleness | Calculate from token balances + prices |
-| **Price feeds** | None | Aggregate from Chainlink, TWAP, etc. |
-| **Anomaly detection** | None | Detect suspicious patterns, reduce allowance |
+| Responsibility                  | On-Chain                          | Off-Chain Oracle                                  |
+| ------------------------------- | --------------------------------- | ------------------------------------------------- |
+| **Spending limit enforcement**  | Simple check: `cost <= allowance` | Calculate allowance based on complex rules        |
+| **Acquired balance tracking**   | Store values, emit events         | Determine when to add/remove acquired status      |
+| **Window management**           | None (stateless)                  | Track rolling windows, handle expiry              |
+| **Deposit/withdrawal matching** | Emit ProtocolExecution events     | Match deposits to withdrawals for acquired status |
+| **Portfolio valuation**         | Store value, check staleness      | Calculate from token balances + prices            |
+| **Price feeds**                 | None                              | Aggregate from Chainlink, TWAP, etc.              |
+| **Anomaly detection**           | None                              | Detect suspicious patterns, reduce allowance      |
 
 ### 8.3 On-Chain Contract (Simplified)
 
@@ -1619,8 +1636,8 @@ interface SubAccountState {
   spendingRecords: { amount: bigint; timestamp: bigint }[];
   depositRecords: DepositRecord[];
   totalSpendingInWindow: bigint;
-  acquiredQueues: Map<Address, AcquiredBalanceEntry[]>;  // FIFO queues
-  acquiredBalances: Map<Address, bigint>;  // Computed totals
+  acquiredQueues: Map<Address, AcquiredBalanceEntry[]>; // FIFO queues
+  acquiredBalances: Map<Address, bigint>; // Computed totals
 }
 
 interface DepositRecord {
@@ -1628,17 +1645,17 @@ interface DepositRecord {
   target: Address;
   tokenIn: Address;
   amountIn: bigint;
-  remainingAmount: bigint;      // Tracks unconsumed deposit
-  tokenOut: Address;            // LP/receipt token received
+  remainingAmount: bigint; // Tracks unconsumed deposit
+  tokenOut: Address; // LP/receipt token received
   amountOut: bigint;
   remainingOutputAmount: bigint; // Tracks unconsumed output
   timestamp: bigint;
-  originalAcquisitionTimestamp: bigint;  // For FIFO inheritance
+  originalAcquisitionTimestamp: bigint; // For FIFO inheritance
 }
 
 interface AcquiredBalanceEntry {
   amount: bigint;
-  originalTimestamp: bigint;  // For 24h expiry calculation
+  originalTimestamp: bigint; // For 24h expiry calculation
 }
 
 // ============ Event Types ============
@@ -1647,7 +1664,7 @@ interface AcquiredBalanceEntry {
 interface ProtocolExecutionEvent {
   subAccount: Address;
   target: Address;
-  opType: OperationType;  // SWAP, DEPOSIT, WITHDRAW, CLAIM, APPROVE
+  opType: OperationType; // SWAP, DEPOSIT, WITHDRAW, CLAIM, APPROVE
   tokensIn: Address[];
   amountsIn: bigint[];
   tokensOut: Address[];
@@ -1663,12 +1680,15 @@ enum OperationType {
   DEPOSIT = 2,
   WITHDRAW = 3,
   CLAIM = 4,
-  APPROVE = 5
+  APPROVE = 5,
 }
 
 // ============ Rolling Window Spending ============
 
-function calculateCurrentSpending(state: SubAccountState, windowStart: bigint): bigint {
+function calculateCurrentSpending(
+  state: SubAccountState,
+  windowStart: bigint,
+): bigint {
   let totalSpending = 0n;
   for (const record of state.spendingRecords) {
     if (record.timestamp >= windowStart) {
@@ -1681,12 +1701,11 @@ function calculateCurrentSpending(state: SubAccountState, windowStart: bigint): 
 function calculateSpendingAllowance(
   portfolioValue: bigint,
   maxSpendingBps: number,
-  currentSpending: bigint
+  currentSpending: bigint,
 ): bigint {
   const maxSpending = (portfolioValue * BigInt(maxSpendingBps)) / 10000n;
   return currentSpending >= maxSpending ? 0n : maxSpending - currentSpending;
 }
-
 
 // ============ FIFO Acquired Balance Management ============
 
@@ -1694,7 +1713,7 @@ function consumeAcquiredBalance(
   queue: AcquiredBalanceEntry[],
   amount: bigint,
   eventTimestamp: bigint,
-  windowDuration: bigint
+  windowDuration: bigint,
 ): { consumed: AcquiredBalanceEntry[]; remaining: bigint } {
   const consumed: AcquiredBalanceEntry[] = [];
   let remaining = amount;
@@ -1714,7 +1733,10 @@ function consumeAcquiredBalance(
       consumed.push(queue.shift()!);
       remaining -= entry.amount;
     } else {
-      consumed.push({ amount: remaining, originalTimestamp: entry.originalTimestamp });
+      consumed.push({
+        amount: remaining,
+        originalTimestamp: entry.originalTimestamp,
+      });
       entry.amount -= remaining;
       remaining = 0n;
     }
@@ -1726,7 +1748,7 @@ function consumeAcquiredBalance(
 function calculateAcquiredBalance(
   queue: AcquiredBalanceEntry[],
   currentTimestamp: bigint,
-  windowDuration: bigint
+  windowDuration: bigint,
 ): bigint {
   const expiryThreshold = currentTimestamp - windowDuration;
   let total = 0n;
@@ -1740,20 +1762,20 @@ function calculateAcquiredBalance(
   return total;
 }
 
-
 // ============ Withdrawal/Claim Deposit Matching ============
 
 function matchWithdrawalToDeposits(
   state: SubAccountState,
   event: ProtocolExecutionEvent,
   tokenOut: Address,
-  amountOut: bigint
+  amountOut: bigint,
 ): { matchedAmount: bigint; inheritedTimestamp: bigint } {
   // Find matching deposits to same protocol by this subaccount
-  const matchingDeposits = state.depositRecords.filter(d =>
-    d.target === event.target &&
-    d.tokenOut.toLowerCase() === tokenOut.toLowerCase() &&
-    d.remainingOutputAmount > 0n
+  const matchingDeposits = state.depositRecords.filter(
+    (d) =>
+      d.target === event.target &&
+      d.tokenOut.toLowerCase() === tokenOut.toLowerCase() &&
+      d.remainingOutputAmount > 0n,
   );
 
   if (matchingDeposits.length === 0) {
@@ -1766,13 +1788,14 @@ function matchWithdrawalToDeposits(
   let totalMatched = 0n;
 
   for (const deposit of matchingDeposits.sort((a, b) =>
-    Number(a.timestamp - b.timestamp)
+    Number(a.timestamp - b.timestamp),
   )) {
     if (remainingToMatch <= 0n) break;
 
-    const matchAmount = remainingToMatch > deposit.remainingOutputAmount
-      ? deposit.remainingOutputAmount
-      : remainingToMatch;
+    const matchAmount =
+      remainingToMatch > deposit.remainingOutputAmount
+        ? deposit.remainingOutputAmount
+        : remainingToMatch;
 
     // Inherit original acquisition timestamp (FIFO chain)
     weightedTimestamp += deposit.originalAcquisitionTimestamp * matchAmount;
@@ -1782,13 +1805,11 @@ function matchWithdrawalToDeposits(
     remainingToMatch -= matchAmount;
   }
 
-  const inheritedTimestamp = totalMatched > 0n
-    ? weightedTimestamp / totalMatched
-    : 0n;
+  const inheritedTimestamp =
+    totalMatched > 0n ? weightedTimestamp / totalMatched : 0n;
 
   return { matchedAmount: totalMatched, inheritedTimestamp };
 }
-
 
 // ============ CRE Event Handlers ============
 
@@ -1796,14 +1817,17 @@ function matchWithdrawalToDeposits(
 function onProtocolExecution(event: ProtocolExecutionEvent): void {
   const state = buildStateFromHistoricalEvents(event.subAccount);
 
-  if (event.opType === OperationType.SWAP || event.opType === OperationType.DEPOSIT) {
+  if (
+    event.opType === OperationType.SWAP ||
+    event.opType === OperationType.DEPOSIT
+  ) {
     // Consume acquired balance from inputs (FIFO)
     for (let i = 0; i < event.tokensIn.length; i++) {
       const { consumed, remaining } = consumeAcquiredBalance(
         state.acquiredQueues.get(event.tokensIn[i]) || [],
         event.amountsIn[i],
         event.timestamp,
-        WINDOW_DURATION
+        WINDOW_DURATION,
       );
       // 'remaining' is original tokens → costs spending
     }
@@ -1812,7 +1836,7 @@ function onProtocolExecution(event: ProtocolExecutionEvent): void {
     if (event.spendingCost > 0n) {
       state.spendingRecords.push({
         amount: event.spendingCost,
-        timestamp: event.timestamp
+        timestamp: event.timestamp,
       });
     }
 
@@ -1820,21 +1844,37 @@ function onProtocolExecution(event: ProtocolExecutionEvent): void {
     // For DEPOSIT: track deposit for withdrawal matching
     if (event.opType === OperationType.SWAP) {
       for (let i = 0; i < event.tokensOut.length; i++) {
-        addAcquiredBalance(state, event.tokensOut[i], event.amountsOut[i], event.timestamp);
+        addAcquiredBalance(
+          state,
+          event.tokensOut[i],
+          event.amountsOut[i],
+          event.timestamp,
+        );
       }
     }
   }
 
-  if (event.opType === OperationType.WITHDRAW || event.opType === OperationType.CLAIM) {
+  if (
+    event.opType === OperationType.WITHDRAW ||
+    event.opType === OperationType.CLAIM
+  ) {
     // Match to deposits, inherit original timestamp
     for (let i = 0; i < event.tokensOut.length; i++) {
       const { matchedAmount, inheritedTimestamp } = matchWithdrawalToDeposits(
-        state, event, event.tokensOut[i], event.amountsOut[i]
+        state,
+        event,
+        event.tokensOut[i],
+        event.amountsOut[i],
       );
 
       if (matchedAmount > 0n) {
         // Matched withdrawal: acquired with inherited timestamp
-        addAcquiredBalance(state, event.tokensOut[i], matchedAmount, inheritedTimestamp);
+        addAcquiredBalance(
+          state,
+          event.tokensOut[i],
+          matchedAmount,
+          inheritedTimestamp,
+        );
       }
       // Unmatched portion is NOT acquired (belongs to multisig)
     }
@@ -1842,13 +1882,17 @@ function onProtocolExecution(event: ProtocolExecutionEvent): void {
   }
 
   // Push update to contract
-  const newAllowance = calculateSpendingAllowance(portfolioValue, maxSpendingBps, state.totalSpendingInWindow);
+  const newAllowance = calculateSpendingAllowance(
+    portfolioValue,
+    maxSpendingBps,
+    state.totalSpendingInWindow,
+  );
   contract.batchUpdate(event.subAccount, newAllowance, state.acquiredBalances);
 }
 
 // Triggered periodically (via cronTrigger) to refresh all subaccounts
 function onCronRefresh(): void {
-  const modules = getActiveModulesFromRegistry();  // Multi-module support
+  const modules = getActiveModulesFromRegistry(); // Multi-module support
 
   for (const moduleAddress of modules) {
     const subaccounts = getActiveSubaccounts(moduleAddress);
@@ -1858,7 +1902,9 @@ function onCronRefresh(): void {
       const portfolioValue = getPortfolioValue();
 
       const newAllowance = calculateSpendingAllowance(
-        portfolioValue, maxSpendingBps, state.totalSpendingInWindow
+        portfolioValue,
+        maxSpendingBps,
+        state.totalSpendingInWindow,
       );
 
       contract.batchUpdate(subAccount, newAllowance, state.acquiredBalances);
@@ -1866,20 +1912,19 @@ function onCronRefresh(): void {
   }
 }
 
-
 // ============ Helper: Add Acquired Balance ============
 
 function addAcquiredBalance(
   state: SubAccountState,
   token: Address,
   amount: bigint,
-  originalTimestamp: bigint  // For expiry and FIFO inheritance
+  originalTimestamp: bigint, // For expiry and FIFO inheritance
 ): void {
   const queue = state.acquiredQueues.get(token) || [];
 
   queue.push({
     amount,
-    originalTimestamp  // Preserves original acquisition time through swaps
+    originalTimestamp, // Preserves original acquisition time through swaps
   });
 
   state.acquiredQueues.set(token, queue);
@@ -1969,26 +2014,26 @@ Scenario 3: Different sub-account
 
 ### 8.7 Benefits of Hybrid Approach
 
-| Benefit | Description |
-|---------|-------------|
-| **Simpler on-chain logic** | Just check `cost <= allowance`, no window management |
-| **Lower gas costs** | No complex calculations or iterations on-chain |
-| **Flexible rules** | Change recovery rules, window duration, etc. without upgrade |
-| **Rolling windows** | Natural implementation off-chain, hard on-chain |
-| **Better matching** | FIFO deposit matching, partial matching, time-based expiry |
-| **Anomaly detection** | Detect suspicious patterns, reduce allowance proactively |
-| **Historical analysis** | Use full transaction history for decisions |
-| **Multiple data sources** | Aggregate prices from multiple oracles |
+| Benefit                    | Description                                                  |
+| -------------------------- | ------------------------------------------------------------ |
+| **Simpler on-chain logic** | Just check `cost <= allowance`, no window management         |
+| **Lower gas costs**        | No complex calculations or iterations on-chain               |
+| **Flexible rules**         | Change recovery rules, window duration, etc. without upgrade |
+| **Rolling windows**        | Natural implementation off-chain, hard on-chain              |
+| **Better matching**        | FIFO deposit matching, partial matching, time-based expiry   |
+| **Anomaly detection**      | Detect suspicious patterns, reduce allowance proactively     |
+| **Historical analysis**    | Use full transaction history for decisions                   |
+| **Multiple data sources**  | Aggregate prices from multiple oracles                       |
 
 ### 8.8 Risks and Mitigations
 
-| Risk | Mitigation |
-|------|------------|
-| **Oracle downtime** | Contract enforces `maxOracleAge`, blocks operations if stale |
-| **Oracle manipulation** | Use Chainlink CRE with decentralized execution |
-| **Frontrunning oracle updates** | Oracle can react to pending transactions |
-| **Delayed updates** | Conservative initial allowance, frequent updates |
-| **Oracle bugs** | On-chain max limits as backstop, monitoring |
+| Risk                            | Mitigation                                                   |
+| ------------------------------- | ------------------------------------------------------------ |
+| **Oracle downtime**             | Contract enforces `maxOracleAge`, blocks operations if stale |
+| **Oracle manipulation**         | Use Chainlink CRE with decentralized execution               |
+| **Frontrunning oracle updates** | Oracle can react to pending transactions                     |
+| **Delayed updates**             | Conservative initial allowance, frequent updates             |
+| **Oracle bugs**                 | On-chain max limits as backstop, monitoring                  |
 
 ### 8.9 On-Chain Safety Backstops
 
@@ -2080,14 +2125,14 @@ uint256[50] private __gap;
 
 ### 9.3 Testing Strategy
 
-| Test Category | Coverage |
-|---------------|----------|
-| Unit tests | Each function in isolation |
-| Integration tests | Full operation flows |
-| Fuzz tests | Random inputs, edge cases |
-| Invariant tests | Global properties always hold |
-| Fork tests | Against mainnet state |
-| Gas benchmarks | Ensure reasonable costs |
+| Test Category     | Coverage                      |
+| ----------------- | ----------------------------- |
+| Unit tests        | Each function in isolation    |
+| Integration tests | Full operation flows          |
+| Fuzz tests        | Random inputs, edge cases     |
+| Invariant tests   | Global properties always hold |
+| Fork tests        | Against mainnet state         |
+| Gas benchmarks    | Ensure reasonable costs       |
 
 ### 9.4 Key Invariants to Test
 
@@ -2178,34 +2223,34 @@ function useAllowance(address subAccount, address token, uint256 amount) interna
 
 ### 11.1 Policy Decisions
 
-| Question | Decision | Rationale |
-|----------|----------|-----------|
-| **Should transfers out always cost spending?** | **Yes** | Transfers move value out of Safe permanently |
-| **Should yield count as acquired?** | **Conditional** | Only if deposit matched by same subaccount to same protocol in window |
-| **Should protocol rewards/airdrops be acquired?** | **Conditional** | Only if deposit matched by same subaccount to same protocol in window (same as withdrawals) |
-| **Should withdrawals become acquired?** | **Conditional** | Only if deposit matched by same subaccount to same protocol in window |
-| **Should approve consume spending?** | **No (capped)** | Capped by allowance for original tokens, but not deducted until execution |
-| **What if Safe balance decreases externally?** | **Reduce sub-account allowances** | Oracle adjusts based on actual balances |
+| Question                                          | Decision                          | Rationale                                                                                   |
+| ------------------------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------- |
+| **Should transfers out always cost spending?**    | **Yes**                           | Transfers move value out of Safe permanently                                                |
+| **Should yield count as acquired?**               | **Conditional**                   | Only if deposit matched by same subaccount to same protocol in window                       |
+| **Should protocol rewards/airdrops be acquired?** | **Conditional**                   | Only if deposit matched by same subaccount to same protocol in window (same as withdrawals) |
+| **Should withdrawals become acquired?**           | **Conditional**                   | Only if deposit matched by same subaccount to same protocol in window                       |
+| **Should approve consume spending?**              | **No (capped)**                   | Capped by allowance for original tokens, but not deducted until execution                   |
+| **What if Safe balance decreases externally?**    | **Reduce sub-account allowances** | Oracle adjusts based on actual balances                                                     |
 
 ### 11.2 Technical Decisions
 
-| Question | Decision | Rationale |
-|----------|----------|-----------|
-| **Cost basis tracking** | **USD** | Simpler implementation, oracle handles price updates |
-| **Lazy vs explicit clearing** | **Lazy (window ID)** | Gas efficient, O(1) reset |
+| Question                      | Decision             | Rationale                                            |
+| ----------------------------- | -------------------- | ---------------------------------------------------- |
+| **Cost basis tracking**       | **USD**              | Simpler implementation, oracle handles price updates |
+| **Lazy vs explicit clearing** | **Lazy (window ID)** | Gas efficient, O(1) reset                            |
 
 ### 11.3 UX Decisions
 
-| Question | Decision |
-|----------|----------|
-| **How to surface spending capacity?** | Custom wallet UI will display state |
-| **Should sub-accounts query their state?** | **Yes** - view functions provided |
+| Question                                   | Decision                            |
+| ------------------------------------------ | ----------------------------------- |
+| **How to surface spending capacity?**      | Custom wallet UI will display state |
+| **Should sub-accounts query their state?** | **Yes** - view functions provided   |
 
 ---
 
 ## 12. Critical Edge Case: Withdrawals Are Free
 
-> **Note**: This section explains *why* withdrawals are free. The implementation uses `executeOnProtocol()` with selector-based classification as described in **Section 13**. Code examples here use simplified function names for clarity.
+> **Note**: This section explains _why_ withdrawals are free. The implementation uses `executeOnProtocol()` with selector-based classification as described in **Section 13**. Code examples here use simplified function names for clarity.
 
 ### 12.1 The Problem
 
@@ -2311,11 +2356,11 @@ Step 3: Sub-account can now:
 
 ### 12.5 Security: Why This Is Safe
 
-| Concern | Mitigation |
-|---------|------------|
-| **Withdraw from wrong protocol?** | `allowedAddresses` whitelist enforced |
-| **Withdraw more than deposited?** | Protocol enforces this (can't withdraw what you don't have) |
-| **Gaming via fake withdrawals?** | Oracle only marks as acquired if matching deposit exists |
+| Concern                             | Mitigation                                                                |
+| ----------------------------------- | ------------------------------------------------------------------------- |
+| **Withdraw from wrong protocol?**   | `allowedAddresses` whitelist enforced                                     |
+| **Withdraw more than deposited?**   | Protocol enforces this (can't withdraw what you don't have)               |
+| **Gaming via fake withdrawals?**    | Oracle only marks as acquired if matching deposit exists                  |
 | **Cross-sub-account exploitation?** | Deposits tracked per sub-account, can't mark others' deposits as acquired |
 
 ### 12.6 What About Partial Withdrawals?
@@ -2352,18 +2397,19 @@ Later: Withdraw remaining $7,000
 
 Several simpler approaches were considered but have security vulnerabilities:
 
-| Approach | Vulnerability |
-|----------|---------------|
-| **Wallet specifies tokens** | Compromised sub-account lies about `tokenSpent` |
-| **Wallet specifies amount** | Compromised sub-account sets `maxSpendAmount = 0` |
-| **No on-chain tracking** | Oracle sees attack only AFTER execution |
-| **Trust wallet classification** | Malicious wallet claims deposit is withdrawal |
+| Approach                        | Vulnerability                                     |
+| ------------------------------- | ------------------------------------------------- |
+| **Wallet specifies tokens**     | Compromised sub-account lies about `tokenSpent`   |
+| **Wallet specifies amount**     | Compromised sub-account sets `maxSpendAmount = 0` |
+| **No on-chain tracking**        | Oracle sees attack only AFTER execution           |
+| **Trust wallet classification** | Malicious wallet claims deposit is withdrawal     |
 
 **Key insight**: A compromised sub-account will lie. On-chain verification is essential.
 
 ### 13.2 Solution: Selector-Based Classification with Calldata Verification
 
 The contract:
+
 1. **Classifies operations from function selectors** (can't be faked)
 2. **Extracts token/amount from calldata** (verifies wallet claims)
 3. **Reverts on unknown selectors** (forces typed fallback functions)
@@ -2872,25 +2918,25 @@ function unregisterSelector(bytes4 selector) external onlyOwner {
 
 ### 13.9 Security Analysis
 
-| Attack Vector | Protection |
-|---------------|------------|
-| **Lie about tokenIn** | Calldata parser extracts real token, verified on-chain |
-| **Lie about amountIn** | Calldata parser extracts real amount, verified on-chain |
-| **Claim deposit is withdrawal** | Selector determines type, can't be faked |
+| Attack Vector                      | Protection                                              |
+| ---------------------------------- | ------------------------------------------------------- |
+| **Lie about tokenIn**              | Calldata parser extracts real token, verified on-chain  |
+| **Lie about amountIn**             | Calldata parser extracts real amount, verified on-chain |
+| **Claim deposit is withdrawal**    | Selector determines type, can't be faked                |
 | **Use unknown malicious selector** | Reverts with `UnknownSelector`, must use typed function |
-| **Typed function abuse** | `depositTyped` verifies balance actually decreased |
-| **Bypass spending check** | Only WITHDRAW/CLAIM skip check, determined by selector |
-| **Register malicious selector** | Only owner can register, requires governance |
+| **Typed function abuse**           | `depositTyped` verifies balance actually decreased      |
+| **Bypass spending check**          | Only WITHDRAW/CLAIM skip check, determined by selector  |
+| **Register malicious selector**    | Only owner can register, requires governance            |
 
 ### 13.10 Gas Costs
 
-| Operation | Additional Gas | Notes |
-|-----------|----------------|-------|
-| Selector lookup | ~200 | Single SLOAD |
-| Calldata parsing | ~500-1000 | Pure function, no storage |
-| Balance snapshot | ~2600 | Per token (cold SLOAD) |
-| Price lookup | ~2600 | Single Chainlink call |
-| **Total overhead** | ~6-10k | On top of protocol call |
+| Operation          | Additional Gas | Notes                     |
+| ------------------ | -------------- | ------------------------- |
+| Selector lookup    | ~200           | Single SLOAD              |
+| Calldata parsing   | ~500-1000      | Pure function, no storage |
+| Balance snapshot   | ~2600          | Per token (cold SLOAD)    |
+| Price lookup       | ~2600          | Single Chainlink call     |
+| **Total overhead** | ~6-10k         | On top of protocol call   |
 
 ### 13.11 Wallet Integration
 
@@ -2909,16 +2955,16 @@ const amount = parseUnits("1000", 6);
 
 // Build Aave supply calldata
 const calldata = aavePool.interface.encodeFunctionData("supply", [
-  usdc,      // asset
-  amount,    // amount
-  safe,      // onBehalfOf (must be Safe address!)
-  0          // referralCode
+  usdc, // asset
+  amount, // amount
+  safe, // onBehalfOf (must be Safe address!)
+  0, // referralCode
 ]);
 
 // Call executeOnProtocol - token/amount extracted from calldata via parser
 await module.executeOnProtocol(
-  aavePool,   // target
-  calldata    // data (parser extracts USDC/1000e6 from this)
+  aavePool, // target
+  calldata, // data (parser extracts USDC/1000e6 from this)
 );
 ```
 
@@ -3035,16 +3081,16 @@ interface ICalldataParser {
 
 ## Appendix B: Glossary
 
-| Term | Definition |
-|------|------------|
-| **Original Balance** | Token balance that costs spending to use (not acquired, or acquired that has expired) |
-| **Acquired Balance** | Exact token amount received from operations; free to use but expires after 24h |
-| **Acquired Expiry** | After 24 hours, acquired tokens become "original" and cost spending to use again |
-| **Spending Allowance** | Remaining USD value a sub-account can spend (oracle-managed) |
-| **Rolling Window** | 24h sliding window for spending and acquired balance tracking (oracle-managed) |
-| **Selector** | First 4 bytes of calldata identifying the function being called |
-| **Operation Type** | Classification: SWAP, DEPOSIT, WITHDRAW, CLAIM, APPROVE |
-| **Calldata Parser** | Contract that extracts token/amount from protocol-specific calldata |
-| **Oracle** | Off-chain service (Chainlink CRE) that manages spending allowances |
-| **Safe** | Gnosis Safe multisig that holds the funds (avatar) |
-| **Sub-Account** | EOA delegated to operate on behalf of the Safe |
+| Term                   | Definition                                                                            |
+| ---------------------- | ------------------------------------------------------------------------------------- |
+| **Original Balance**   | Token balance that costs spending to use (not acquired, or acquired that has expired) |
+| **Acquired Balance**   | Exact token amount received from operations; free to use but expires after 24h        |
+| **Acquired Expiry**    | After 24 hours, acquired tokens become "original" and cost spending to use again      |
+| **Spending Allowance** | Remaining USD value a sub-account can spend (oracle-managed)                          |
+| **Rolling Window**     | 24h sliding window for spending and acquired balance tracking (oracle-managed)        |
+| **Selector**           | First 4 bytes of calldata identifying the function being called                       |
+| **Operation Type**     | Classification: SWAP, DEPOSIT, WITHDRAW, CLAIM, APPROVE                               |
+| **Calldata Parser**    | Contract that extracts token/amount from protocol-specific calldata                   |
+| **Oracle**             | Off-chain service (Chainlink CRE) that manages spending allowances                    |
+| **Safe**               | Gnosis Safe multisig that holds the funds (avatar)                                    |
+| **Sub-Account**        | EOA delegated to operate on behalf of the Safe                                        |

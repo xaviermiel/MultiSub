@@ -114,7 +114,7 @@ This allows sub-accounts to chain operations (swap → deposit → withdraw) wit
 ### Granular Controls
 
 - **Per-Sub-Account Allowlists**: Each sub-account has its own protocol whitelist
-- **Custom Limits**: Configurable spending percentages per sub-account
+- **Dual-Mode Spending Limits**: Configurable as either a percentage of Safe value (BPS mode) or a fixed USD amount (USD mode) per sub-account
 - **Rolling Windows**: 24-hour rolling windows prevent rapid drain attacks
 
 ### Security
@@ -131,8 +131,15 @@ This allows sub-accounts to chain operations (swap → deposit → withdraw) wit
 
 If not configured, sub-accounts use:
 
-- **Max Spending**: 5% of portfolio per 24 hours
+- **Max Spending**: 5% of portfolio per 24 hours (BPS mode)
 - **Window**: Rolling 24 hours (86400 seconds)
+
+Limits can be set in two modes via `setSubAccountLimits`:
+
+- **BPS mode** (`maxSpendingBps > 0, maxSpendingUSD = 0`): spending cap = percentage of Safe's USD value. Adjusts automatically as portfolio value changes.
+- **USD mode** (`maxSpendingBps = 0, maxSpendingUSD > 0`): spending cap = fixed USD amount (18 decimals). Stays constant regardless of portfolio value.
+
+Exactly one mode must be active — setting both or neither reverts.
 
 ## Hybrid On-Chain/Off-Chain Architecture
 

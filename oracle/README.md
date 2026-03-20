@@ -13,6 +13,7 @@ Event-driven monitor that tracks spending and acquired balances for sub-accounts
 - **RPC polling** for `ProtocolExecution` and `TransferExecuted` events
 - **Rolling 24h window** tracking for spending calculations
 - **Deposit/withdrawal matching** for acquired balance status (FIFO queues)
+- **Dual-mode spending limits**: reads per-sub-account limits from `getSubAccountLimits()` — supports both BPS (percentage of Safe value) and fixed USD modes
 - **Cron-based periodic refresh** to update allowances as spending expires
 - **Multi-module support** via ModuleRegistry discovery
 
@@ -30,11 +31,12 @@ Periodic portfolio valuation service that calculates and stores the total USD va
 
 The oracle wallet has significant on-chain power:
 
-| Capability                             | Constraint                                                     |
-| -------------------------------------- | -------------------------------------------------------------- |
-| Set `spendingAllowance` per subaccount | Capped by `absoluteMaxSpendingBps * safeValue` (default 20%)   |
-| Set `acquiredBalance` per token        | Capped by Safe's actual token balance (`_capToSafeBalance`)    |
-| Update `safeValue`                     | Affects allowance caps — inflated value raises spending limits |
+| Capability                             | Constraint                                                                    |
+| -------------------------------------- | ----------------------------------------------------------------------------- |
+| Set `spendingAllowance` per subaccount | Capped by `absoluteMaxSpendingBps * safeValue` (default 20%)                  |
+| Set `acquiredBalance` per token        | Capped by Safe's actual token balance (`_capToSafeBalance`)                   |
+| Update `safeValue`                     | Affects allowance caps — inflated value raises spending limits                |
+| Compute per-subaccount allowance       | Respects dual-mode limits: BPS (% of Safe value) or fixed USD per sub-account |
 
 **If the oracle key is compromised**, an attacker can maximize allowances and acquired balances within the on-chain caps. The `absoluteMaxSpendingBps` (default 20%) is the last line of defense.
 
