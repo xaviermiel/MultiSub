@@ -29,12 +29,10 @@ contract MockSafe {
         return enabledModules[module];
     }
 
-    function execTransactionFromModule(
-        address to,
-        uint256 value,
-        bytes calldata data,
-        ISafe.Operation
-    ) external returns (bool) {
+    function execTransactionFromModule(address to, uint256 value, bytes calldata data, ISafe.Operation)
+        external
+        returns (bool)
+    {
         (bool success,) = to.call{value: value}(data);
         return success;
     }

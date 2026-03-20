@@ -55,12 +55,12 @@ contract WhitelistAddresses is Script, SafeTxHelper {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        _executeSafeTx(safe, module, abi.encodeWithSignature(
-            "setAllowedAddresses(address,address[],bool)",
-            subAccount,
-            addresses,
-            allow
-        ), deployerPrivateKey);
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("setAllowedAddresses(address,address[],bool)", subAccount, addresses, allow),
+            deployerPrivateKey
+        );
 
         vm.stopBroadcast();
 

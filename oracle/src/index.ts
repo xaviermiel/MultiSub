@@ -9,38 +9,38 @@
  *   npm run spending-oracle - Run only spending oracle
  */
 
-import { startCron as startSafeValue } from './safe-value.js'
-import { start as startSpendingOracle } from './spending-oracle.js'
-import { validateConfig } from './config.js'
+import { startCron as startSafeValue } from "./safe-value.js";
+import { start as startSpendingOracle } from "./spending-oracle.js";
+import { validateConfig } from "./config.js";
 
 function main() {
-  console.log('===========================================')
-  console.log('  MultiSub Local Oracle')
-  console.log('===========================================')
-  console.log('')
+  console.log("===========================================");
+  console.log("  MultiSub Local Oracle");
+  console.log("===========================================");
+  console.log("");
 
   try {
-    validateConfig()
+    validateConfig();
   } catch (error) {
-    console.error('Configuration error:', error)
-    console.error('')
-    console.error('Please copy .env.example to .env and configure:')
-    console.error('  - PRIVATE_KEY: Private key of the authorized updater')
-    console.error('  - MODULE_ADDRESS: DeFiInteractorModule contract address')
-    console.error('  - RPC_URL: Ethereum RPC URL')
-    process.exit(1)
+    console.error("Configuration error:", error);
+    console.error("");
+    console.error("Please copy .env.example to .env and configure:");
+    console.error("  - PRIVATE_KEY: Private key of the authorized updater");
+    console.error("  - MODULE_ADDRESS: DeFiInteractorModule contract address");
+    console.error("  - RPC_URL: Ethereum RPC URL");
+    process.exit(1);
   }
 
-  console.log('Starting Safe Value Oracle...')
-  startSafeValue()
+  console.log("Starting Safe Value Oracle...");
+  startSafeValue();
 
-  console.log('')
-  console.log('Starting Spending Oracle...')
-  startSpendingOracle()
+  console.log("");
+  console.log("Starting Spending Oracle...");
+  startSpendingOracle();
 
-  console.log('')
-  console.log('Both oracles are now running.')
-  console.log('Press Ctrl+C to stop.')
+  console.log("");
+  console.log("Both oracles are now running.");
+  console.log("Press Ctrl+C to stop.");
 }
 
-main()
+main();

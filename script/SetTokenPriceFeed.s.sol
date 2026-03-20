@@ -14,11 +14,7 @@ contract SetTokenPriceFeed is Script, SafeTxHelper {
         address mockPriceFeed = 0xDd317fAbDD4884a1C3f87e53c119D2d58609e209;
 
         // Encode setTokenPriceFeed call
-        bytes memory data = abi.encodeWithSignature(
-            "setTokenPriceFeed(address,address)",
-            usdc,
-            mockPriceFeed
-        );
+        bytes memory data = abi.encodeWithSignature("setTokenPriceFeed(address,address)", usdc, mockPriceFeed);
 
         console.log("Setting USDC price feed to MockPriceFeed...");
         console.log("  Safe:", safe);

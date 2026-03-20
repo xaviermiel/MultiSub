@@ -71,22 +71,14 @@ contract MorphoParserTest is Test {
 
     function testDepositExtractInputToken() public view {
         // deposit(uint256 assets, address receiver)
-        bytes memory data = abi.encodeWithSelector(
-            parser.DEPOSIT_SELECTOR(),
-            1000e6,
-            USER
-        );
+        bytes memory data = abi.encodeWithSelector(parser.DEPOSIT_SELECTOR(), 1000e6, USER);
 
         address[] memory tokens = parser.extractInputTokens(address(vault), data);
         assertEq(tokens[0], USDC, "Input token should be vault's underlying asset");
     }
 
     function testDepositExtractInputAmount() public view {
-        bytes memory data = abi.encodeWithSelector(
-            parser.DEPOSIT_SELECTOR(),
-            1000e6,
-            USER
-        );
+        bytes memory data = abi.encodeWithSelector(parser.DEPOSIT_SELECTOR(), 1000e6, USER);
 
         uint256[] memory amounts = parser.extractInputAmounts(address(vault), data);
         assertEq(amounts[0], 1000e6, "Input amount should be 1000e6");
@@ -137,12 +129,7 @@ contract MorphoParserTest is Test {
 
     function testWithdrawExtractOutputTokens() public view {
         // withdraw(uint256 assets, address receiver, address owner)
-        bytes memory data = abi.encodeWithSelector(
-            parser.WITHDRAW_SELECTOR(),
-            1000e6,
-            USER,
-            OWNER
-        );
+        bytes memory data = abi.encodeWithSelector(parser.WITHDRAW_SELECTOR(), 1000e6, USER, OWNER);
 
         address[] memory tokens = parser.extractOutputTokens(address(vault), data);
         assertEq(tokens.length, 1, "Should have 1 output token");
@@ -212,12 +199,7 @@ contract MorphoParserTest is Test {
 
     function testWithdrawReturnsEmptyInputTokens() public view {
         // Withdraw returns empty array (no input tokens)
-        bytes memory data = abi.encodeWithSelector(
-            parser.WITHDRAW_SELECTOR(),
-            1000e6,
-            USER,
-            OWNER
-        );
+        bytes memory data = abi.encodeWithSelector(parser.WITHDRAW_SELECTOR(), 1000e6, USER, OWNER);
 
         address[] memory tokens = parser.extractInputTokens(address(vault), data);
         assertEq(tokens.length, 0, "Withdraw should return empty input tokens array");
@@ -225,11 +207,7 @@ contract MorphoParserTest is Test {
 
     function testDepositExtractOutputTokens() public view {
         // Deposit output is vault shares (the vault token itself)
-        bytes memory data = abi.encodeWithSelector(
-            parser.DEPOSIT_SELECTOR(),
-            1000e6,
-            USER
-        );
+        bytes memory data = abi.encodeWithSelector(parser.DEPOSIT_SELECTOR(), 1000e6, USER);
 
         address[] memory tokens = parser.extractOutputTokens(address(vault), data);
         assertEq(tokens.length, 1, "Should have 1 output token");
@@ -238,11 +216,7 @@ contract MorphoParserTest is Test {
 
     function testMintExtractOutputTokens() public view {
         // Mint output is vault shares (the vault token itself)
-        bytes memory data = abi.encodeWithSelector(
-            parser.MINT_SELECTOR(),
-            1000e18,
-            USER
-        );
+        bytes memory data = abi.encodeWithSelector(parser.MINT_SELECTOR(), 1000e18, USER);
 
         address[] memory tokens = parser.extractOutputTokens(address(vault), data);
         assertEq(tokens.length, 1, "Should have 1 output token");
@@ -255,11 +229,7 @@ contract MorphoParserTest is Test {
         address WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
         MockMorphoVault wethVault = new MockMorphoVault(WETH);
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.DEPOSIT_SELECTOR(),
-            1e18,
-            USER
-        );
+        bytes memory data = abi.encodeWithSelector(parser.DEPOSIT_SELECTOR(), 1e18, USER);
 
         address[] memory tokens = parser.extractInputTokens(address(wethVault), data);
         assertEq(tokens[0], WETH, "Should return WETH as underlying asset");
@@ -268,11 +238,7 @@ contract MorphoParserTest is Test {
     // ============ Fuzz Tests ============
 
     function testFuzzDepositAmount(uint256 amount) public view {
-        bytes memory data = abi.encodeWithSelector(
-            parser.DEPOSIT_SELECTOR(),
-            amount,
-            USER
-        );
+        bytes memory data = abi.encodeWithSelector(parser.DEPOSIT_SELECTOR(), amount, USER);
 
         uint256[] memory extracted = parser.extractInputAmounts(address(vault), data);
         assertEq(extracted[0], amount, "Should extract any amount correctly");
@@ -284,11 +250,7 @@ contract MorphoParserTest is Test {
         // But with higher rates, need to bound. Max safe is ~type(uint256).max / 2e18
         shares = bound(shares, 0, type(uint128).max);
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.MINT_SELECTOR(),
-            shares,
-            USER
-        );
+        bytes memory data = abi.encodeWithSelector(parser.MINT_SELECTOR(), shares, USER);
 
         // With 1:1 exchange rate, extracted amount equals shares
         uint256[] memory extracted = parser.extractInputAmounts(address(vault), data);

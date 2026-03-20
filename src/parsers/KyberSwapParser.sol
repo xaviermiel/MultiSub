@@ -98,7 +98,12 @@ contract KyberSwapParser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractInputAmounts(address, bytes calldata data) external pure override returns (uint256[] memory amounts) {
+    function extractInputAmounts(address, bytes calldata data)
+        external
+        pure
+        override
+        returns (uint256[] memory amounts)
+    {
         if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         uint256 amount;
@@ -136,7 +141,12 @@ contract KyberSwapParser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractOutputTokens(address, bytes calldata data) external pure override returns (address[] memory tokens) {
+    function extractOutputTokens(address, bytes calldata data)
+        external
+        pure
+        override
+        returns (address[] memory tokens)
+    {
         if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         address token;
@@ -172,7 +182,12 @@ contract KyberSwapParser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractRecipient(address, bytes calldata data, address defaultRecipient) external pure override returns (address recipient) {
+    function extractRecipient(address, bytes calldata data, address defaultRecipient)
+        external
+        pure
+        override
+        returns (address recipient)
+    {
         if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
@@ -202,9 +217,7 @@ contract KyberSwapParser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function supportsSelector(bytes4 selector) external pure override returns (bool) {
-        return selector == SWAP_SELECTOR ||
-               selector == SWAP_SIMPLE_MODE_SELECTOR ||
-               selector == SWAP_GENERIC_SELECTOR;
+        return selector == SWAP_SELECTOR || selector == SWAP_SIMPLE_MODE_SELECTOR || selector == SWAP_GENERIC_SELECTOR;
     }
 
     /// @inheritdoc ICalldataParser
@@ -213,9 +226,7 @@ contract KyberSwapParser is ICalldataParser {
         bytes4 selector = bytes4(data[:4]);
 
         // All KyberSwap functions are swaps
-        if (selector == SWAP_SELECTOR ||
-            selector == SWAP_SIMPLE_MODE_SELECTOR ||
-            selector == SWAP_GENERIC_SELECTOR) {
+        if (selector == SWAP_SELECTOR || selector == SWAP_SIMPLE_MODE_SELECTOR || selector == SWAP_GENERIC_SELECTOR) {
             return 1; // SWAP
         }
 

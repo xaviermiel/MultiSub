@@ -38,11 +38,12 @@ contract RegisterParser is Script, SafeTxHelper {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        _executeSafeTx(safe, module, abi.encodeWithSignature(
-            "registerParser(address,address)",
-            protocol,
-            parser
-        ), deployerPrivateKey);
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerParser(address,address)", protocol, parser),
+            deployerPrivateKey
+        );
 
         vm.stopBroadcast();
 

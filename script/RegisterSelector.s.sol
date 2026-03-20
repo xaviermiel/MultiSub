@@ -45,11 +45,12 @@ contract RegisterSelector is Script, SafeTxHelper {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        _executeSafeTx(safe, module, abi.encodeWithSignature(
-            "registerSelector(bytes4,uint8)",
-            selector,
-            operationType
-        ), deployerPrivateKey);
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerSelector(bytes4,uint8)", selector, operationType),
+            deployerPrivateKey
+        );
 
         vm.stopBroadcast();
 

@@ -16,13 +16,18 @@ contract MorphoParser is ICalldataParser {
     error InvalidCalldata();
 
     // ERC4626 function selectors
-    bytes4 public constant DEPOSIT_SELECTOR = 0x6e553f65;   // deposit(uint256,address)
-    bytes4 public constant MINT_SELECTOR = 0x94bf804d;      // mint(uint256,address)
-    bytes4 public constant WITHDRAW_SELECTOR = 0xb460af94;  // withdraw(uint256,address,address)
-    bytes4 public constant REDEEM_SELECTOR = 0xba087652;    // redeem(uint256,address,address)
+    bytes4 public constant DEPOSIT_SELECTOR = 0x6e553f65; // deposit(uint256,address)
+    bytes4 public constant MINT_SELECTOR = 0x94bf804d; // mint(uint256,address)
+    bytes4 public constant WITHDRAW_SELECTOR = 0xb460af94; // withdraw(uint256,address,address)
+    bytes4 public constant REDEEM_SELECTOR = 0xba087652; // redeem(uint256,address,address)
 
     /// @inheritdoc ICalldataParser
-    function extractInputTokens(address target, bytes calldata data) external view override returns (address[] memory tokens) {
+    function extractInputTokens(address target, bytes calldata data)
+        external
+        view
+        override
+        returns (address[] memory tokens)
+    {
         if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
@@ -39,7 +44,12 @@ contract MorphoParser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractInputAmounts(address target, bytes calldata data) external view override returns (uint256[] memory amounts) {
+    function extractInputAmounts(address target, bytes calldata data)
+        external
+        view
+        override
+        returns (uint256[] memory amounts)
+    {
         if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
@@ -63,7 +73,12 @@ contract MorphoParser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractOutputTokens(address target, bytes calldata data) external view override returns (address[] memory tokens) {
+    function extractOutputTokens(address target, bytes calldata data)
+        external
+        view
+        override
+        returns (address[] memory tokens)
+    {
         if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
@@ -82,7 +97,12 @@ contract MorphoParser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractRecipient(address, bytes calldata data, address) external pure override returns (address recipient) {
+    function extractRecipient(address, bytes calldata data, address)
+        external
+        pure
+        override
+        returns (address recipient)
+    {
         if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
@@ -103,10 +123,8 @@ contract MorphoParser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function supportsSelector(bytes4 selector) external pure override returns (bool) {
-        return selector == DEPOSIT_SELECTOR ||
-               selector == MINT_SELECTOR ||
-               selector == WITHDRAW_SELECTOR ||
-               selector == REDEEM_SELECTOR;
+        return selector == DEPOSIT_SELECTOR || selector == MINT_SELECTOR || selector == WITHDRAW_SELECTOR
+            || selector == REDEEM_SELECTOR;
     }
 
     /**

@@ -35,10 +35,9 @@ contract SetAuthorizedOracle is Script, SafeTxHelper {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        _executeSafeTx(safe, module, abi.encodeWithSignature(
-            "setAuthorizedOracle(address)",
-            newOracle
-        ), deployerPrivateKey);
+        _executeSafeTx(
+            safe, module, abi.encodeWithSignature("setAuthorizedOracle(address)", newOracle), deployerPrivateKey
+        );
 
         vm.stopBroadcast();
 

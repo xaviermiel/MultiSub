@@ -44,10 +44,10 @@ contract ConfigureParsersAndSelectors is Script, SafeTxHelper {
     bytes4 constant AAVE_WITHDRAW = 0x69328dec;
     bytes4 constant AAVE_BORROW = 0xa415bcad;
     bytes4 constant AAVE_REPAY = 0x573ade81;
-    bytes4 constant AAVE_CLAIM_REWARDS = 0x236300dc;            // claimRewards(address[],uint256,address,address)
-    bytes4 constant AAVE_CLAIM_REWARDS_ON_BEHALF = 0x33028b99;  // claimRewardsOnBehalf(address[],uint256,address,address,address)
-    bytes4 constant AAVE_CLAIM_ALL_REWARDS = 0xbb492bf5;        // claimAllRewards(address[],address)
-    bytes4 constant AAVE_CLAIM_ALL_ON_BEHALF = 0x9ff55db9;      // claimAllRewardsOnBehalf(address[],address,address)
+    bytes4 constant AAVE_CLAIM_REWARDS = 0x236300dc; // claimRewards(address[],uint256,address,address)
+    bytes4 constant AAVE_CLAIM_REWARDS_ON_BEHALF = 0x33028b99; // claimRewardsOnBehalf(address[],uint256,address,address,address)
+    bytes4 constant AAVE_CLAIM_ALL_REWARDS = 0xbb492bf5; // claimAllRewards(address[],address)
+    bytes4 constant AAVE_CLAIM_ALL_ON_BEHALF = 0x9ff55db9; // claimAllRewardsOnBehalf(address[],address,address)
     bytes4 constant EXACT_INPUT_SINGLE = 0x414bf389;
     bytes4 constant EXACT_INPUT = 0xc04b8d59;
     bytes4 constant EXACT_OUTPUT_SINGLE = 0xdb3e2198;
@@ -103,108 +103,281 @@ contract ConfigureParsersAndSelectors is Script, SafeTxHelper {
         // ============ Register Parsers via Safe ============
         console.log("\n--- Registering Parsers ---");
 
-        _executeSafeTx(safe, module, abi.encodeWithSignature(
-            "registerParser(address,address)", AAVE_V3_POOL, address(aaveParser)
-        ), deployerPrivateKey);
-        _executeSafeTx(safe, module, abi.encodeWithSignature(
-            "registerParser(address,address)", AAVE_V3_REWARDS, address(aaveParser)
-        ), deployerPrivateKey);
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerParser(address,address)", AAVE_V3_POOL, address(aaveParser)),
+            deployerPrivateKey
+        );
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerParser(address,address)", AAVE_V3_REWARDS, address(aaveParser)),
+            deployerPrivateKey
+        );
         console.log("Aave V3 Pool & Rewards -> AaveV3Parser");
 
-        _executeSafeTx(safe, module, abi.encodeWithSignature(
-            "registerParser(address,address)", UNISWAP_V3_ROUTER, address(uniV3Parser)
-        ), deployerPrivateKey);
-        _executeSafeTx(safe, module, abi.encodeWithSignature(
-            "registerParser(address,address)", NONFUNGIBLE_POSITION_MANAGER, address(uniV3Parser)
-        ), deployerPrivateKey);
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerParser(address,address)", UNISWAP_V3_ROUTER, address(uniV3Parser)),
+            deployerPrivateKey
+        );
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature(
+                "registerParser(address,address)", NONFUNGIBLE_POSITION_MANAGER, address(uniV3Parser)
+            ),
+            deployerPrivateKey
+        );
         console.log("Uniswap V3 Router & NPM -> UniswapV3Parser");
 
-        _executeSafeTx(safe, module, abi.encodeWithSignature(
-            "registerParser(address,address)", UNISWAP_V4_POSITION_MANAGER, address(uniV4Parser)
-        ), deployerPrivateKey);
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature(
+                "registerParser(address,address)", UNISWAP_V4_POSITION_MANAGER, address(uniV4Parser)
+            ),
+            deployerPrivateKey
+        );
         console.log("Uniswap V4 PositionManager -> UniswapV4Parser");
 
-        _executeSafeTx(safe, module, abi.encodeWithSignature(
-            "registerParser(address,address)", UNIVERSAL_ROUTER, address(universalParser)
-        ), deployerPrivateKey);
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerParser(address,address)", UNIVERSAL_ROUTER, address(universalParser)),
+            deployerPrivateKey
+        );
         console.log("Uniswap Universal Router -> UniversalRouterParser");
 
-        _executeSafeTx(safe, module, abi.encodeWithSignature(
-            "registerParser(address,address)", PANCAKESWAP_UNIVERSAL_ROUTER, address(universalParser)
-        ), deployerPrivateKey);
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature(
+                "registerParser(address,address)", PANCAKESWAP_UNIVERSAL_ROUTER, address(universalParser)
+            ),
+            deployerPrivateKey
+        );
         console.log("PancakeSwap Universal Router -> UniversalRouterParser");
 
-        _executeSafeTx(safe, module, abi.encodeWithSignature(
-            "registerParser(address,address)", UNISWAP_UNIVERSAL_ROUTER_V2, address(universalParser)
-        ), deployerPrivateKey);
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature(
+                "registerParser(address,address)", UNISWAP_UNIVERSAL_ROUTER_V2, address(universalParser)
+            ),
+            deployerPrivateKey
+        );
         console.log("Uniswap Universal Router V2 -> UniversalRouterParser");
 
-        _executeSafeTx(safe, module, abi.encodeWithSignature(
-            "registerParser(address,address)", MERKL_DISTRIBUTOR, address(merklParser)
-        ), deployerPrivateKey);
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerParser(address,address)", MERKL_DISTRIBUTOR, address(merklParser)),
+            deployerPrivateKey
+        );
         console.log("Merkl Distributor -> MerklParser");
 
         // ============ Register Selectors via Safe ============
         console.log("\n--- Registering Selectors ---");
 
         // ERC20
-        _executeSafeTx(safe, module, abi.encodeWithSignature(
-            "registerSelector(bytes4,uint8)", APPROVE_SELECTOR, uint8(5)
-        ), deployerPrivateKey);
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerSelector(bytes4,uint8)", APPROVE_SELECTOR, uint8(5)),
+            deployerPrivateKey
+        );
         console.log("approve -> APPROVE");
 
         // Aave V3 Pool
-        _executeSafeTx(safe, module, abi.encodeWithSignature("registerSelector(bytes4,uint8)", AAVE_SUPPLY, uint8(2)), deployerPrivateKey);
-        _executeSafeTx(safe, module, abi.encodeWithSignature("registerSelector(bytes4,uint8)", AAVE_WITHDRAW, uint8(3)), deployerPrivateKey);
-        _executeSafeTx(safe, module, abi.encodeWithSignature("registerSelector(bytes4,uint8)", AAVE_BORROW, uint8(3)), deployerPrivateKey);
-        _executeSafeTx(safe, module, abi.encodeWithSignature("registerSelector(bytes4,uint8)", AAVE_REPAY, uint8(2)), deployerPrivateKey);
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerSelector(bytes4,uint8)", AAVE_SUPPLY, uint8(2)),
+            deployerPrivateKey
+        );
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerSelector(bytes4,uint8)", AAVE_WITHDRAW, uint8(3)),
+            deployerPrivateKey
+        );
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerSelector(bytes4,uint8)", AAVE_BORROW, uint8(3)),
+            deployerPrivateKey
+        );
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerSelector(bytes4,uint8)", AAVE_REPAY, uint8(2)),
+            deployerPrivateKey
+        );
         console.log("Aave supply/repay -> DEPOSIT, withdraw/borrow -> WITHDRAW");
 
         // Aave V3 Rewards
-        _executeSafeTx(safe, module, abi.encodeWithSignature("registerSelector(bytes4,uint8)", AAVE_CLAIM_REWARDS, uint8(4)), deployerPrivateKey);
-        _executeSafeTx(safe, module, abi.encodeWithSignature("registerSelector(bytes4,uint8)", AAVE_CLAIM_REWARDS_ON_BEHALF, uint8(4)), deployerPrivateKey);
-        _executeSafeTx(safe, module, abi.encodeWithSignature("registerSelector(bytes4,uint8)", AAVE_CLAIM_ALL_REWARDS, uint8(4)), deployerPrivateKey);
-        _executeSafeTx(safe, module, abi.encodeWithSignature("registerSelector(bytes4,uint8)", AAVE_CLAIM_ALL_ON_BEHALF, uint8(4)), deployerPrivateKey);
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerSelector(bytes4,uint8)", AAVE_CLAIM_REWARDS, uint8(4)),
+            deployerPrivateKey
+        );
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerSelector(bytes4,uint8)", AAVE_CLAIM_REWARDS_ON_BEHALF, uint8(4)),
+            deployerPrivateKey
+        );
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerSelector(bytes4,uint8)", AAVE_CLAIM_ALL_REWARDS, uint8(4)),
+            deployerPrivateKey
+        );
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerSelector(bytes4,uint8)", AAVE_CLAIM_ALL_ON_BEHALF, uint8(4)),
+            deployerPrivateKey
+        );
         console.log("Aave claim* -> CLAIM");
 
         // Uniswap V3 SwapRouter
-        _executeSafeTx(safe, module, abi.encodeWithSignature("registerSelector(bytes4,uint8)", EXACT_INPUT_SINGLE, uint8(1)), deployerPrivateKey);
-        _executeSafeTx(safe, module, abi.encodeWithSignature("registerSelector(bytes4,uint8)", EXACT_INPUT, uint8(1)), deployerPrivateKey);
-        _executeSafeTx(safe, module, abi.encodeWithSignature("registerSelector(bytes4,uint8)", EXACT_OUTPUT_SINGLE, uint8(1)), deployerPrivateKey);
-        _executeSafeTx(safe, module, abi.encodeWithSignature("registerSelector(bytes4,uint8)", EXACT_OUTPUT, uint8(1)), deployerPrivateKey);
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerSelector(bytes4,uint8)", EXACT_INPUT_SINGLE, uint8(1)),
+            deployerPrivateKey
+        );
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerSelector(bytes4,uint8)", EXACT_INPUT, uint8(1)),
+            deployerPrivateKey
+        );
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerSelector(bytes4,uint8)", EXACT_OUTPUT_SINGLE, uint8(1)),
+            deployerPrivateKey
+        );
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerSelector(bytes4,uint8)", EXACT_OUTPUT, uint8(1)),
+            deployerPrivateKey
+        );
         console.log("Uniswap V3 exactInput*/exactOutput* -> SWAP");
 
         // Uniswap V3 SwapRouter02 variants
-        _executeSafeTx(safe, module, abi.encodeWithSignature("registerSelector(bytes4,uint8)", EXACT_INPUT_SINGLE_V2, uint8(1)), deployerPrivateKey);
-        _executeSafeTx(safe, module, abi.encodeWithSignature("registerSelector(bytes4,uint8)", EXACT_INPUT_V2, uint8(1)), deployerPrivateKey);
-        _executeSafeTx(safe, module, abi.encodeWithSignature("registerSelector(bytes4,uint8)", EXACT_OUTPUT_SINGLE_V2, uint8(1)), deployerPrivateKey);
-        _executeSafeTx(safe, module, abi.encodeWithSignature("registerSelector(bytes4,uint8)", EXACT_OUTPUT_V2, uint8(1)), deployerPrivateKey);
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerSelector(bytes4,uint8)", EXACT_INPUT_SINGLE_V2, uint8(1)),
+            deployerPrivateKey
+        );
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerSelector(bytes4,uint8)", EXACT_INPUT_V2, uint8(1)),
+            deployerPrivateKey
+        );
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerSelector(bytes4,uint8)", EXACT_OUTPUT_SINGLE_V2, uint8(1)),
+            deployerPrivateKey
+        );
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerSelector(bytes4,uint8)", EXACT_OUTPUT_V2, uint8(1)),
+            deployerPrivateKey
+        );
         console.log("Uniswap V3 SwapRouter02 variants -> SWAP");
 
         // NonfungiblePositionManager
-        _executeSafeTx(safe, module, abi.encodeWithSignature("registerSelector(bytes4,uint8)", NPM_MINT, uint8(2)), deployerPrivateKey);
-        _executeSafeTx(safe, module, abi.encodeWithSignature("registerSelector(bytes4,uint8)", NPM_INCREASE_LIQUIDITY, uint8(2)), deployerPrivateKey);
-        _executeSafeTx(safe, module, abi.encodeWithSignature("registerSelector(bytes4,uint8)", NPM_DECREASE_LIQUIDITY, uint8(3)), deployerPrivateKey);
-        _executeSafeTx(safe, module, abi.encodeWithSignature("registerSelector(bytes4,uint8)", NPM_COLLECT, uint8(4)), deployerPrivateKey);
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerSelector(bytes4,uint8)", NPM_MINT, uint8(2)),
+            deployerPrivateKey
+        );
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerSelector(bytes4,uint8)", NPM_INCREASE_LIQUIDITY, uint8(2)),
+            deployerPrivateKey
+        );
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerSelector(bytes4,uint8)", NPM_DECREASE_LIQUIDITY, uint8(3)),
+            deployerPrivateKey
+        );
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerSelector(bytes4,uint8)", NPM_COLLECT, uint8(4)),
+            deployerPrivateKey
+        );
         console.log("NPM mint/increase -> DEPOSIT, decrease -> WITHDRAW, collect -> CLAIM");
 
         // Uniswap V4
-        _executeSafeTx(safe, module, abi.encodeWithSignature("registerSelector(bytes4,uint8)", MODIFY_LIQUIDITIES, uint8(2)), deployerPrivateKey);
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerSelector(bytes4,uint8)", MODIFY_LIQUIDITIES, uint8(2)),
+            deployerPrivateKey
+        );
         console.log("V4 modifyLiquidities -> DEPOSIT (parser handles dynamic classification)");
 
         // Universal Router
-        _executeSafeTx(safe, module, abi.encodeWithSignature("registerSelector(bytes4,uint8)", UNIVERSAL_EXECUTE, uint8(1)), deployerPrivateKey);
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerSelector(bytes4,uint8)", UNIVERSAL_EXECUTE, uint8(1)),
+            deployerPrivateKey
+        );
         console.log("Universal Router execute -> SWAP");
 
         // Morpho
-        _executeSafeTx(safe, module, abi.encodeWithSignature("registerSelector(bytes4,uint8)", MORPHO_DEPOSIT, uint8(2)), deployerPrivateKey);
-        _executeSafeTx(safe, module, abi.encodeWithSignature("registerSelector(bytes4,uint8)", MORPHO_MINT, uint8(2)), deployerPrivateKey);
-        _executeSafeTx(safe, module, abi.encodeWithSignature("registerSelector(bytes4,uint8)", MORPHO_WITHDRAW, uint8(3)), deployerPrivateKey);
-        _executeSafeTx(safe, module, abi.encodeWithSignature("registerSelector(bytes4,uint8)", MORPHO_REDEEM, uint8(3)), deployerPrivateKey);
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerSelector(bytes4,uint8)", MORPHO_DEPOSIT, uint8(2)),
+            deployerPrivateKey
+        );
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerSelector(bytes4,uint8)", MORPHO_MINT, uint8(2)),
+            deployerPrivateKey
+        );
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerSelector(bytes4,uint8)", MORPHO_WITHDRAW, uint8(3)),
+            deployerPrivateKey
+        );
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerSelector(bytes4,uint8)", MORPHO_REDEEM, uint8(3)),
+            deployerPrivateKey
+        );
         console.log("Morpho deposit/mint -> DEPOSIT, withdraw/redeem -> WITHDRAW");
 
         // Merkl
-        _executeSafeTx(safe, module, abi.encodeWithSignature("registerSelector(bytes4,uint8)", MERKL_CLAIM, uint8(4)), deployerPrivateKey);
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerSelector(bytes4,uint8)", MERKL_CLAIM, uint8(4)),
+            deployerPrivateKey
+        );
         console.log("Merkl claim -> CLAIM");
 
         vm.stopBroadcast();

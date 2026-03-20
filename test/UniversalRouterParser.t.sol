@@ -84,12 +84,7 @@ contract UniversalRouterParserTest is Test {
         bytes[] memory inputs = new bytes[](1);
         inputs[0] = _encodeV3SwapExactIn(USER, 1000e6, 0, _encodePath(USDC, 3000, WETH), true);
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.EXECUTE_SELECTOR(),
-            commands,
-            inputs,
-            block.timestamp + 1
-        );
+        bytes memory data = abi.encodeWithSelector(parser.EXECUTE_SELECTOR(), commands, inputs, block.timestamp + 1);
 
         assertEq(parser.getOperationType(data), 1, "Should always return SWAP (1)");
     }
@@ -103,12 +98,7 @@ contract UniversalRouterParserTest is Test {
         bytes[] memory inputs = new bytes[](1);
         inputs[0] = _encodeV3SwapExactIn(USER, 1000e6, 900e18, _encodePath(USDC, 3000, WETH), true);
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.EXECUTE_SELECTOR(),
-            commands,
-            inputs,
-            block.timestamp + 1
-        );
+        bytes memory data = abi.encodeWithSelector(parser.EXECUTE_SELECTOR(), commands, inputs, block.timestamp + 1);
 
         address[] memory tokens = parser.extractInputTokens(UNIVERSAL_ROUTER, data);
         assertEq(tokens[0], USDC, "Input token should be USDC");
@@ -121,12 +111,7 @@ contract UniversalRouterParserTest is Test {
         bytes[] memory inputs = new bytes[](1);
         inputs[0] = _encodeV3SwapExactIn(USER, 1000e6, 900e18, _encodePath(USDC, 3000, WETH), true);
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.EXECUTE_SELECTOR(),
-            commands,
-            inputs,
-            block.timestamp + 1
-        );
+        bytes memory data = abi.encodeWithSelector(parser.EXECUTE_SELECTOR(), commands, inputs, block.timestamp + 1);
 
         uint256[] memory amounts = parser.extractInputAmounts(UNIVERSAL_ROUTER, data);
         assertEq(amounts[0], 1000e6, "Input amount should be 1000e6");
@@ -139,12 +124,7 @@ contract UniversalRouterParserTest is Test {
         bytes[] memory inputs = new bytes[](1);
         inputs[0] = _encodeV3SwapExactIn(USER, 1000e6, 900e18, _encodePath(USDC, 3000, WETH), true);
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.EXECUTE_SELECTOR(),
-            commands,
-            inputs,
-            block.timestamp + 1
-        );
+        bytes memory data = abi.encodeWithSelector(parser.EXECUTE_SELECTOR(), commands, inputs, block.timestamp + 1);
 
         address[] memory tokens = parser.extractOutputTokens(UNIVERSAL_ROUTER, data);
         assertEq(tokens.length, 1, "Should have 1 output token");
@@ -158,12 +138,7 @@ contract UniversalRouterParserTest is Test {
         bytes[] memory inputs = new bytes[](1);
         inputs[0] = _encodeV3SwapExactIn(USER, 1000e6, 900e18, _encodePath(USDC, 3000, WETH), true);
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.EXECUTE_SELECTOR(),
-            commands,
-            inputs,
-            block.timestamp + 1
-        );
+        bytes memory data = abi.encodeWithSelector(parser.EXECUTE_SELECTOR(), commands, inputs, block.timestamp + 1);
 
         address recipient = parser.extractRecipient(UNIVERSAL_ROUTER, data, address(0));
         assertEq(recipient, USER, "Recipient should be USER");
@@ -180,12 +155,7 @@ contract UniversalRouterParserTest is Test {
         bytes[] memory inputs = new bytes[](1);
         inputs[0] = _encodeV3SwapExactIn(USER, 1e18, 1100e6, _encodePath(WETH, 3000, USDC), true);
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.EXECUTE_SELECTOR(),
-            commands,
-            inputs,
-            block.timestamp + 1
-        );
+        bytes memory data = abi.encodeWithSelector(parser.EXECUTE_SELECTOR(), commands, inputs, block.timestamp + 1);
 
         address[] memory tokens = parser.extractInputTokens(UNIVERSAL_ROUTER, data);
         assertEq(tokens[0], USDC, "Input token should be USDC (last in reversed path)");
@@ -198,12 +168,7 @@ contract UniversalRouterParserTest is Test {
         bytes[] memory inputs = new bytes[](1);
         inputs[0] = _encodeV3SwapExactIn(USER, 1e18, 1100e6, _encodePath(WETH, 3000, USDC), true);
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.EXECUTE_SELECTOR(),
-            commands,
-            inputs,
-            block.timestamp + 1
-        );
+        bytes memory data = abi.encodeWithSelector(parser.EXECUTE_SELECTOR(), commands, inputs, block.timestamp + 1);
 
         address[] memory tokens = parser.extractOutputTokens(UNIVERSAL_ROUTER, data);
         assertEq(tokens.length, 1, "Should have 1 output token");
@@ -223,12 +188,7 @@ contract UniversalRouterParserTest is Test {
         bytes[] memory inputs = new bytes[](1);
         inputs[0] = abi.encode(USER, uint256(1000e6), uint256(900e18), path, true);
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.EXECUTE_SELECTOR(),
-            commands,
-            inputs,
-            block.timestamp + 1
-        );
+        bytes memory data = abi.encodeWithSelector(parser.EXECUTE_SELECTOR(), commands, inputs, block.timestamp + 1);
 
         address[] memory tokens = parser.extractInputTokens(UNIVERSAL_ROUTER, data);
         assertEq(tokens[0], USDC, "Input token should be USDC");
@@ -245,12 +205,7 @@ contract UniversalRouterParserTest is Test {
         bytes[] memory inputs = new bytes[](1);
         inputs[0] = abi.encode(USER, uint256(1000e6), uint256(900e18), path, true);
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.EXECUTE_SELECTOR(),
-            commands,
-            inputs,
-            block.timestamp + 1
-        );
+        bytes memory data = abi.encodeWithSelector(parser.EXECUTE_SELECTOR(), commands, inputs, block.timestamp + 1);
 
         uint256[] memory amounts = parser.extractInputAmounts(UNIVERSAL_ROUTER, data);
         assertEq(amounts[0], 1000e6, "Input amount should be 1000e6");
@@ -267,12 +222,7 @@ contract UniversalRouterParserTest is Test {
         bytes[] memory inputs = new bytes[](1);
         inputs[0] = abi.encode(USER, uint256(1000e6), uint256(900e18), path, true);
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.EXECUTE_SELECTOR(),
-            commands,
-            inputs,
-            block.timestamp + 1
-        );
+        bytes memory data = abi.encodeWithSelector(parser.EXECUTE_SELECTOR(), commands, inputs, block.timestamp + 1);
 
         address[] memory tokens = parser.extractOutputTokens(UNIVERSAL_ROUTER, data);
         assertEq(tokens.length, 1, "Should have 1 output token");
@@ -293,12 +243,7 @@ contract UniversalRouterParserTest is Test {
         bytes[] memory inputs = new bytes[](1);
         inputs[0] = abi.encode(USER, uint256(1e18), uint256(1100e6), path, true);
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.EXECUTE_SELECTOR(),
-            commands,
-            inputs,
-            block.timestamp + 1
-        );
+        bytes memory data = abi.encodeWithSelector(parser.EXECUTE_SELECTOR(), commands, inputs, block.timestamp + 1);
 
         address[] memory tokens = parser.extractInputTokens(UNIVERSAL_ROUTER, data);
         assertEq(tokens[0], WETH, "Input token should be WETH (last in path)");
@@ -315,12 +260,7 @@ contract UniversalRouterParserTest is Test {
         bytes[] memory inputs = new bytes[](1);
         inputs[0] = abi.encode(USER, uint256(1e18), uint256(1100e6), path, true);
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.EXECUTE_SELECTOR(),
-            commands,
-            inputs,
-            block.timestamp + 1
-        );
+        bytes memory data = abi.encodeWithSelector(parser.EXECUTE_SELECTOR(), commands, inputs, block.timestamp + 1);
 
         address[] memory tokens = parser.extractOutputTokens(UNIVERSAL_ROUTER, data);
         assertEq(tokens.length, 1, "Should have 1 output token");
@@ -336,12 +276,7 @@ contract UniversalRouterParserTest is Test {
         bytes[] memory inputs = new bytes[](1);
         inputs[0] = abi.encode(USER, uint256(1e18));
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.EXECUTE_SELECTOR(),
-            commands,
-            inputs,
-            block.timestamp + 1
-        );
+        bytes memory data = abi.encodeWithSelector(parser.EXECUTE_SELECTOR(), commands, inputs, block.timestamp + 1);
 
         address[] memory tokens = parser.extractInputTokens(UNIVERSAL_ROUTER, data);
         assertEq(tokens[0], address(0), "Input token should be address(0) for native ETH");
@@ -354,12 +289,7 @@ contract UniversalRouterParserTest is Test {
         bytes[] memory inputs = new bytes[](1);
         inputs[0] = abi.encode(USER, uint256(1e18));
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.EXECUTE_SELECTOR(),
-            commands,
-            inputs,
-            block.timestamp + 1
-        );
+        bytes memory data = abi.encodeWithSelector(parser.EXECUTE_SELECTOR(), commands, inputs, block.timestamp + 1);
 
         uint256[] memory amounts = parser.extractInputAmounts(UNIVERSAL_ROUTER, data);
         assertEq(amounts[0], 1e18, "Input amount should be 1e18");
@@ -372,12 +302,7 @@ contract UniversalRouterParserTest is Test {
         bytes[] memory inputs = new bytes[](1);
         inputs[0] = abi.encode(USER, uint256(1e18));
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.EXECUTE_SELECTOR(),
-            commands,
-            inputs,
-            block.timestamp + 1
-        );
+        bytes memory data = abi.encodeWithSelector(parser.EXECUTE_SELECTOR(), commands, inputs, block.timestamp + 1);
 
         address recipient = parser.extractRecipient(UNIVERSAL_ROUTER, data, address(0));
         assertEq(recipient, USER, "Recipient should be USER");
@@ -392,12 +317,7 @@ contract UniversalRouterParserTest is Test {
         bytes[] memory inputs = new bytes[](1);
         inputs[0] = abi.encode(USER, uint256(1e18));
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.EXECUTE_SELECTOR(),
-            commands,
-            inputs,
-            block.timestamp + 1
-        );
+        bytes memory data = abi.encodeWithSelector(parser.EXECUTE_SELECTOR(), commands, inputs, block.timestamp + 1);
 
         address[] memory tokens = parser.extractOutputTokens(UNIVERSAL_ROUTER, data);
         assertEq(tokens.length, 1, "Should have 1 output token");
@@ -411,12 +331,7 @@ contract UniversalRouterParserTest is Test {
         bytes[] memory inputs = new bytes[](1);
         inputs[0] = abi.encode(USER, uint256(1e18));
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.EXECUTE_SELECTOR(),
-            commands,
-            inputs,
-            block.timestamp + 1
-        );
+        bytes memory data = abi.encodeWithSelector(parser.EXECUTE_SELECTOR(), commands, inputs, block.timestamp + 1);
 
         address recipient = parser.extractRecipient(UNIVERSAL_ROUTER, data, address(0));
         assertEq(recipient, USER, "Recipient should be USER");
@@ -434,12 +349,7 @@ contract UniversalRouterParserTest is Test {
         bytes[] memory inputs = new bytes[](1);
         inputs[0] = _encodeV3SwapExactIn(USER, 1000e6, 800e18, path, true);
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.EXECUTE_SELECTOR(),
-            commands,
-            inputs,
-            block.timestamp + 1
-        );
+        bytes memory data = abi.encodeWithSelector(parser.EXECUTE_SELECTOR(), commands, inputs, block.timestamp + 1);
 
         address[] memory tokens = parser.extractInputTokens(UNIVERSAL_ROUTER, data);
         assertEq(tokens[0], USDC, "Input token should be USDC (first in multi-hop path)");
@@ -454,12 +364,7 @@ contract UniversalRouterParserTest is Test {
         bytes[] memory inputs = new bytes[](1);
         inputs[0] = _encodeV3SwapExactIn(USER, 1000e6, 800e18, path, true);
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.EXECUTE_SELECTOR(),
-            commands,
-            inputs,
-            block.timestamp + 1
-        );
+        bytes memory data = abi.encodeWithSelector(parser.EXECUTE_SELECTOR(), commands, inputs, block.timestamp + 1);
 
         address[] memory tokens = parser.extractOutputTokens(UNIVERSAL_ROUTER, data);
         assertEq(tokens.length, 1, "Should have 1 output token");
@@ -472,12 +377,7 @@ contract UniversalRouterParserTest is Test {
         bytes memory commands = "";
         bytes[] memory inputs = new bytes[](0);
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.EXECUTE_SELECTOR(),
-            commands,
-            inputs,
-            block.timestamp + 1
-        );
+        bytes memory data = abi.encodeWithSelector(parser.EXECUTE_SELECTOR(), commands, inputs, block.timestamp + 1);
 
         address defaultRecipient = address(0x9999);
         address recipient = parser.extractRecipient(UNIVERSAL_ROUTER, data, defaultRecipient);
@@ -495,12 +395,7 @@ contract UniversalRouterParserTest is Test {
         bytes[] memory inputs = new bytes[](1);
         inputs[0] = _encodeV3SwapExactIn(USER, 1000e6, 900e18, _encodePath(USDC, 3000, WETH), true);
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.EXECUTE_SELECTOR(),
-            commands,
-            inputs,
-            block.timestamp + 1
-        );
+        bytes memory data = abi.encodeWithSelector(parser.EXECUTE_SELECTOR(), commands, inputs, block.timestamp + 1);
 
         address[] memory tokens = parser.extractInputTokens(UNIVERSAL_ROUTER, data);
         assertEq(tokens[0], USDC, "Should parse correctly with flag bits");
@@ -512,13 +407,11 @@ contract UniversalRouterParserTest is Test {
         return abi.encodePacked(tokenA, fee, tokenB);
     }
 
-    function _encodeMultiHopPath(
-        address token0,
-        uint24 fee0,
-        address token1,
-        uint24 fee1,
-        address token2
-    ) internal pure returns (bytes memory) {
+    function _encodeMultiHopPath(address token0, uint24 fee0, address token1, uint24 fee1, address token2)
+        internal
+        pure
+        returns (bytes memory)
+    {
         return abi.encodePacked(token0, fee0, token1, fee1, token2);
     }
 

@@ -30,12 +30,9 @@ interface ISafe {
     /**
      * @notice Execute a transaction from an enabled module
      */
-    function execTransactionFromModule(
-        address to,
-        uint256 value,
-        bytes calldata data,
-        Operation operation
-    ) external returns (bool success);
+    function execTransactionFromModule(address to, uint256 value, bytes calldata data, Operation operation)
+        external
+        returns (bool success);
 
     /**
      * @notice Enable a module on the Safe

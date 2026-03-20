@@ -139,7 +139,12 @@ contract ParaswapParser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractInputAmounts(address, bytes calldata data) external pure override returns (uint256[] memory amounts) {
+    function extractInputAmounts(address, bytes calldata data)
+        external
+        pure
+        override
+        returns (uint256[] memory amounts)
+    {
         if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         uint256 amount;
@@ -194,7 +199,12 @@ contract ParaswapParser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractOutputTokens(address, bytes calldata data) external pure override returns (address[] memory tokens) {
+    function extractOutputTokens(address, bytes calldata data)
+        external
+        pure
+        override
+        returns (address[] memory tokens)
+    {
         if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         address token;
@@ -253,7 +263,12 @@ contract ParaswapParser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractRecipient(address, bytes calldata data, address defaultRecipient) external pure override returns (address recipient) {
+    function extractRecipient(address, bytes calldata data, address defaultRecipient)
+        external
+        pure
+        override
+        returns (address recipient)
+    {
         if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
@@ -301,13 +316,9 @@ contract ParaswapParser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function supportsSelector(bytes4 selector) external pure override returns (bool) {
-        return selector == SWAP_EXACT_AMOUNT_IN_SELECTOR ||
-               selector == SWAP_EXACT_AMOUNT_OUT_SELECTOR ||
-               selector == SWAP_EXACT_IN_UNISWAP_V2_SELECTOR ||
-               selector == SWAP_EXACT_IN_UNISWAP_V3_SELECTOR ||
-               selector == SIMPLE_SWAP_SELECTOR ||
-               selector == MULTI_SWAP_SELECTOR ||
-               selector == MEGA_SWAP_SELECTOR;
+        return selector == SWAP_EXACT_AMOUNT_IN_SELECTOR || selector == SWAP_EXACT_AMOUNT_OUT_SELECTOR
+            || selector == SWAP_EXACT_IN_UNISWAP_V2_SELECTOR || selector == SWAP_EXACT_IN_UNISWAP_V3_SELECTOR
+            || selector == SIMPLE_SWAP_SELECTOR || selector == MULTI_SWAP_SELECTOR || selector == MEGA_SWAP_SELECTOR;
     }
 
     /// @inheritdoc ICalldataParser
@@ -316,13 +327,11 @@ contract ParaswapParser is ICalldataParser {
         bytes4 selector = bytes4(data[:4]);
 
         // All Paraswap functions are swaps
-        if (selector == SWAP_EXACT_AMOUNT_IN_SELECTOR ||
-            selector == SWAP_EXACT_AMOUNT_OUT_SELECTOR ||
-            selector == SWAP_EXACT_IN_UNISWAP_V2_SELECTOR ||
-            selector == SWAP_EXACT_IN_UNISWAP_V3_SELECTOR ||
-            selector == SIMPLE_SWAP_SELECTOR ||
-            selector == MULTI_SWAP_SELECTOR ||
-            selector == MEGA_SWAP_SELECTOR) {
+        if (
+            selector == SWAP_EXACT_AMOUNT_IN_SELECTOR || selector == SWAP_EXACT_AMOUNT_OUT_SELECTOR
+                || selector == SWAP_EXACT_IN_UNISWAP_V2_SELECTOR || selector == SWAP_EXACT_IN_UNISWAP_V3_SELECTOR
+                || selector == SIMPLE_SWAP_SELECTOR || selector == MULTI_SWAP_SELECTOR || selector == MEGA_SWAP_SELECTOR
+        ) {
             return 1; // SWAP
         }
 

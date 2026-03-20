@@ -64,10 +64,7 @@ contract DeployModuleViaFactory is Script, SafeTxHelper {
 
         // 2. Enable module on Safe via execTransaction
         console.log("\n2. Enabling module on Safe...");
-        _executeSafeTx(safe, safe, abi.encodeWithSignature(
-            "enableModule(address)",
-            module
-        ), deployerPrivateKey);
+        _executeSafeTx(safe, safe, abi.encodeWithSignature("enableModule(address)", module), deployerPrivateKey);
         console.log("   Module enabled");
 
         vm.stopBroadcast();

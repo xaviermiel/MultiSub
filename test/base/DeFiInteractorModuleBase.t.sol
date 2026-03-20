@@ -60,10 +60,10 @@ abstract contract DeFiInteractorModuleBase is Test {
         safe.enableModule(address(module));
 
         // Transfer tokens to Safe
-        token.transfer(address(safe), 100000 * 10**18);
+        token.transfer(address(safe), 100000 * 10 ** 18);
 
         // Set initial Safe value
-        module.updateSafeValue(1_000_000 * 10**18);
+        module.updateSafeValue(1_000_000 * 10 ** 18);
 
         // Set price feed for token
         module.setTokenPriceFeed(address(token), address(priceFeed));

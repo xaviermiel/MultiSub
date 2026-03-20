@@ -91,13 +91,10 @@ abstract contract Module {
      * @param operation Call (0) or DelegateCall (1)
      * @return success Whether the transaction succeeded
      */
-    function exec(
-        address to,
-        uint256 value,
-        bytes memory data,
-        ISafe.Operation operation
-    ) internal returns (bool success) {
+    function exec(address to, uint256 value, bytes memory data, ISafe.Operation operation)
+        internal
+        returns (bool success)
+    {
         return ISafe(target).execTransactionFromModule(to, value, data, operation);
     }
-
 }

@@ -48,14 +48,14 @@ contract UniswapV3ParserTest is Test {
         // exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96))
         bytes memory data = abi.encodeWithSelector(
             parser.EXACT_INPUT_SINGLE_SELECTOR(),
-            USDC,           // tokenIn
-            WETH,           // tokenOut
-            FEE_MEDIUM,     // fee
-            USER,           // recipient
+            USDC, // tokenIn
+            WETH, // tokenOut
+            FEE_MEDIUM, // fee
+            USER, // recipient
             block.timestamp + 3600, // deadline
-            1000e6,         // amountIn
-            0,              // amountOutMinimum
-            uint160(0)      // sqrtPriceLimitX96
+            1000e6, // amountIn
+            0, // amountOutMinimum
+            uint160(0) // sqrtPriceLimitX96
         );
 
         address[] memory tokens = parser.extractInputTokens(SWAP_ROUTER, data);
@@ -104,14 +104,8 @@ contract UniswapV3ParserTest is Test {
         // For multi-hop: tokenA + fee + tokenB + fee + tokenC
         bytes memory path = abi.encodePacked(USDC, FEE_MEDIUM, WETH);
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.EXACT_INPUT_SELECTOR(),
-            path,
-            USER,
-            block.timestamp + 3600,
-            1000e6,
-            0
-        );
+        bytes memory data =
+            abi.encodeWithSelector(parser.EXACT_INPUT_SELECTOR(), path, USER, block.timestamp + 3600, 1000e6, 0);
 
         address[] memory tokens = parser.extractInputTokens(SWAP_ROUTER, data);
         assertEq(tokens[0], USDC, "Input token should be USDC (first in path)");
@@ -120,14 +114,8 @@ contract UniswapV3ParserTest is Test {
     function testExactInputExtractInputAmount() public view {
         bytes memory path = abi.encodePacked(USDC, FEE_MEDIUM, WETH);
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.EXACT_INPUT_SELECTOR(),
-            path,
-            USER,
-            block.timestamp + 3600,
-            1000e6,
-            0
-        );
+        bytes memory data =
+            abi.encodeWithSelector(parser.EXACT_INPUT_SELECTOR(), path, USER, block.timestamp + 3600, 1000e6, 0);
 
         uint256[] memory amounts = parser.extractInputAmounts(SWAP_ROUTER, data);
         assertEq(amounts[0], 1000e6, "Input amount should be 1000e6");
@@ -136,14 +124,8 @@ contract UniswapV3ParserTest is Test {
     function testExactInputExtractOutputTokens() public view {
         bytes memory path = abi.encodePacked(USDC, FEE_MEDIUM, WETH);
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.EXACT_INPUT_SELECTOR(),
-            path,
-            USER,
-            block.timestamp + 3600,
-            1000e6,
-            0
-        );
+        bytes memory data =
+            abi.encodeWithSelector(parser.EXACT_INPUT_SELECTOR(), path, USER, block.timestamp + 3600, 1000e6, 0);
 
         address[] memory tokens = parser.extractOutputTokens(SWAP_ROUTER, data);
         assertEq(tokens.length, 1, "Should have 1 output token");
@@ -152,22 +134,10 @@ contract UniswapV3ParserTest is Test {
 
     function testExactInputMultiHop() public view {
         // USDC -> WETH -> DAI (3-hop path)
-        bytes memory path = abi.encodePacked(
-            USDC,
-            FEE_MEDIUM,
-            WETH,
-            FEE_LOW,
-            DAI
-        );
+        bytes memory path = abi.encodePacked(USDC, FEE_MEDIUM, WETH, FEE_LOW, DAI);
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.EXACT_INPUT_SELECTOR(),
-            path,
-            USER,
-            block.timestamp + 3600,
-            1000e6,
-            0
-        );
+        bytes memory data =
+            abi.encodeWithSelector(parser.EXACT_INPUT_SELECTOR(), path, USER, block.timestamp + 3600, 1000e6, 0);
 
         address[] memory inputTokens = parser.extractInputTokens(SWAP_ROUTER, data);
         address[] memory outputTokens = parser.extractOutputTokens(SWAP_ROUTER, data);
@@ -183,13 +153,13 @@ contract UniswapV3ParserTest is Test {
         // exactOutputSingle params: tokenIn, tokenOut, fee, recipient, deadline, amountOut, amountInMaximum, sqrtPriceLimitX96
         bytes memory data = abi.encodeWithSelector(
             parser.EXACT_OUTPUT_SINGLE_SELECTOR(),
-            USDC,           // tokenIn
-            WETH,           // tokenOut
+            USDC, // tokenIn
+            WETH, // tokenOut
             FEE_MEDIUM,
             USER,
             block.timestamp + 3600,
-            1e18,           // amountOut (want 1 WETH)
-            2000e6,         // amountInMaximum
+            1e18, // amountOut (want 1 WETH)
+            2000e6, // amountInMaximum
             uint160(0)
         );
 
@@ -206,7 +176,7 @@ contract UniswapV3ParserTest is Test {
             USER,
             block.timestamp + 3600,
             1e18,
-            2000e6,         // amountInMaximum
+            2000e6, // amountInMaximum
             uint160(0)
         );
 
@@ -244,8 +214,8 @@ contract UniswapV3ParserTest is Test {
             path,
             USER,
             block.timestamp + 3600,
-            1e18,           // amountOut
-            2000e6          // amountInMaximum
+            1e18, // amountOut
+            2000e6 // amountInMaximum
         );
 
         address[] memory inputTokens = parser.extractInputTokens(SWAP_ROUTER, data);
@@ -260,14 +230,8 @@ contract UniswapV3ParserTest is Test {
     function testExactOutputExtractInputAmount() public view {
         bytes memory path = abi.encodePacked(WETH, FEE_MEDIUM, USDC);
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.EXACT_OUTPUT_SELECTOR(),
-            path,
-            USER,
-            block.timestamp + 3600,
-            1e18,
-            2000e6
-        );
+        bytes memory data =
+            abi.encodeWithSelector(parser.EXACT_OUTPUT_SELECTOR(), path, USER, block.timestamp + 3600, 1e18, 2000e6);
 
         uint256[] memory amounts = parser.extractInputAmounts(SWAP_ROUTER, data);
         assertEq(amounts[0], 2000e6, "Input amount should be amountInMaximum");
@@ -309,14 +273,8 @@ contract UniswapV3ParserTest is Test {
         // Path too short (less than 20 bytes for a token address)
         bytes memory shortPath = hex"1234";
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.EXACT_INPUT_SELECTOR(),
-            shortPath,
-            USER,
-            block.timestamp + 3600,
-            1000e6,
-            0
-        );
+        bytes memory data =
+            abi.encodeWithSelector(parser.EXACT_INPUT_SELECTOR(), shortPath, USER, block.timestamp + 3600, 1000e6, 0);
 
         vm.expectRevert(UniswapV3Parser.InvalidPath.selector);
         parser.extractInputTokens(SWAP_ROUTER, data);

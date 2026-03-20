@@ -57,21 +57,23 @@ contract ConfigureSubaccount is Script, SafeTxHelper {
 
         // 1. Grant DEFI_EXECUTE_ROLE
         console.log("\n1. Granting DEFI_EXECUTE_ROLE...");
-        _executeSafeTx(safe, module, abi.encodeWithSignature(
-            "grantRole(address,uint16)",
-            subAccount,
-            defiModule.DEFI_EXECUTE_ROLE()
-        ), deployerPrivateKey);
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("grantRole(address,uint16)", subAccount, defiModule.DEFI_EXECUTE_ROLE()),
+            deployerPrivateKey
+        );
         console.log("   Done");
 
         // 2. Optionally grant DEFI_TRANSFER_ROLE
         if (grantTransfer) {
             console.log("\n2. Granting DEFI_TRANSFER_ROLE...");
-            _executeSafeTx(safe, module, abi.encodeWithSignature(
-                "grantRole(address,uint16)",
-                subAccount,
-                defiModule.DEFI_TRANSFER_ROLE()
-            ), deployerPrivateKey);
+            _executeSafeTx(
+                safe,
+                module,
+                abi.encodeWithSignature("grantRole(address,uint16)", subAccount, defiModule.DEFI_TRANSFER_ROLE()),
+                deployerPrivateKey
+            );
             console.log("   Done");
         } else {
             console.log("\n2. Skipping DEFI_TRANSFER_ROLE (not requested)");
@@ -79,12 +81,14 @@ contract ConfigureSubaccount is Script, SafeTxHelper {
 
         // 3. Set spending limits
         console.log("\n3. Setting spending limits...");
-        _executeSafeTx(safe, module, abi.encodeWithSignature(
-            "setSubAccountLimits(address,uint256,uint256)",
-            subAccount,
-            maxSpendingBps,
-            windowDuration
-        ), deployerPrivateKey);
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature(
+                "setSubAccountLimits(address,uint256,uint256)", subAccount, maxSpendingBps, windowDuration
+            ),
+            deployerPrivateKey
+        );
         console.log("   Done");
 
         // 4. Whitelist protocol addresses
@@ -100,12 +104,12 @@ contract ConfigureSubaccount is Script, SafeTxHelper {
         protocols[7] = UNISWAP_UNIVERSAL_ROUTER_V2;
         protocols[8] = MERKL_DISTRIBUTOR;
 
-        _executeSafeTx(safe, module, abi.encodeWithSignature(
-            "setAllowedAddresses(address,address[],bool)",
-            subAccount,
-            protocols,
-            true
-        ), deployerPrivateKey);
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("setAllowedAddresses(address,address[],bool)", subAccount, protocols, true),
+            deployerPrivateKey
+        );
         console.log("   Whitelisted:", protocols.length, "protocols");
 
         vm.stopBroadcast();

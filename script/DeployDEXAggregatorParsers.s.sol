@@ -69,27 +69,30 @@ contract DeployDEXAggregatorParsers is Script, SafeTxHelper {
         console.log("Registering parsers with module...");
 
         // Register 1inch parser
-        _executeSafeTx(SAFE, MODULE, abi.encodeWithSignature(
-            "registerParser(address,address)",
-            ONE_INCH_ROUTER,
-            address(oneInchParser)
-        ), deployerPrivateKey);
+        _executeSafeTx(
+            SAFE,
+            MODULE,
+            abi.encodeWithSignature("registerParser(address,address)", ONE_INCH_ROUTER, address(oneInchParser)),
+            deployerPrivateKey
+        );
         console.log("Registered OneInchParser for", ONE_INCH_ROUTER);
 
         // Register Paraswap parser
-        _executeSafeTx(SAFE, MODULE, abi.encodeWithSignature(
-            "registerParser(address,address)",
-            PARASWAP_ROUTER,
-            address(paraswapParser)
-        ), deployerPrivateKey);
+        _executeSafeTx(
+            SAFE,
+            MODULE,
+            abi.encodeWithSignature("registerParser(address,address)", PARASWAP_ROUTER, address(paraswapParser)),
+            deployerPrivateKey
+        );
         console.log("Registered ParaswapParser for", PARASWAP_ROUTER);
 
         // Register KyberSwap parser
-        _executeSafeTx(SAFE, MODULE, abi.encodeWithSignature(
-            "registerParser(address,address)",
-            KYBERSWAP_ROUTER,
-            address(kyberSwapParser)
-        ), deployerPrivateKey);
+        _executeSafeTx(
+            SAFE,
+            MODULE,
+            abi.encodeWithSignature("registerParser(address,address)", KYBERSWAP_ROUTER, address(kyberSwapParser)),
+            deployerPrivateKey
+        );
         console.log("Registered KyberSwapParser for", KYBERSWAP_ROUTER);
 
         console.log("");
@@ -106,11 +109,16 @@ contract DeployDEXAggregatorParsers is Script, SafeTxHelper {
         oneInchSelectors[3] = 0x093d4fa5; // clipperSwapTo
 
         for (uint256 i = 0; i < oneInchSelectors.length; i++) {
-            _executeSafeTx(SAFE, MODULE, abi.encodeWithSignature(
-                "registerSelector(bytes4,uint8)",
-                oneInchSelectors[i],
-                uint8(1) // SWAP
-            ), deployerPrivateKey);
+            _executeSafeTx(
+                SAFE,
+                MODULE,
+                abi.encodeWithSignature(
+                    "registerSelector(bytes4,uint8)",
+                    oneInchSelectors[i],
+                    uint8(1) // SWAP
+                ),
+                deployerPrivateKey
+            );
         }
         console.log("Registered 1inch selectors:", oneInchSelectors.length);
 
@@ -125,11 +133,16 @@ contract DeployDEXAggregatorParsers is Script, SafeTxHelper {
         paraswapSelectors[6] = 0x46c67b6d; // megaSwap
 
         for (uint256 i = 0; i < paraswapSelectors.length; i++) {
-            _executeSafeTx(SAFE, MODULE, abi.encodeWithSignature(
-                "registerSelector(bytes4,uint8)",
-                paraswapSelectors[i],
-                uint8(1) // SWAP
-            ), deployerPrivateKey);
+            _executeSafeTx(
+                SAFE,
+                MODULE,
+                abi.encodeWithSignature(
+                    "registerSelector(bytes4,uint8)",
+                    paraswapSelectors[i],
+                    uint8(1) // SWAP
+                ),
+                deployerPrivateKey
+            );
         }
         console.log("Registered Paraswap selectors:", paraswapSelectors.length);
 
@@ -140,11 +153,16 @@ contract DeployDEXAggregatorParsers is Script, SafeTxHelper {
         kyberSwapSelectors[2] = 0x59e50fed; // swapGeneric
 
         for (uint256 i = 0; i < kyberSwapSelectors.length; i++) {
-            _executeSafeTx(SAFE, MODULE, abi.encodeWithSignature(
-                "registerSelector(bytes4,uint8)",
-                kyberSwapSelectors[i],
-                uint8(1) // SWAP
-            ), deployerPrivateKey);
+            _executeSafeTx(
+                SAFE,
+                MODULE,
+                abi.encodeWithSignature(
+                    "registerSelector(bytes4,uint8)",
+                    kyberSwapSelectors[i],
+                    uint8(1) // SWAP
+                ),
+                deployerPrivateKey
+            );
         }
         console.log("Registered KyberSwap selectors:", kyberSwapSelectors.length);
 
@@ -160,12 +178,14 @@ contract DeployDEXAggregatorParsers is Script, SafeTxHelper {
         aggregators[2] = KYBERSWAP_ROUTER;
 
         for (uint256 i = 0; i < SUBACCOUNTS.length; i++) {
-            _executeSafeTx(SAFE, MODULE, abi.encodeWithSignature(
-                "setAllowedAddresses(address,address[],bool)",
-                SUBACCOUNTS[i],
-                aggregators,
-                true
-            ), deployerPrivateKey);
+            _executeSafeTx(
+                SAFE,
+                MODULE,
+                abi.encodeWithSignature(
+                    "setAllowedAddresses(address,address[],bool)", SUBACCOUNTS[i], aggregators, true
+                ),
+                deployerPrivateKey
+            );
             console.log("Whitelisted aggregators for subaccount", i + 1);
         }
 

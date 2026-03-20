@@ -79,13 +79,7 @@ contract MerklParserTest is Test {
         proofs[1] = new bytes32[](1);
         proofs[1][0] = keccak256("proof2");
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.CLAIM_SELECTOR(),
-            users,
-            tokens,
-            amounts,
-            proofs
-        );
+        bytes memory data = abi.encodeWithSelector(parser.CLAIM_SELECTOR(), users, tokens, amounts, proofs);
 
         // extractOutputTokens returns all tokens
         address[] memory outputTokens = parser.extractOutputTokens(MERKL_DISTRIBUTOR, data);
@@ -114,13 +108,7 @@ contract MerklParserTest is Test {
         proofs[1] = new bytes32[](1);
         proofs[1][0] = keccak256("proof2");
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.CLAIM_SELECTOR(),
-            users,
-            tokens,
-            amounts,
-            proofs
-        );
+        bytes memory data = abi.encodeWithSelector(parser.CLAIM_SELECTOR(), users, tokens, amounts, proofs);
 
         // Should return all tokens
         address[] memory extractedTokens = parser.extractAllClaimTokens(data);
@@ -149,13 +137,7 @@ contract MerklParserTest is Test {
         proofs[1] = new bytes32[](1);
         proofs[1][0] = keccak256("proof2");
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.CLAIM_SELECTOR(),
-            users,
-            tokens,
-            amounts,
-            proofs
-        );
+        bytes memory data = abi.encodeWithSelector(parser.CLAIM_SELECTOR(), users, tokens, amounts, proofs);
 
         // Should return all amounts
         uint256[] memory extractedAmounts = parser.extractAllClaimAmounts(data);
@@ -197,13 +179,7 @@ contract MerklParserTest is Test {
         uint256[] memory amounts = new uint256[](0);
         bytes32[][] memory proofs = new bytes32[][](0);
 
-        bytes memory data = abi.encodeWithSelector(
-            parser.CLAIM_SELECTOR(),
-            users,
-            tokens,
-            amounts,
-            proofs
-        );
+        bytes memory data = abi.encodeWithSelector(parser.CLAIM_SELECTOR(), users, tokens, amounts, proofs);
 
         // Should return empty array for empty tokens
         address[] memory outputTokens = parser.extractOutputTokens(MERKL_DISTRIBUTOR, data);

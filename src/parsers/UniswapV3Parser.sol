@@ -8,20 +8,23 @@ import {ICalldataParser} from "../interfaces/ICalldataParser.sol";
  * @notice Interface for querying position details from Uniswap V3 NonfungiblePositionManager
  */
 interface INonfungiblePositionManager {
-    function positions(uint256 tokenId) external view returns (
-        uint96 nonce,
-        address operator,
-        address token0,
-        address token1,
-        uint24 fee,
-        int24 tickLower,
-        int24 tickUpper,
-        uint128 liquidity,
-        uint256 feeGrowthInside0LastX128,
-        uint256 feeGrowthInside1LastX128,
-        uint128 tokensOwed0,
-        uint128 tokensOwed1
-    );
+    function positions(uint256 tokenId)
+        external
+        view
+        returns (
+            uint96 nonce,
+            address operator,
+            address token0,
+            address token1,
+            uint24 fee,
+            int24 tickLower,
+            int24 tickUpper,
+            uint128 liquidity,
+            uint256 feeGrowthInside0LastX128,
+            uint256 feeGrowthInside1LastX128,
+            uint128 tokensOwed0,
+            uint128 tokensOwed1
+        );
 }
 
 /**
@@ -47,16 +50,16 @@ contract UniswapV3Parser is ICalldataParser {
     // ============ SwapRouter Selectors ============
 
     // Uniswap V3 SwapRouter function selectors (with deadline in struct)
-    bytes4 public constant EXACT_INPUT_SINGLE_SELECTOR = 0x414bf389;  // exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))
-    bytes4 public constant EXACT_INPUT_SELECTOR = 0xc04b8d59;          // exactInput((bytes,address,uint256,uint256,uint256))
+    bytes4 public constant EXACT_INPUT_SINGLE_SELECTOR = 0x414bf389; // exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))
+    bytes4 public constant EXACT_INPUT_SELECTOR = 0xc04b8d59; // exactInput((bytes,address,uint256,uint256,uint256))
     bytes4 public constant EXACT_OUTPUT_SINGLE_SELECTOR = 0xdb3e2198; // exactOutputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))
-    bytes4 public constant EXACT_OUTPUT_SELECTOR = 0xf28c0498;         // exactOutput((bytes,address,uint256,uint256,uint256))
+    bytes4 public constant EXACT_OUTPUT_SELECTOR = 0xf28c0498; // exactOutput((bytes,address,uint256,uint256,uint256))
 
     // SwapRouter02 function selectors (no deadline in struct, handled via multicall)
-    bytes4 public constant EXACT_INPUT_SINGLE_02_SELECTOR = 0x04e45aaf;  // exactInputSingle((address,address,uint24,address,uint256,uint256,uint160))
-    bytes4 public constant EXACT_INPUT_02_SELECTOR = 0xb858183f;          // exactInput((bytes,address,uint256,uint256))
+    bytes4 public constant EXACT_INPUT_SINGLE_02_SELECTOR = 0x04e45aaf; // exactInputSingle((address,address,uint24,address,uint256,uint256,uint160))
+    bytes4 public constant EXACT_INPUT_02_SELECTOR = 0xb858183f; // exactInput((bytes,address,uint256,uint256))
     bytes4 public constant EXACT_OUTPUT_SINGLE_02_SELECTOR = 0x5023b4df; // exactOutputSingle((address,address,uint24,address,uint256,uint256,uint160))
-    bytes4 public constant EXACT_OUTPUT_02_SELECTOR = 0x09b81346;         // exactOutput((bytes,address,uint256,uint256))
+    bytes4 public constant EXACT_OUTPUT_02_SELECTOR = 0x09b81346; // exactOutput((bytes,address,uint256,uint256))
 
     // ============ NonfungiblePositionManager Selectors ============
 
@@ -70,14 +73,20 @@ contract UniswapV3Parser is ICalldataParser {
     bytes4 public constant COLLECT_SELECTOR = 0xfc6f7865;
 
     /// @inheritdoc ICalldataParser
-    function extractInputTokens(address target, bytes calldata data) external view override returns (address[] memory tokens) {
+    function extractInputTokens(address target, bytes calldata data)
+        external
+        view
+        override
+        returns (address[] memory tokens)
+    {
         if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         address token;
 
         // ============ SwapRouter Functions (single input token) ============
         if (selector == EXACT_INPUT_SINGLE_SELECTOR) {
-            (token,,,,,,,) = abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint256, uint160));
+            (token,,,,,,,) =
+                abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint256, uint160));
             tokens = new address[](1);
             tokens[0] = token;
             return tokens;
@@ -87,7 +96,8 @@ contract UniswapV3Parser is ICalldataParser {
             tokens[0] = token;
             return tokens;
         } else if (selector == EXACT_OUTPUT_SINGLE_SELECTOR) {
-            (token,,,,,,,) = abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint256, uint160));
+            (token,,,,,,,) =
+                abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint256, uint160));
             tokens = new address[](1);
             tokens[0] = token;
             return tokens;
@@ -137,7 +147,9 @@ contract UniswapV3Parser is ICalldataParser {
         else if (selector == MINT_SELECTOR) {
             // MintParams: (token0, token1, fee, tickLower, tickUpper, amount0Desired, amount1Desired, amount0Min, amount1Min, recipient, deadline)
             // Both tokens are inputs
-            (address token0, address token1,,,,,,,,,) = abi.decode(data[4:], (address, address, uint24, int24, int24, uint256, uint256, uint256, uint256, address, uint256));
+            (address token0, address token1,,,,,,,,,) = abi.decode(
+                data[4:], (address, address, uint24, int24, int24, uint256, uint256, uint256, uint256, address, uint256)
+            );
             tokens = new address[](2);
             tokens[0] = token0;
             tokens[1] = token1;
@@ -160,14 +172,20 @@ contract UniswapV3Parser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractInputAmounts(address, bytes calldata data) external pure override returns (uint256[] memory amounts) {
+    function extractInputAmounts(address, bytes calldata data)
+        external
+        pure
+        override
+        returns (uint256[] memory amounts)
+    {
         if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         uint256 amount;
 
         // ============ SwapRouter Functions (single input amount) ============
         if (selector == EXACT_INPUT_SINGLE_SELECTOR) {
-            (,,,,, amount,,) = abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint256, uint160));
+            (,,,,, amount,,) =
+                abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint256, uint160));
             amounts = new uint256[](1);
             amounts[0] = amount;
             return amounts;
@@ -187,7 +205,8 @@ contract UniswapV3Parser is ICalldataParser {
             amounts[0] = amount;
             return amounts;
         } else if (selector == EXACT_OUTPUT_SINGLE_SELECTOR) {
-            (,,,,,, amount,) = abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint256, uint160));
+            (,,,,,, amount,) =
+                abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint256, uint160));
             amounts = new uint256[](1);
             amounts[0] = amount;
             return amounts;
@@ -210,14 +229,17 @@ contract UniswapV3Parser is ICalldataParser {
         // ============ NonfungiblePositionManager Functions (dual input amounts) ============
         else if (selector == MINT_SELECTOR) {
             // MintParams: (token0, token1, fee, tickLower, tickUpper, amount0Desired, amount1Desired, amount0Min, amount1Min, recipient, deadline)
-            (,,,,, uint256 amount0Desired, uint256 amount1Desired,,,) = abi.decode(data[4:], (address, address, uint24, int24, int24, uint256, uint256, uint256, uint256, address));
+            (,,,,, uint256 amount0Desired, uint256 amount1Desired,,,) = abi.decode(
+                data[4:], (address, address, uint24, int24, int24, uint256, uint256, uint256, uint256, address)
+            );
             amounts = new uint256[](2);
             amounts[0] = amount0Desired;
             amounts[1] = amount1Desired;
             return amounts;
         } else if (selector == INCREASE_LIQUIDITY_SELECTOR) {
             // IncreaseLiquidityParams: (tokenId, amount0Desired, amount1Desired, amount0Min, amount1Min, deadline)
-            (, uint256 amount0Desired, uint256 amount1Desired,,,) = abi.decode(data[4:], (uint256, uint256, uint256, uint256, uint256, uint256));
+            (, uint256 amount0Desired, uint256 amount1Desired,,,) =
+                abi.decode(data[4:], (uint256, uint256, uint256, uint256, uint256, uint256));
             amounts = new uint256[](2);
             amounts[0] = amount0Desired;
             amounts[1] = amount1Desired;
@@ -231,7 +253,12 @@ contract UniswapV3Parser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractOutputTokens(address target, bytes calldata data) external view override returns (address[] memory tokens) {
+    function extractOutputTokens(address target, bytes calldata data)
+        external
+        view
+        override
+        returns (address[] memory tokens)
+    {
         if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         address token;
@@ -239,7 +266,8 @@ contract UniswapV3Parser is ICalldataParser {
         // ============ SwapRouter Functions ============
         if (selector == EXACT_INPUT_SINGLE_SELECTOR || selector == EXACT_OUTPUT_SINGLE_SELECTOR) {
             // tokenOut is second field (V1)
-            (, token,,,,,,) = abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint256, uint160));
+            (, token,,,,,,) =
+                abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint256, uint160));
             tokens = new address[](1);
             tokens[0] = token;
             return tokens;
@@ -318,14 +346,20 @@ contract UniswapV3Parser is ICalldataParser {
     }
 
     /// @inheritdoc ICalldataParser
-    function extractRecipient(address, bytes calldata data, address defaultRecipient) external pure override returns (address recipient) {
+    function extractRecipient(address, bytes calldata data, address defaultRecipient)
+        external
+        pure
+        override
+        returns (address recipient)
+    {
         if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
 
         // ============ SwapRouter Functions ============
         if (selector == EXACT_INPUT_SINGLE_SELECTOR || selector == EXACT_OUTPUT_SINGLE_SELECTOR) {
             // V1 Single: (tokenIn, tokenOut, fee, recipient, deadline, amountIn, amountOutMin, sqrtPriceLimitX96)
-            (,,, recipient,,,,) = abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint256, uint160));
+            (,,, recipient,,,,) =
+                abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint256, uint160));
         } else if (selector == EXACT_INPUT_SINGLE_02_SELECTOR || selector == EXACT_OUTPUT_SINGLE_02_SELECTOR) {
             // V2 Single (no deadline): (tokenIn, tokenOut, fee, recipient, amountIn, amountOutMin, sqrtPriceLimitX96)
             (,,, recipient,,,) = abi.decode(data[4:], (address, address, uint24, address, uint256, uint256, uint160));
@@ -339,7 +373,9 @@ contract UniswapV3Parser is ICalldataParser {
         // ============ NonfungiblePositionManager Functions ============
         else if (selector == MINT_SELECTOR) {
             // MintParams: (token0, token1, fee, tickLower, tickUpper, amount0Desired, amount1Desired, amount0Min, amount1Min, recipient, deadline)
-            (,,,,,,,,, recipient,) = abi.decode(data[4:], (address, address, uint24, int24, int24, uint256, uint256, uint256, uint256, address, uint256));
+            (,,,,,,,,, recipient,) = abi.decode(
+                data[4:], (address, address, uint24, int24, int24, uint256, uint256, uint256, uint256, address, uint256)
+            );
         } else if (selector == INCREASE_LIQUIDITY_SELECTOR || selector == DECREASE_LIQUIDITY_SELECTOR) {
             // These operate on existing positions owned by the caller
             // No explicit recipient - tokens go to/from msg.sender (Safe)
@@ -354,18 +390,12 @@ contract UniswapV3Parser is ICalldataParser {
 
     /// @inheritdoc ICalldataParser
     function supportsSelector(bytes4 selector) external pure override returns (bool) {
-        return selector == EXACT_INPUT_SINGLE_SELECTOR ||
-               selector == EXACT_INPUT_SELECTOR ||
-               selector == EXACT_OUTPUT_SINGLE_SELECTOR ||
-               selector == EXACT_OUTPUT_SELECTOR ||
-               selector == EXACT_INPUT_SINGLE_02_SELECTOR ||
-               selector == EXACT_INPUT_02_SELECTOR ||
-               selector == EXACT_OUTPUT_SINGLE_02_SELECTOR ||
-               selector == EXACT_OUTPUT_02_SELECTOR ||
-               selector == MINT_SELECTOR ||
-               selector == INCREASE_LIQUIDITY_SELECTOR ||
-               selector == DECREASE_LIQUIDITY_SELECTOR ||
-               selector == COLLECT_SELECTOR;
+        return selector == EXACT_INPUT_SINGLE_SELECTOR || selector == EXACT_INPUT_SELECTOR
+            || selector == EXACT_OUTPUT_SINGLE_SELECTOR || selector == EXACT_OUTPUT_SELECTOR
+            || selector == EXACT_INPUT_SINGLE_02_SELECTOR || selector == EXACT_INPUT_02_SELECTOR
+            || selector == EXACT_OUTPUT_SINGLE_02_SELECTOR || selector == EXACT_OUTPUT_02_SELECTOR
+            || selector == MINT_SELECTOR || selector == INCREASE_LIQUIDITY_SELECTOR
+            || selector == DECREASE_LIQUIDITY_SELECTOR || selector == COLLECT_SELECTOR;
     }
 
     /**
@@ -377,14 +407,12 @@ contract UniswapV3Parser is ICalldataParser {
         if (data.length < 4) revert InvalidCalldata();
         bytes4 selector = bytes4(data[:4]);
         // Swap operations
-        if (selector == EXACT_INPUT_SINGLE_SELECTOR ||
-            selector == EXACT_INPUT_SELECTOR ||
-            selector == EXACT_OUTPUT_SINGLE_SELECTOR ||
-            selector == EXACT_OUTPUT_SELECTOR ||
-            selector == EXACT_INPUT_SINGLE_02_SELECTOR ||
-            selector == EXACT_INPUT_02_SELECTOR ||
-            selector == EXACT_OUTPUT_SINGLE_02_SELECTOR ||
-            selector == EXACT_OUTPUT_02_SELECTOR) {
+        if (
+            selector == EXACT_INPUT_SINGLE_SELECTOR || selector == EXACT_INPUT_SELECTOR
+                || selector == EXACT_OUTPUT_SINGLE_SELECTOR || selector == EXACT_OUTPUT_SELECTOR
+                || selector == EXACT_INPUT_SINGLE_02_SELECTOR || selector == EXACT_INPUT_02_SELECTOR
+                || selector == EXACT_OUTPUT_SINGLE_02_SELECTOR || selector == EXACT_OUTPUT_02_SELECTOR
+        ) {
             return 1; // SWAP
         }
         // Deposit operations (adding liquidity)

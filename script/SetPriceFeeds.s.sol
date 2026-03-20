@@ -67,39 +67,59 @@ contract SetPriceFeeds is Script, SafeTxHelper {
         address[] memory feeds = new address[](19);
 
         // Native ETH (for swaps with value)
-        tokens[0] = address(0); feeds[0] = ETH_USD;
+        tokens[0] = address(0);
+        feeds[0] = ETH_USD;
 
         // Underlying tokens (8)
-        tokens[1] = WETH;      feeds[1] = ETH_USD;
-        tokens[2] = WBTC;      feeds[2] = BTC_USD;
-        tokens[3] = USDC;      feeds[3] = USDC_USD;
-        tokens[4] = DAI;       feeds[4] = DAI_USD;
-        tokens[5] = USDT;      feeds[5] = USDC_USD;  // Use USDC feed as proxy
-        tokens[6] = LINK;      feeds[6] = LINK_USD;
-        tokens[7] = AAVE;      feeds[7] = LINK_USD;  // Use LINK as proxy (similar price range on testnet)
-        tokens[8] = EURS;      feeds[8] = EUR_USD;
+        tokens[1] = WETH;
+        feeds[1] = ETH_USD;
+        tokens[2] = WBTC;
+        feeds[2] = BTC_USD;
+        tokens[3] = USDC;
+        feeds[3] = USDC_USD;
+        tokens[4] = DAI;
+        feeds[4] = DAI_USD;
+        tokens[5] = USDT; // Use USDC feed as proxy
+        feeds[5] = USDC_USD;
+        tokens[6] = LINK;
+        feeds[6] = LINK_USD;
+        tokens[7] = AAVE; // Use LINK as proxy (similar price range on testnet)
+        feeds[7] = LINK_USD;
+        tokens[8] = EURS;
+        feeds[8] = EUR_USD;
 
         // aTokens (8) - 1:1 with underlying, use same price feeds
-        tokens[9] = aWETH;     feeds[9] = ETH_USD;
-        tokens[10] = aWBTC;    feeds[10] = BTC_USD;
-        tokens[11] = aUSDC;    feeds[11] = USDC_USD;
-        tokens[12] = aDAI;     feeds[12] = DAI_USD;
-        tokens[13] = aUSDT;    feeds[13] = USDC_USD;
-        tokens[14] = aLINK;    feeds[14] = LINK_USD;
-        tokens[15] = aAAVE;    feeds[15] = LINK_USD;
-        tokens[16] = aEURS;    feeds[16] = EUR_USD;
+        tokens[9] = aWETH;
+        feeds[9] = ETH_USD;
+        tokens[10] = aWBTC;
+        feeds[10] = BTC_USD;
+        tokens[11] = aUSDC;
+        feeds[11] = USDC_USD;
+        tokens[12] = aDAI;
+        feeds[12] = DAI_USD;
+        tokens[13] = aUSDT;
+        feeds[13] = USDC_USD;
+        tokens[14] = aLINK;
+        feeds[14] = LINK_USD;
+        tokens[15] = aAAVE;
+        feeds[15] = LINK_USD;
+        tokens[16] = aEURS;
+        feeds[16] = EUR_USD;
 
         // Other tokens (2)
-        tokens[17] = USDC_CIRCLE; feeds[17] = USDC_USD;
-        tokens[18] = EURC;        feeds[18] = EUR_USD;
+        tokens[17] = USDC_CIRCLE;
+        feeds[17] = USDC_USD;
+        tokens[18] = EURC;
+        feeds[18] = EUR_USD;
 
         vm.startBroadcast(deployerPrivateKey);
 
-        _executeSafeTx(safe, module, abi.encodeWithSignature(
-            "setTokenPriceFeeds(address[],address[])",
-            tokens,
-            feeds
-        ), deployerPrivateKey);
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("setTokenPriceFeeds(address[],address[])", tokens, feeds),
+            deployerPrivateKey
+        );
 
         vm.stopBroadcast();
 

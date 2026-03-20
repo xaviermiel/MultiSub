@@ -12,8 +12,9 @@ abstract contract SafeTxHelper {
     bytes32 private constant DOMAIN_SEPARATOR_TYPEHASH =
         keccak256("EIP712Domain(uint256 chainId,address verifyingContract)");
 
-    bytes32 private constant SAFE_TX_TYPEHASH =
-        keccak256("SafeTx(address to,uint256 value,bytes data,uint8 operation,uint256 safeTxGas,uint256 baseGas,uint256 gasPrice,address gasToken,address refundReceiver,uint256 nonce)");
+    bytes32 private constant SAFE_TX_TYPEHASH = keccak256(
+        "SafeTx(address to,uint256 value,bytes data,uint8 operation,uint256 safeTxGas,uint256 baseGas,uint256 gasPrice,address gasToken,address refundReceiver,uint256 nonce)"
+    );
 
     Vm private constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
 
@@ -29,7 +30,16 @@ abstract contract SafeTxHelper {
         (bool execSuccess, bytes memory execResult) = safe.call(
             abi.encodeWithSignature(
                 "execTransaction(address,uint256,bytes,uint8,uint256,uint256,uint256,address,address,bytes)",
-                to, 0, data, uint8(0), 0, 0, 0, address(0), payable(address(0)), signature
+                to,
+                0,
+                data,
+                uint8(0),
+                0,
+                0,
+                0,
+                address(0),
+                payable(address(0)),
+                signature
             )
         );
         require(execSuccess, "execTransaction call failed");
@@ -37,15 +47,34 @@ abstract contract SafeTxHelper {
     }
 
     function _getSafeTxHash(
-        address safe, address to, uint256 value, bytes memory data,
-        uint8 operation, uint256 safeTxGas, uint256 baseGas, uint256 gasPrice,
-        address gasToken, address refundReceiver, uint256 nonce
+        address safe,
+        address to,
+        uint256 value,
+        bytes memory data,
+        uint8 operation,
+        uint256 safeTxGas,
+        uint256 baseGas,
+        uint256 gasPrice,
+        address gasToken,
+        address refundReceiver,
+        uint256 nonce
     ) internal view returns (bytes32) {
         bytes32 domainSeparator = keccak256(abi.encode(DOMAIN_SEPARATOR_TYPEHASH, block.chainid, safe));
-        bytes32 safeTxHash = keccak256(abi.encode(
-            SAFE_TX_TYPEHASH, to, value, keccak256(data), operation,
-            safeTxGas, baseGas, gasPrice, gasToken, refundReceiver, nonce
-        ));
+        bytes32 safeTxHash = keccak256(
+            abi.encode(
+                SAFE_TX_TYPEHASH,
+                to,
+                value,
+                keccak256(data),
+                operation,
+                safeTxGas,
+                baseGas,
+                gasPrice,
+                gasToken,
+                refundReceiver,
+                nonce
+            )
+        );
         return keccak256(abi.encodePacked(bytes1(0x19), bytes1(0x01), domainSeparator, safeTxHash));
     }
 }

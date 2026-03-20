@@ -84,20 +84,29 @@ contract UpdateParser is Script, SafeTxHelper {
         console.log("Deployed at:", address(parser));
 
         console.log("Registering for Aave V3 Pool...");
-        _executeSafeTx(safe, module, abi.encodeWithSignature(
-            "registerParser(address,address)", AAVE_V3_POOL, address(parser)
-        ), deployerPrivateKey);
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerParser(address,address)", AAVE_V3_POOL, address(parser)),
+            deployerPrivateKey
+        );
 
         console.log("Registering for Aave V3 Rewards...");
-        _executeSafeTx(safe, module, abi.encodeWithSignature(
-            "registerParser(address,address)", AAVE_V3_REWARDS, address(parser)
-        ), deployerPrivateKey);
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerParser(address,address)", AAVE_V3_REWARDS, address(parser)),
+            deployerPrivateKey
+        );
 
         if (extraProtocol != address(0)) {
             console.log("Registering for extra protocol:", extraProtocol);
-            _executeSafeTx(safe, module, abi.encodeWithSignature(
-                "registerParser(address,address)", extraProtocol, address(parser)
-            ), deployerPrivateKey);
+            _executeSafeTx(
+                safe,
+                module,
+                abi.encodeWithSignature("registerParser(address,address)", extraProtocol, address(parser)),
+                deployerPrivateKey
+            );
         }
 
         console.log("\n=== AaveV3Parser Updated ===");
@@ -110,20 +119,29 @@ contract UpdateParser is Script, SafeTxHelper {
         console.log("Deployed at:", address(parser));
 
         console.log("Registering for Uniswap V3 Router...");
-        _executeSafeTx(safe, module, abi.encodeWithSignature(
-            "registerParser(address,address)", UNISWAP_V3_ROUTER, address(parser)
-        ), deployerPrivateKey);
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerParser(address,address)", UNISWAP_V3_ROUTER, address(parser)),
+            deployerPrivateKey
+        );
 
         console.log("Registering for NonfungiblePositionManager...");
-        _executeSafeTx(safe, module, abi.encodeWithSignature(
-            "registerParser(address,address)", NONFUNGIBLE_POSITION_MANAGER, address(parser)
-        ), deployerPrivateKey);
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerParser(address,address)", NONFUNGIBLE_POSITION_MANAGER, address(parser)),
+            deployerPrivateKey
+        );
 
         if (extraProtocol != address(0)) {
             console.log("Registering for extra protocol:", extraProtocol);
-            _executeSafeTx(safe, module, abi.encodeWithSignature(
-                "registerParser(address,address)", extraProtocol, address(parser)
-            ), deployerPrivateKey);
+            _executeSafeTx(
+                safe,
+                module,
+                abi.encodeWithSignature("registerParser(address,address)", extraProtocol, address(parser)),
+                deployerPrivateKey
+            );
         }
 
         console.log("\n=== UniswapV3Parser Updated ===");
@@ -136,15 +154,21 @@ contract UpdateParser is Script, SafeTxHelper {
         console.log("Deployed at:", address(parser));
 
         console.log("Registering for Uniswap V4 PositionManager...");
-        _executeSafeTx(safe, module, abi.encodeWithSignature(
-            "registerParser(address,address)", UNISWAP_V4_POSITION_MANAGER, address(parser)
-        ), deployerPrivateKey);
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerParser(address,address)", UNISWAP_V4_POSITION_MANAGER, address(parser)),
+            deployerPrivateKey
+        );
 
         if (extraProtocol != address(0)) {
             console.log("Registering for extra protocol:", extraProtocol);
-            _executeSafeTx(safe, module, abi.encodeWithSignature(
-                "registerParser(address,address)", extraProtocol, address(parser)
-            ), deployerPrivateKey);
+            _executeSafeTx(
+                safe,
+                module,
+                abi.encodeWithSignature("registerParser(address,address)", extraProtocol, address(parser)),
+                deployerPrivateKey
+            );
         }
 
         console.log("\n=== UniswapV4Parser Updated ===");
@@ -157,25 +181,37 @@ contract UpdateParser is Script, SafeTxHelper {
         console.log("Deployed at:", address(parser));
 
         console.log("Registering for Universal Router...");
-        _executeSafeTx(safe, module, abi.encodeWithSignature(
-            "registerParser(address,address)", UNIVERSAL_ROUTER, address(parser)
-        ), deployerPrivateKey);
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerParser(address,address)", UNIVERSAL_ROUTER, address(parser)),
+            deployerPrivateKey
+        );
 
         console.log("Registering for PancakeSwap Universal Router...");
-        _executeSafeTx(safe, module, abi.encodeWithSignature(
-            "registerParser(address,address)", PANCAKESWAP_UNIVERSAL_ROUTER, address(parser)
-        ), deployerPrivateKey);
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerParser(address,address)", PANCAKESWAP_UNIVERSAL_ROUTER, address(parser)),
+            deployerPrivateKey
+        );
 
         console.log("Registering for Uniswap Universal Router V2...");
-        _executeSafeTx(safe, module, abi.encodeWithSignature(
-            "registerParser(address,address)", UNISWAP_UNIVERSAL_ROUTER_V2, address(parser)
-        ), deployerPrivateKey);
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerParser(address,address)", UNISWAP_UNIVERSAL_ROUTER_V2, address(parser)),
+            deployerPrivateKey
+        );
 
         if (extraProtocol != address(0)) {
             console.log("Registering for extra protocol:", extraProtocol);
-            _executeSafeTx(safe, module, abi.encodeWithSignature(
-                "registerParser(address,address)", extraProtocol, address(parser)
-            ), deployerPrivateKey);
+            _executeSafeTx(
+                safe,
+                module,
+                abi.encodeWithSignature("registerParser(address,address)", extraProtocol, address(parser)),
+                deployerPrivateKey
+            );
         }
 
         console.log("\n=== UniversalRouterParser Updated ===");
@@ -189,9 +225,12 @@ contract UpdateParser is Script, SafeTxHelper {
 
         if (extraProtocol != address(0)) {
             console.log("Registering for Morpho vault:", extraProtocol);
-            _executeSafeTx(safe, module, abi.encodeWithSignature(
-                "registerParser(address,address)", extraProtocol, address(parser)
-            ), deployerPrivateKey);
+            _executeSafeTx(
+                safe,
+                module,
+                abi.encodeWithSignature("registerParser(address,address)", extraProtocol, address(parser)),
+                deployerPrivateKey
+            );
         } else {
             console.log("Note: Specify PROTOCOL_ADDRESS to register for a specific vault");
         }
@@ -206,15 +245,21 @@ contract UpdateParser is Script, SafeTxHelper {
         console.log("Deployed at:", address(parser));
 
         console.log("Registering for Merkl Distributor...");
-        _executeSafeTx(safe, module, abi.encodeWithSignature(
-            "registerParser(address,address)", MERKL_DISTRIBUTOR, address(parser)
-        ), deployerPrivateKey);
+        _executeSafeTx(
+            safe,
+            module,
+            abi.encodeWithSignature("registerParser(address,address)", MERKL_DISTRIBUTOR, address(parser)),
+            deployerPrivateKey
+        );
 
         if (extraProtocol != address(0)) {
             console.log("Registering for extra protocol:", extraProtocol);
-            _executeSafeTx(safe, module, abi.encodeWithSignature(
-                "registerParser(address,address)", extraProtocol, address(parser)
-            ), deployerPrivateKey);
+            _executeSafeTx(
+                safe,
+                module,
+                abi.encodeWithSignature("registerParser(address,address)", extraProtocol, address(parser)),
+                deployerPrivateKey
+            );
         }
 
         console.log("\n=== MerklParser Updated ===");
