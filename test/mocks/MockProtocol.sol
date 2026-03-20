@@ -15,4 +15,8 @@ contract MockProtocol {
     function withdraw(uint256 amount, address) external {
         emit ProtocolCalled(msg.sender, amount);
     }
+
+    function swap(uint256 amount, address) external {
+        emit ProtocolCalled(msg.sender, amount);
+    }
 }

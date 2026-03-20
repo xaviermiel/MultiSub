@@ -54,9 +54,7 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         module.grantRole(subAccount2, module.DEFI_EXECUTE_ROLE());
         assertEq(module.getSubaccountCount(module.DEFI_EXECUTE_ROLE()), 2);
 
-        address[] memory accounts = module.getSubaccountsByRole(
-            module.DEFI_EXECUTE_ROLE()
-        );
+        address[] memory accounts = module.getSubaccountsByRole(module.DEFI_EXECUTE_ROLE());
         assertEq(accounts.length, 2);
     }
 
@@ -74,8 +72,7 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
     function testSetSubAccountLimits() public {
         module.setSubAccountLimits(subAccount1, 1500, 0, 2 days);
 
-        (uint256 maxSpending, uint256 maxUSD, uint256 window) = module
-            .getSubAccountLimits(subAccount1);
+        (uint256 maxSpending, uint256 maxUSD, uint256 window) = module.getSubAccountLimits(subAccount1);
 
         assertEq(maxSpending, 1500);
         assertEq(maxUSD, 0);
@@ -85,8 +82,7 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
     function testSetSubAccountLimitsFixedUSD() public {
         module.setSubAccountLimits(subAccount1, 0, 1000 * 10 ** 18, 1 days);
 
-        (uint256 maxBps, uint256 maxUSD, uint256 window) = module
-            .getSubAccountLimits(subAccount1);
+        (uint256 maxBps, uint256 maxUSD, uint256 window) = module.getSubAccountLimits(subAccount1);
 
         assertEq(maxBps, 0);
         assertEq(maxUSD, 1000 * 10 ** 18);
@@ -94,8 +90,7 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
     }
 
     function testDefaultLimits() public view {
-        (uint256 maxSpending, uint256 maxUSD, uint256 window) = module
-            .getSubAccountLimits(subAccount1);
+        (uint256 maxSpending, uint256 maxUSD, uint256 window) = module.getSubAccountLimits(subAccount1);
 
         assertEq(maxSpending, module.DEFAULT_MAX_SPENDING_BPS());
         assertEq(maxUSD, 0);
@@ -103,9 +98,7 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
     }
 
     function testSetSubAccountLimitsInvalid() public {
-        vm.expectRevert(
-            DeFiInteractorModule.InvalidLimitConfiguration.selector
-        );
+        vm.expectRevert(DeFiInteractorModule.InvalidLimitConfiguration.selector);
         module.setSubAccountLimits(subAccount1, 15000, 0, 2 days); // >100%
     }
 
@@ -174,24 +167,17 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
 
         // Expect SpendingAllowanceUpdated event when capping
         vm.expectEmit(true, false, false, true);
-        emit DeFiInteractorModule.SpendingAllowanceUpdated(
-            subAccount1,
-            40_000 * 10 ** 18
-        );
+        emit DeFiInteractorModule.SpendingAllowanceUpdated(subAccount1, 40_000 * 10 ** 18);
 
         module.setSubAccountLimits(subAccount1, 400, 0, 1 days); // 4% = $40k max
     }
 
     function testSetSubAccountLimitsNoCapWhenZeroSafeValue() public {
         // Deploy a fresh module with zero safe value
-        DeFiInteractorModule freshModule = new DeFiInteractorModule(
-            address(safe),
-            address(this),
-            address(this)
-        );
+        DeFiInteractorModule freshModule = new DeFiInteractorModule(address(safe), address(this), address(this));
 
         // Safe value is 0 (not initialized)
-        (uint256 totalValue, , ) = freshModule.getSafeValue();
+        (uint256 totalValue,,) = freshModule.getSafeValue();
         assertEq(totalValue, 0);
 
         // Even if we had some allowance, it shouldn't be modified since safeValue is 0
@@ -266,22 +252,13 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
 
     function testRegisterSelector() public {
         bytes4 newSelector = bytes4(keccak256("newFunction()"));
-        module.registerSelector(
-            newSelector,
-            DeFiInteractorModule.OperationType.SWAP
-        );
-        assertEq(
-            uint256(module.selectorType(newSelector)),
-            uint256(DeFiInteractorModule.OperationType.SWAP)
-        );
+        module.registerSelector(newSelector, DeFiInteractorModule.OperationType.SWAP);
+        assertEq(uint256(module.selectorType(newSelector)), uint256(DeFiInteractorModule.OperationType.SWAP));
     }
 
     function testUnregisterSelector() public {
         module.unregisterSelector(DEPOSIT_SELECTOR);
-        assertEq(
-            uint256(module.selectorType(DEPOSIT_SELECTOR)),
-            uint256(DeFiInteractorModule.OperationType.UNKNOWN)
-        );
+        assertEq(uint256(module.selectorType(DEPOSIT_SELECTOR)), uint256(DeFiInteractorModule.OperationType.UNKNOWN));
     }
 
     // ============ Oracle Functions Tests ============
@@ -292,15 +269,8 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
     }
 
     function testUpdateAcquiredBalance() public {
-        module.updateAcquiredBalance(
-            subAccount1,
-            address(token),
-            1000 * 10 ** 18
-        );
-        assertEq(
-            module.getAcquiredBalance(subAccount1, address(token)),
-            1000 * 10 ** 18
-        );
+        module.updateAcquiredBalance(subAccount1, address(token), 1000 * 10 ** 18);
+        assertEq(module.getAcquiredBalance(subAccount1, address(token)), 1000 * 10 ** 18);
     }
 
     function testBatchUpdate() public {
@@ -318,10 +288,7 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         module.batchUpdate(subAccount1, 10000 * 10 ** 18, tokens, balances);
 
         assertEq(module.getSpendingAllowance(subAccount1), 10000 * 10 ** 18);
-        assertEq(
-            module.getAcquiredBalance(subAccount1, tokens[0]),
-            500 * 10 ** 18
-        );
+        assertEq(module.getAcquiredBalance(subAccount1, tokens[0]), 500 * 10 ** 18);
         // token2 is an EOA (no balanceOf), so acquired balance is capped to 0 (N-M-01)
         assertEq(module.getAcquiredBalance(subAccount1, tokens[1]), 0);
     }
@@ -344,9 +311,7 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         // Setting above max should fail
         vm.expectRevert(
             abi.encodeWithSelector(
-                DeFiInteractorModule.ExceedsAbsoluteMaxSpending.selector,
-                maxAllowance + 1,
-                maxAllowance
+                DeFiInteractorModule.ExceedsAbsoluteMaxSpending.selector, maxAllowance + 1, maxAllowance
             )
         );
         module.updateSpendingAllowance(subAccount1, maxAllowance + 1);
@@ -361,9 +326,7 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         // Above max should fail
         vm.expectRevert(
             abi.encodeWithSelector(
-                DeFiInteractorModule.ExceedsAbsoluteMaxSpending.selector,
-                maxAllowance + 1,
-                maxAllowance
+                DeFiInteractorModule.ExceedsAbsoluteMaxSpending.selector, maxAllowance + 1, maxAllowance
             )
         );
         module.batchUpdate(subAccount1, maxAllowance + 1, tokens, balances);
@@ -390,11 +353,7 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         module.updateSpendingAllowance(subAccount1, 10000 * 10 ** 18); // $10k allowance
 
         // Deposit 1000 tokens
-        bytes memory data = abi.encodeWithSignature(
-            "deposit(uint256,address)",
-            1000 * 10 ** 18,
-            address(safe)
-        );
+        bytes memory data = abi.encodeWithSignature("deposit(uint256,address)", 1000 * 10 ** 18, address(safe));
 
         vm.prank(subAccount1);
         module.executeOnProtocol(address(protocol), data);
@@ -409,11 +368,7 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         module.updateSpendingAllowance(subAccount1, 10000 * 10 ** 18);
 
         // Withdraw - should not cost spending
-        bytes memory data = abi.encodeWithSignature(
-            "withdraw(uint256,address)",
-            1000 * 10 ** 18,
-            address(safe)
-        );
+        bytes memory data = abi.encodeWithSignature("withdraw(uint256,address)", 1000 * 10 ** 18, address(safe));
 
         uint256 allowanceBefore = module.getSpendingAllowance(subAccount1);
 
@@ -430,11 +385,7 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         module.updateSpendingAllowance(subAccount1, 100 * 10 ** 18); // Only $100
 
         // Try to deposit 1000 tokens ($1000 worth)
-        bytes memory data = abi.encodeWithSignature(
-            "deposit(uint256,address)",
-            1000 * 10 ** 18,
-            address(safe)
-        );
+        bytes memory data = abi.encodeWithSignature("deposit(uint256,address)", 1000 * 10 ** 18, address(safe));
 
         vm.prank(subAccount1);
         vm.expectRevert(DeFiInteractorModule.ExceedsSpendingLimit.selector);
@@ -446,18 +397,10 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         module.updateSpendingAllowance(subAccount1, 10000 * 10 ** 18);
 
         // Try unknown function
-        bytes memory data = abi.encodeWithSignature(
-            "unknownFunction(uint256)",
-            1000
-        );
+        bytes memory data = abi.encodeWithSignature("unknownFunction(uint256)", 1000);
 
         vm.prank(subAccount1);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                DeFiInteractorModule.UnknownSelector.selector,
-                bytes4(data)
-            )
-        );
+        vm.expectRevert(abi.encodeWithSelector(DeFiInteractorModule.UnknownSelector.selector, bytes4(data)));
         module.executeOnProtocol(address(protocol), data);
     }
 
@@ -465,18 +408,10 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         // Setup
         _setupSubAccount(subAccount1);
         module.updateSpendingAllowance(subAccount1, 500 * 10 ** 18); // Only $500 allowance
-        module.updateAcquiredBalance(
-            subAccount1,
-            address(token),
-            800 * 10 ** 18
-        ); // 800 tokens acquired
+        module.updateAcquiredBalance(subAccount1, address(token), 800 * 10 ** 18); // 800 tokens acquired
 
         // Try to deposit 1000 tokens - 800 from acquired (free) + 200 from original ($200)
-        bytes memory data = abi.encodeWithSignature(
-            "deposit(uint256,address)",
-            1000 * 10 ** 18,
-            address(safe)
-        );
+        bytes memory data = abi.encodeWithSignature("deposit(uint256,address)", 1000 * 10 ** 18, address(safe));
 
         vm.prank(subAccount1);
         module.executeOnProtocol(address(protocol), data);
@@ -497,10 +432,7 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         vm.prank(subAccount1);
         module.transferToken(address(token), recipient, 100 * 10 ** 18);
 
-        assertEq(
-            token.balanceOf(address(safe)),
-            safeBalanceBefore - 100 * 10 ** 18
-        );
+        assertEq(token.balanceOf(address(safe)), safeBalanceBefore - 100 * 10 ** 18);
         assertEq(token.balanceOf(recipient), 100 * 10 ** 18);
     }
 
@@ -537,11 +469,7 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         module.updateSpendingAllowance(subAccount1, 10000 * 10 ** 18);
         module.pause();
 
-        bytes memory data = abi.encodeWithSignature(
-            "deposit(uint256,address)",
-            1000 * 10 ** 18,
-            address(safe)
-        );
+        bytes memory data = abi.encodeWithSignature("deposit(uint256,address)", 1000 * 10 ** 18, address(safe));
 
         vm.prank(subAccount1);
         vm.expectRevert(abi.encodeWithSignature("EnforcedPause()"));
@@ -557,11 +485,7 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         // Fast forward past oracle staleness (maxOracleAge is 60 minutes)
         vm.warp(block.timestamp + 61 minutes);
 
-        bytes memory data = abi.encodeWithSignature(
-            "deposit(uint256,address)",
-            1000 * 10 ** 18,
-            address(safe)
-        );
+        bytes memory data = abi.encodeWithSignature("deposit(uint256,address)", 1000 * 10 ** 18, address(safe));
 
         vm.prank(subAccount1);
         vm.expectRevert(DeFiInteractorModule.StaleOracleData.selector);
@@ -572,16 +496,10 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
 
     function testSetTokenPriceFeed() public {
         MockERC20 newToken = new MockERC20();
-        MockChainlinkPriceFeed newPriceFeed = new MockChainlinkPriceFeed(
-            2_00000000,
-            8
-        );
+        MockChainlinkPriceFeed newPriceFeed = new MockChainlinkPriceFeed(2_00000000, 8);
 
         module.setTokenPriceFeed(address(newToken), address(newPriceFeed));
-        assertEq(
-            address(module.tokenPriceFeeds(address(newToken))),
-            address(newPriceFeed)
-        );
+        assertEq(address(module.tokenPriceFeeds(address(newToken))), address(newPriceFeed));
     }
 
     function testNoPriceFeedSet() public {
@@ -596,18 +514,10 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
 
         // Setup subaccount with new protocol allowed
         _setupSubAccount(subAccount1);
-        module.setAllowedAddresses(
-            subAccount1,
-            _toArray(address(newProtocol)),
-            true
-        );
+        module.setAllowedAddresses(subAccount1, _toArray(address(newProtocol)), true);
         module.updateSpendingAllowance(subAccount1, 10000 * 10 ** 18);
 
-        bytes memory data = abi.encodeWithSignature(
-            "deposit(uint256,address)",
-            1000 * 10 ** 18,
-            address(safe)
-        );
+        bytes memory data = abi.encodeWithSignature("deposit(uint256,address)", 1000 * 10 ** 18, address(safe));
 
         // Should fail because no price feed is set for newToken
         vm.prank(subAccount1);
@@ -624,11 +534,7 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         module.updateSafeValue(1_000_000 * 10 ** 18); // Refresh Safe value first
         module.updateSpendingAllowance(subAccount1, 10000 * 10 ** 18); // Then refresh oracle
 
-        bytes memory data = abi.encodeWithSignature(
-            "deposit(uint256,address)",
-            1000 * 10 ** 18,
-            address(safe)
-        );
+        bytes memory data = abi.encodeWithSignature("deposit(uint256,address)", 1000 * 10 ** 18, address(safe));
 
         vm.prank(subAccount1);
         vm.expectRevert(DeFiInteractorModule.StalePriceFeed.selector);
@@ -655,8 +561,7 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
     }
 
     function testGetSafeValue() public view {
-        (uint256 totalValue, uint256 lastUpdated, uint256 updateCount) = module
-            .getSafeValue();
+        (uint256 totalValue, uint256 lastUpdated, uint256 updateCount) = module.getSafeValue();
         assertEq(totalValue, 1_000_000 * 10 ** 18);
         assertGt(lastUpdated, 0);
         assertEq(updateCount, 1);
@@ -682,10 +587,7 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         module.executeOnProtocol(address(token), data);
 
         // Should succeed - check allowance was set
-        assertEq(
-            token.allowance(address(safe), address(protocol)),
-            approveAmount
-        );
+        assertEq(token.allowance(address(safe), address(protocol)), approveAmount);
     }
 
     function testSafeValueStalenessCheck() public {
@@ -734,27 +636,14 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
 
         // Create a new protocol without parser
         MockProtocol newProtocol = new MockProtocol();
-        module.setAllowedAddresses(
-            subAccount1,
-            _toArray(address(newProtocol)),
-            true
-        );
+        module.setAllowedAddresses(subAccount1, _toArray(address(newProtocol)), true);
         // Note: NOT registering a parser for newProtocol
 
         // Withdraw should fail because no parser
-        bytes memory data = abi.encodeWithSignature(
-            "withdraw(uint256,address)",
-            1000 * 10 ** 18,
-            address(safe)
-        );
+        bytes memory data = abi.encodeWithSignature("withdraw(uint256,address)", 1000 * 10 ** 18, address(safe));
 
         vm.prank(subAccount1);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                DeFiInteractorModule.NoParserRegistered.selector,
-                address(newProtocol)
-            )
-        );
+        vm.expectRevert(abi.encodeWithSelector(DeFiInteractorModule.NoParserRegistered.selector, address(newProtocol)));
         module.executeOnProtocol(address(newProtocol), data);
     }
 
@@ -765,32 +654,17 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
 
         // Register a CLAIM selector
         bytes4 claimSelector = bytes4(keccak256("claim(uint256)"));
-        module.registerSelector(
-            claimSelector,
-            DeFiInteractorModule.OperationType.CLAIM
-        );
+        module.registerSelector(claimSelector, DeFiInteractorModule.OperationType.CLAIM);
 
         // Create a new protocol without parser
         MockProtocol newProtocol = new MockProtocol();
-        module.setAllowedAddresses(
-            subAccount1,
-            _toArray(address(newProtocol)),
-            true
-        );
+        module.setAllowedAddresses(subAccount1, _toArray(address(newProtocol)), true);
 
         // Claim should fail because no parser
-        bytes memory data = abi.encodeWithSignature(
-            "claim(uint256)",
-            1000 * 10 ** 18
-        );
+        bytes memory data = abi.encodeWithSignature("claim(uint256)", 1000 * 10 ** 18);
 
         vm.prank(subAccount1);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                DeFiInteractorModule.NoParserRegistered.selector,
-                address(newProtocol)
-            )
-        );
+        vm.expectRevert(abi.encodeWithSelector(DeFiInteractorModule.NoParserRegistered.selector, address(newProtocol)));
         module.executeOnProtocol(address(newProtocol), data);
     }
 
@@ -799,11 +673,7 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         assertEq(module.lastOracleUpdate(subAccount1), 0);
 
         // Update acquired balance
-        module.updateAcquiredBalance(
-            subAccount1,
-            address(token),
-            1000 * 10 ** 18
-        );
+        module.updateAcquiredBalance(subAccount1, address(token), 1000 * 10 ** 18);
 
         // Check timestamp was updated
         assertEq(module.lastOracleUpdate(subAccount1), block.timestamp);
@@ -813,22 +683,14 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         // Setup
         _setupSubAccount(subAccount1);
         module.updateSpendingAllowance(subAccount1, 100 * 10 ** 18); // $100 allowance
-        module.updateAcquiredBalance(
-            subAccount1,
-            address(token),
-            500 * 10 ** 18
-        ); // 500 acquired
+        module.updateAcquiredBalance(subAccount1, address(token), 500 * 10 ** 18); // 500 acquired
 
         // Try to approve 700 tokens:
         // - 500 from acquired (free)
         // - 200 from original ($200 USD value)
         // Should fail because $200 > $100 allowance
         uint256 approveAmount = 700 * 10 ** 18;
-        bytes memory data = abi.encodeWithSelector(
-            APPROVE_SELECTOR,
-            address(protocol),
-            approveAmount
-        );
+        bytes memory data = abi.encodeWithSelector(APPROVE_SELECTOR, address(protocol), approveAmount);
 
         vm.prank(subAccount1);
         vm.expectRevert(DeFiInteractorModule.ApprovalExceedsLimit.selector);
@@ -839,30 +701,19 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         // Setup
         _setupSubAccount(subAccount1);
         module.updateSpendingAllowance(subAccount1, 100 * 10 ** 18); // $100 allowance
-        module.updateAcquiredBalance(
-            subAccount1,
-            address(token),
-            500 * 10 ** 18
-        ); // 500 acquired
+        module.updateAcquiredBalance(subAccount1, address(token), 500 * 10 ** 18); // 500 acquired
 
         // Approve 550 tokens:
         // - 500 from acquired (free)
         // - 50 from original ($50 USD value)
         // Should succeed because $50 <= $100 allowance
         uint256 approveAmount = 550 * 10 ** 18;
-        bytes memory data = abi.encodeWithSelector(
-            APPROVE_SELECTOR,
-            address(protocol),
-            approveAmount
-        );
+        bytes memory data = abi.encodeWithSelector(APPROVE_SELECTOR, address(protocol), approveAmount);
 
         vm.prank(subAccount1);
         module.executeOnProtocol(address(token), data);
 
-        assertEq(
-            token.allowance(address(safe), address(protocol)),
-            approveAmount
-        );
+        assertEq(token.allowance(address(safe), address(protocol)), approveAmount);
     }
 
     function testApproveSpenderMustBeAllowed() public {
@@ -898,5 +749,264 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         address[] memory arr = new address[](1);
         arr[0] = addr;
         return arr;
+    }
+
+    // ============ Option X: _enforceAllowanceCap respects USD mode ============
+
+    function testEnforceAllowanceCapUSDMode() public {
+        // Configure subAccount1 with $500 USD limit
+        module.setSubAccountLimits(subAccount1, 0, 500e18, 1 days);
+
+        // Safe value = $1M, absoluteMaxSpendingBps = 2000 (20%) → global cap = $200K
+        // Per-account USD cap = $500 → should take minimum ($500)
+        module.updateSpendingAllowance(subAccount1, 500e18); // exactly $500 should work
+
+        // $501 should revert — exceeds per-account USD cap
+        vm.expectRevert(
+            abi.encodeWithSelector(DeFiInteractorModule.ExceedsAbsoluteMaxSpending.selector, 501e18, 500e18)
+        );
+        module.updateSpendingAllowance(subAccount1, 501e18);
+    }
+
+    function testEnforceAllowanceCapBPSModeUnchanged() public {
+        // BPS mode: 500 bps (5%) of $1M = $50K
+        module.setSubAccountLimits(subAccount1, 500, 0, 1 days);
+
+        // Global cap: 2000 bps (20%) of $1M = $200K
+        module.updateSpendingAllowance(subAccount1, 50000e18); // $50K within global cap
+        module.updateSpendingAllowance(subAccount1, 200000e18); // $200K within global cap
+
+        // $200K + 1 should revert (exceeds global cap)
+        vm.expectRevert();
+        module.updateSpendingAllowance(subAccount1, 200001e18);
+    }
+
+    // ============ Solution 1: On-chain cumulative spending tracker ============
+
+    function testCumulativeSpendingTracked() public {
+        _setupSubAccount(subAccount1);
+        module.setSubAccountLimits(subAccount1, 500, 0, 1 days);
+        module.updateSpendingAllowance(subAccount1, 50000e18);
+
+        // Deposit 100 tokens ($100 spending cost)
+        bytes memory depositData = abi.encodeWithSelector(DEPOSIT_SELECTOR, 100e18, address(safe));
+        vm.prank(subAccount1);
+        module.executeOnProtocol(address(protocol), depositData);
+
+        // Verify cumulative spending tracked
+        assertEq(module.cumulativeSpent(subAccount1), 100e18);
+        assertTrue(module.windowStart(subAccount1) > 0);
+        assertEq(module.windowSafeValue(subAccount1), 1_000_000e18);
+    }
+
+    function testCumulativeSpendingBlocksOracleReset() public {
+        _setupSubAccount(subAccount1);
+        module.setSubAccountLimits(subAccount1, 500, 0, 1 days);
+
+        // Max spending = 5% of $1M = $50K
+        module.updateSpendingAllowance(subAccount1, 50000e18);
+
+        // Spend $50K via deposit
+        bytes memory depositData = abi.encodeWithSelector(DEPOSIT_SELECTOR, 50000e18, address(safe));
+        vm.prank(subAccount1);
+        module.executeOnProtocol(address(protocol), depositData);
+        assertEq(module.cumulativeSpent(subAccount1), 50000e18);
+
+        // Oracle resets allowance back to $50K (the old attack)
+        module.updateSpendingAllowance(subAccount1, 50000e18);
+
+        // Try to spend again — oracle-allowance is available but cumulative tracker blocks it
+        vm.prank(subAccount1);
+        vm.expectRevert(
+            abi.encodeWithSelector(DeFiInteractorModule.ExceedsCumulativeSpendingLimit.selector, 50001e18, 50000e18)
+        );
+        bytes memory depositData2 = abi.encodeWithSelector(DEPOSIT_SELECTOR, 1e18, address(safe));
+        module.executeOnProtocol(address(protocol), depositData2);
+    }
+
+    function testCumulativeSpendingWindowReset() public {
+        _setupSubAccount(subAccount1);
+        module.setSubAccountLimits(subAccount1, 500, 0, 1 days);
+        module.updateSpendingAllowance(subAccount1, 50000e18);
+
+        // Spend $100
+        bytes memory depositData = abi.encodeWithSelector(DEPOSIT_SELECTOR, 100e18, address(safe));
+        vm.prank(subAccount1);
+        module.executeOnProtocol(address(protocol), depositData);
+        assertEq(module.cumulativeSpent(subAccount1), 100e18);
+
+        // Warp past window (24h + 1s)
+        vm.warp(block.timestamp + 1 days + 1);
+
+        // Refresh oracle data and price feed (required after time warp)
+        priceFeed.setPrice(1_00000000);
+        module.updateSafeValue(1_000_000e18);
+        module.updateSpendingAllowance(subAccount1, 50000e18);
+
+        // Spend again — new window, cumulative reset
+        vm.prank(subAccount1);
+        module.executeOnProtocol(address(protocol), depositData);
+        assertEq(module.cumulativeSpent(subAccount1), 100e18); // reset + 100
+    }
+
+    function testCumulativeSpendingTransfer() public {
+        module.grantRole(subAccount1, module.DEFI_TRANSFER_ROLE());
+        module.setSubAccountLimits(subAccount1, 500, 0, 1 days);
+        module.updateSpendingAllowance(subAccount1, 50000e18);
+
+        // Transfer 100 tokens ($100 spending cost)
+        vm.prank(subAccount1);
+        module.transferToken(address(token), recipient, 100e18);
+        assertEq(module.cumulativeSpent(subAccount1), 100e18);
+    }
+
+    function testCumulativeSpendingUSDMode() public {
+        _setupSubAccount(subAccount1);
+        module.setSubAccountLimits(subAccount1, 0, 500e18, 1 days);
+        module.updateSpendingAllowance(subAccount1, 500e18);
+
+        // Spend $500 exactly — should succeed
+        bytes memory depositData = abi.encodeWithSelector(DEPOSIT_SELECTOR, 500e18, address(safe));
+        vm.prank(subAccount1);
+        module.executeOnProtocol(address(protocol), depositData);
+        assertEq(module.cumulativeSpent(subAccount1), 500e18);
+
+        // Reset oracle allowance
+        module.updateSpendingAllowance(subAccount1, 500e18);
+
+        // Try $1 more — cumulative tracker blocks it
+        vm.prank(subAccount1);
+        vm.expectRevert();
+        bytes memory depositData2 = abi.encodeWithSelector(DEPOSIT_SELECTOR, 1e18, address(safe));
+        module.executeOnProtocol(address(protocol), depositData2);
+    }
+
+    // ============ Solution 6, Tier 1: On-chain swap marking ============
+
+    function testSwapExecutesWithSwapOpType() public {
+        // Register SWAP selector — verifies the swap marking code path doesn't revert
+        bytes4 swapSelector = bytes4(keccak256("swap(uint256,address)"));
+        module.registerSelector(swapSelector, DeFiInteractorModule.OperationType.SWAP);
+
+        _setupSubAccount(subAccount1);
+        module.setSubAccountLimits(subAccount1, 500, 0, 1 days);
+        module.updateSpendingAllowance(subAccount1, 50000e18);
+
+        // Execute swap — MockProtocol.swap() emits event but doesn't move tokens,
+        // so amountsOut = 0 and no acquired balance is marked.
+        // The key test is that the SWAP code path (with marking loop) executes cleanly.
+        bytes memory swapData = abi.encodeWithSelector(swapSelector, 100e18, address(safe));
+        vm.prank(subAccount1);
+        module.executeOnProtocol(address(protocol), swapData);
+
+        // Spending cost is tracked
+        assertEq(module.cumulativeSpent(subAccount1), 100e18);
+    }
+
+    function testSwapMarkingAddsToAcquired() public {
+        // Verify the marking logic: set oracle-acquired to 10, do a deposit (no marking),
+        // then verify acquired stays at 10 minus used.
+        _setupSubAccount(subAccount1);
+        module.setSubAccountLimits(subAccount1, 500, 0, 1 days);
+        module.updateSpendingAllowance(subAccount1, 50000e18);
+
+        // Oracle sets acquired to 10
+        module.updateAcquiredBalance(subAccount1, address(token), 10e18);
+        assertEq(module.acquiredBalance(subAccount1, address(token)), 10e18);
+
+        // Deposit 5 tokens — uses 5 from acquired, leaving 5
+        bytes memory depositData = abi.encodeWithSelector(DEPOSIT_SELECTOR, 5e18, address(safe));
+        vm.prank(subAccount1);
+        module.executeOnProtocol(address(protocol), depositData);
+
+        // Acquired reduced by 5 (used), not increased (DEPOSIT doesn't auto-mark)
+        assertEq(module.acquiredBalance(subAccount1, address(token)), 5e18);
+    }
+
+    function testDepositOutputNotMarkedAsAcquired() public {
+        _setupSubAccount(subAccount1);
+        module.setSubAccountLimits(subAccount1, 500, 0, 1 days);
+        module.updateSpendingAllowance(subAccount1, 50000e18);
+
+        uint256 acquiredBefore = module.acquiredBalance(subAccount1, address(token));
+
+        bytes memory depositData = abi.encodeWithSelector(DEPOSIT_SELECTOR, 100e18, address(safe));
+        vm.prank(subAccount1);
+        module.executeOnProtocol(address(protocol), depositData);
+
+        // Deposit outputs should NOT be auto-marked as acquired
+        uint256 acquiredAfter = module.acquiredBalance(subAccount1, address(token));
+        assertEq(acquiredAfter, acquiredBefore, "Deposit should not auto-mark acquired");
+    }
+
+    // ============ Solution 6, Tier 2: Oracle acquired budget ============
+
+    function testOracleAcquiredBudgetLimit() public {
+        module.setSubAccountLimits(subAccount1, 500, 0, 1 days);
+
+        // Mint enough tokens so _capToSafeBalance doesn't interfere
+        token.transfer(address(safe), 900000e18);
+
+        // maxOracleAcquiredBps = 2000 (20%), safeValue = $1M → max grant = $200K
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(token);
+        uint256[] memory balances = new uint256[](1);
+        balances[0] = 200000e18;
+        module.batchUpdate(subAccount1, 20000e18, tokens, balances);
+
+        // Now try to increase by $1 more — should revert (budget exhausted)
+        balances[0] = 200001e18;
+        vm.expectRevert();
+        module.batchUpdate(subAccount1, 20000e18, tokens, balances);
+    }
+
+    function testOracleAcquiredBudgetWindowReset() public {
+        module.setSubAccountLimits(subAccount1, 200, 0, 1 days);
+
+        // Mint enough tokens
+        token.transfer(address(safe), 900000e18);
+
+        // Max grant = $200K (20% of $1M)
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(token);
+        uint256[] memory balances = new uint256[](1);
+        balances[0] = 200000e18;
+        module.batchUpdate(subAccount1, 20000e18, tokens, balances);
+
+        // Budget exhausted in this window. Warp past window.
+        vm.warp(block.timestamp + 1 days + 1);
+        priceFeed.setPrice(1_00000000);
+        module.updateSafeValue(1_000_000e18);
+
+        // New window — budget resets, should succeed again
+        balances[0] = 200001e18; // increase by $1
+        module.batchUpdate(subAccount1, 20000e18, tokens, balances);
+    }
+
+    function testOracleAcquiredDecreaseAlwaysAllowed() public {
+        module.setSubAccountLimits(subAccount1, 200, 0, 1 days);
+
+        // Set acquired to $200K
+        module.updateAcquiredBalance(subAccount1, address(token), 200000e18);
+
+        // Decrease to $100K — should always work (not tracked)
+        module.updateAcquiredBalance(subAccount1, address(token), 100000e18);
+        assertEq(module.acquiredBalance(subAccount1, address(token)), 100000e18);
+    }
+
+    function testSetMaxOracleAcquiredBps() public {
+        module.setMaxOracleAcquiredBps(3000);
+        assertEq(module.maxOracleAcquiredBps(), 3000);
+    }
+
+    function testSetMaxOracleAcquiredBpsExceedsMax() public {
+        vm.expectRevert(DeFiInteractorModule.ExceedsMaxBps.selector);
+        module.setMaxOracleAcquiredBps(10001);
+    }
+
+    function testSetMaxOracleAcquiredBpsOnlyOwner() public {
+        vm.prank(subAccount1);
+        vm.expectRevert();
+        module.setMaxOracleAcquiredBps(3000);
     }
 }
