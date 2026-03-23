@@ -129,6 +129,16 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     /// @dev Default 20% (2000 bps). Limits oracle's ability to inflate acquired balances.
     uint256 public maxOracleAcquiredBps = 2000;
 
+    // ============ Optimistic Concurrency (Version Counters) ============
+
+    /// @notice Monotonic version counter for spending allowance per sub-account
+    /// @dev Bumped on every mutation. Oracle passes expected version; skips if stale.
+    mapping(address => uint256) public allowanceVersion;
+
+    /// @notice Monotonic version counter for acquired balance per sub-account per token
+    /// @dev Bumped on every mutation. Oracle passes expected version; skips if stale.
+    mapping(address => mapping(address => uint256)) public acquiredBalanceVersion;
+
     /// @notice Per-sub-account allowed addresses: subAccount => target => allowed
     mapping(address => mapping(address => bool)) public allowedAddresses;
 
@@ -190,6 +200,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
 
     event CumulativeSpendingReset(address indexed subAccount, uint256 windowSafeValue);
     event OracleAcquiredBudgetReset(address indexed subAccount);
+    event OracleUpdateSkipped(address indexed subAccount, string reason);
 
     event EmergencyPaused(address indexed by);
     event EmergencyUnpaused(address indexed by);
@@ -394,6 +405,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             }
             if (spendingAllowance[subAccount] > newMaxAllowance) {
                 spendingAllowance[subAccount] = newMaxAllowance;
+                allowanceVersion[subAccount]++;
                 emit SpendingAllowanceUpdated(subAccount, newMaxAllowance);
             }
         }
@@ -604,7 +616,10 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             uint256 usedFromAcquired = amountsIn[i] > acquired ? acquired : amountsIn[i];
             uint256 fromOriginal = amountsIn[i] - usedFromAcquired;
             spendingCost += _estimateTokenValueUSD(tokensIn[i], fromOriginal);
-            acquiredBalance[subAccount][tokensIn[i]] -= usedFromAcquired;
+            if (usedFromAcquired > 0) {
+                acquiredBalance[subAccount][tokensIn[i]] -= usedFromAcquired;
+                acquiredBalanceVersion[subAccount][tokensIn[i]]++;
+            }
         }
 
         // 7. Check spending allowance (reverts restore all state changes including acquired balance)
@@ -613,7 +628,10 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         }
 
         // 8. Deduct spending allowance and track cumulative spending
-        spendingAllowance[subAccount] -= spendingCost;
+        if (spendingCost > 0) {
+            spendingAllowance[subAccount] -= spendingCost;
+            allowanceVersion[subAccount]++;
+        }
         _trackCumulativeSpending(subAccount, spendingCost);
 
         // 9. Capture balances before for output tracking (multiple tokens)
@@ -641,6 +659,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             for (uint256 i = 0; i < tokensOut.length; i++) {
                 if (amountsOut[i] > 0) {
                     acquiredBalance[subAccount][tokensOut[i]] += amountsOut[i];
+                    acquiredBalanceVersion[subAccount][tokensOut[i]]++;
                 }
             }
         }
@@ -844,9 +863,15 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         }
 
         // Deduct spending allowance, track cumulative, and deduct acquired balance
-        spendingAllowance[msg.sender] -= spendingCost;
+        if (spendingCost > 0) {
+            spendingAllowance[msg.sender] -= spendingCost;
+            allowanceVersion[msg.sender]++;
+        }
         _trackCumulativeSpending(msg.sender, spendingCost);
-        acquiredBalance[msg.sender][token] -= usedFromAcquired;
+        if (usedFromAcquired > 0) {
+            acquiredBalance[msg.sender][token] -= usedFromAcquired;
+            acquiredBalanceVersion[msg.sender][token]++;
+        }
 
         // Execute transfer
         bytes memory transferData = abi.encodeWithSelector(IERC20.transfer.selector, recipient, amount);
@@ -869,49 +894,88 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         emit SafeValueUpdated(totalValueUSD, safeValue.updateCount);
     }
 
-    function updateSpendingAllowance(address subAccount, uint256 newAllowance) external onlyOracle {
+    /// @notice Update spending allowance with optimistic concurrency check
+    /// @param subAccount The sub-account to update
+    /// @param expectedVersion The allowance version the oracle read when computing
+    /// @param newAllowance The new allowance value
+    /// @dev Skips if on-chain state changed since oracle read (version mismatch)
+    function updateSpendingAllowance(address subAccount, uint256 expectedVersion, uint256 newAllowance)
+        external
+        onlyOracle
+    {
+        lastOracleUpdate[subAccount] = block.timestamp;
+        if (allowanceVersion[subAccount] != expectedVersion) {
+            emit OracleUpdateSkipped(subAccount, "allowance version mismatch");
+            return;
+        }
         _enforceAllowanceCap(subAccount, newAllowance);
         spendingAllowance[subAccount] = newAllowance;
-        lastOracleUpdate[subAccount] = block.timestamp;
+        allowanceVersion[subAccount]++;
         emit SpendingAllowanceUpdated(subAccount, newAllowance);
     }
 
-    function updateAcquiredBalance(address subAccount, address token, uint256 newBalance) external onlyOracle {
-        // Cap acquired balance to Safe's actual token balance
+    /// @notice Update acquired balance with optimistic concurrency check
+    /// @param subAccount The sub-account to update
+    /// @param token The token to update
+    /// @param expectedVersion The token's acquired balance version the oracle read
+    /// @param newBalance The new acquired balance
+    function updateAcquiredBalance(address subAccount, address token, uint256 expectedVersion, uint256 newBalance)
+        external
+        onlyOracle
+    {
+        lastOracleUpdate[subAccount] = block.timestamp;
+        if (acquiredBalanceVersion[subAccount][token] != expectedVersion) {
+            emit OracleUpdateSkipped(subAccount, "acquired version mismatch");
+            return;
+        }
         newBalance = _capToSafeBalance(token, newBalance);
-        // Track oracle-granted acquired increases
         _trackOracleAcquiredGrant(subAccount, token, acquiredBalance[subAccount][token], newBalance);
         acquiredBalance[subAccount][token] = newBalance;
-        lastOracleUpdate[subAccount] = block.timestamp;
-
+        acquiredBalanceVersion[subAccount][token]++;
         emit AcquiredBalanceUpdated(subAccount, token, newBalance);
     }
 
-    /**
-     * @notice Batch update for efficiency
-     */
+    /// @notice Batch update with per-field optimistic concurrency checks
+    /// @param subAccount The sub-account to update
+    /// @param expectedAllowanceVersion The allowance version the oracle read
+    /// @param newAllowance The new allowance value
+    /// @param tokens Token addresses to update acquired balances for
+    /// @param expectedTokenVersions Per-token acquired balance versions the oracle read
+    /// @param balances New acquired balance values per token
+    /// @dev Each field is independently skipped if its version mismatches
     function batchUpdate(
         address subAccount,
+        uint256 expectedAllowanceVersion,
         uint256 newAllowance,
         address[] calldata tokens,
+        uint256[] calldata expectedTokenVersions,
         uint256[] calldata balances
     ) external onlyOracle {
-        if (tokens.length != balances.length) revert LengthMismatch();
-        _enforceAllowanceCap(subAccount, newAllowance);
-
-        spendingAllowance[subAccount] = newAllowance;
-        lastOracleUpdate[subAccount] = block.timestamp;
-
-        for (uint256 i = 0; i < tokens.length; i++) {
-            // Cap acquired balance to Safe's actual token balance
-            uint256 cappedBalance = _capToSafeBalance(tokens[i], balances[i]);
-            // Track oracle-granted acquired increases
-            _trackOracleAcquiredGrant(subAccount, tokens[i], acquiredBalance[subAccount][tokens[i]], cappedBalance);
-            acquiredBalance[subAccount][tokens[i]] = cappedBalance;
-            emit AcquiredBalanceUpdated(subAccount, tokens[i], cappedBalance);
+        if (tokens.length != balances.length || tokens.length != expectedTokenVersions.length) {
+            revert LengthMismatch();
         }
 
-        emit SpendingAllowanceUpdated(subAccount, newAllowance);
+        lastOracleUpdate[subAccount] = block.timestamp;
+
+        // Update allowance if version matches
+        if (allowanceVersion[subAccount] == expectedAllowanceVersion) {
+            _enforceAllowanceCap(subAccount, newAllowance);
+            spendingAllowance[subAccount] = newAllowance;
+            allowanceVersion[subAccount]++;
+            emit SpendingAllowanceUpdated(subAccount, newAllowance);
+        }
+
+        // Update each token's acquired balance if its version matches
+        for (uint256 i = 0; i < tokens.length; i++) {
+            if (acquiredBalanceVersion[subAccount][tokens[i]] != expectedTokenVersions[i]) {
+                continue; // Skip stale token — on-chain state changed since oracle read
+            }
+            uint256 cappedBalance = _capToSafeBalance(tokens[i], balances[i]);
+            _trackOracleAcquiredGrant(subAccount, tokens[i], acquiredBalance[subAccount][tokens[i]], cappedBalance);
+            acquiredBalance[subAccount][tokens[i]] = cappedBalance;
+            acquiredBalanceVersion[subAccount][tokens[i]]++;
+            emit AcquiredBalanceUpdated(subAccount, tokens[i], cappedBalance);
+        }
     }
 
     function setAuthorizedOracle(address newOracle) external onlyOwner {
