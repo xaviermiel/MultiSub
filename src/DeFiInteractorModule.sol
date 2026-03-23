@@ -903,7 +903,6 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         external
         onlyOracle
     {
-        lastOracleUpdate[subAccount] = block.timestamp;
         if (allowanceVersion[subAccount] != expectedVersion) {
             emit OracleUpdateSkipped(subAccount, "allowance version mismatch");
             return;
@@ -911,6 +910,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         _enforceAllowanceCap(subAccount, newAllowance);
         spendingAllowance[subAccount] = newAllowance;
         allowanceVersion[subAccount]++;
+        lastOracleUpdate[subAccount] = block.timestamp;
         emit SpendingAllowanceUpdated(subAccount, newAllowance);
     }
 
@@ -923,7 +923,6 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         external
         onlyOracle
     {
-        lastOracleUpdate[subAccount] = block.timestamp;
         if (acquiredBalanceVersion[subAccount][token] != expectedVersion) {
             emit OracleUpdateSkipped(subAccount, "acquired version mismatch");
             return;
@@ -932,6 +931,7 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
         _trackOracleAcquiredGrant(subAccount, token, acquiredBalance[subAccount][token], newBalance);
         acquiredBalance[subAccount][token] = newBalance;
         acquiredBalanceVersion[subAccount][token]++;
+        lastOracleUpdate[subAccount] = block.timestamp;
         emit AcquiredBalanceUpdated(subAccount, token, newBalance);
     }
 
@@ -942,7 +942,8 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
     /// @param tokens Token addresses to update acquired balances for
     /// @param expectedTokenVersions Per-token acquired balance versions the oracle read
     /// @param balances New acquired balance values per token
-    /// @dev Each field is independently skipped if its version mismatches
+    /// @dev Each field is independently skipped if its version mismatches.
+    ///      lastOracleUpdate is only set if at least one field was actually updated.
     function batchUpdate(
         address subAccount,
         uint256 expectedAllowanceVersion,
@@ -955,26 +956,36 @@ contract DeFiInteractorModule is Module, ReentrancyGuard, Pausable {
             revert LengthMismatch();
         }
 
-        lastOracleUpdate[subAccount] = block.timestamp;
+        bool anyUpdated = false;
 
         // Update allowance if version matches
         if (allowanceVersion[subAccount] == expectedAllowanceVersion) {
             _enforceAllowanceCap(subAccount, newAllowance);
             spendingAllowance[subAccount] = newAllowance;
             allowanceVersion[subAccount]++;
+            anyUpdated = true;
             emit SpendingAllowanceUpdated(subAccount, newAllowance);
+        } else {
+            emit OracleUpdateSkipped(subAccount, "allowance version mismatch");
         }
 
         // Update each token's acquired balance if its version matches
         for (uint256 i = 0; i < tokens.length; i++) {
             if (acquiredBalanceVersion[subAccount][tokens[i]] != expectedTokenVersions[i]) {
-                continue; // Skip stale token — on-chain state changed since oracle read
+                emit OracleUpdateSkipped(subAccount, "acquired version mismatch");
+                continue;
             }
             uint256 cappedBalance = _capToSafeBalance(tokens[i], balances[i]);
             _trackOracleAcquiredGrant(subAccount, tokens[i], acquiredBalance[subAccount][tokens[i]], cappedBalance);
             acquiredBalance[subAccount][tokens[i]] = cappedBalance;
             acquiredBalanceVersion[subAccount][tokens[i]]++;
+            anyUpdated = true;
             emit AcquiredBalanceUpdated(subAccount, tokens[i], cappedBalance);
+        }
+
+        // Only refresh oracle freshness if at least one field was actually updated
+        if (anyUpdated) {
+            lastOracleUpdate[subAccount] = block.timestamp;
         }
     }
 
