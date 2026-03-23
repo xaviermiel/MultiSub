@@ -228,7 +228,8 @@ contract DeFiModuleFuzzTests is Test {
             bytes4 errorSelector = bytes4(reason);
             assertTrue(
                 errorSelector == DeFiInteractorModule.ExceedsSpendingLimit.selector
-                    || errorSelector == DeFiInteractorModule.TransactionFailed.selector,
+                    || errorSelector == DeFiInteractorModule.TransactionFailed.selector
+                    || errorSelector == DeFiInteractorModule.ExceedsCumulativeSpendingLimit.selector,
                 "Should not have arithmetic overflow"
             );
         }
@@ -270,7 +271,8 @@ contract DeFiModuleFuzzTests is Test {
             bytes4 errorSelector = bytes4(reason);
             assertTrue(
                 errorSelector == DeFiInteractorModule.ExceedsSpendingLimit.selector
-                    || errorSelector == DeFiInteractorModule.TransactionFailed.selector,
+                    || errorSelector == DeFiInteractorModule.TransactionFailed.selector
+                    || errorSelector == DeFiInteractorModule.ExceedsCumulativeSpendingLimit.selector,
                 "Should not have arithmetic overflow"
             );
         }
