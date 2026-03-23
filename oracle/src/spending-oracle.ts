@@ -485,6 +485,41 @@ async function getOnChainAcquiredBalance(
   return balance as bigint;
 }
 
+async function getAllowanceVersion(
+  moduleAddress: Address,
+  subAccount: Address,
+): Promise<bigint> {
+  const version = await rpcManager.executeWithFallback(
+    (client) =>
+      client.readContract({
+        address: moduleAddress,
+        abi: DeFiInteractorModuleABI,
+        functionName: "allowanceVersion",
+        args: [subAccount],
+      }),
+    `allowanceVersion(${subAccount})`,
+  );
+  return version as bigint;
+}
+
+async function getAcquiredBalanceVersion(
+  moduleAddress: Address,
+  subAccount: Address,
+  token: Address,
+): Promise<bigint> {
+  const version = await rpcManager.executeWithFallback(
+    (client) =>
+      client.readContract({
+        address: moduleAddress,
+        abi: DeFiInteractorModuleABI,
+        functionName: "acquiredBalanceVersion",
+        args: [subAccount, token],
+      }),
+    `acquiredBalanceVersion(${subAccount}, ${token})`,
+  );
+  return version as bigint;
+}
+
 // ============ Event Parsing ============
 
 function parseProtocolExecutionLog(log: Log): ProtocolExecutionEvent {
@@ -1915,12 +1950,14 @@ async function prepareBatchUpdate(
   balances: bigint[];
   allowanceChanged: boolean;
   timestamp: bigint;
+  allowanceVersion: bigint;
+  tokenVersions: bigint[];
 } | null> {
-  // Get current on-chain values
-  const onChainAllowance = await getOnChainSpendingAllowance(
-    moduleAddress,
-    subAccount,
-  );
+  // Get current on-chain values and versions
+  const [onChainAllowance, allowanceVer] = await Promise.all([
+    getOnChainSpendingAllowance(moduleAddress, subAccount),
+    getAllowanceVersion(moduleAddress, subAccount),
+  ]);
   const currentTimestamp = BigInt(Math.floor(Date.now() / 1000));
 
   // Check staleness (key includes moduleAddress to avoid collision across modules)
@@ -1968,23 +2005,24 @@ async function prepareBatchUpdate(
     }
   }
 
-  // Check if any acquired balances changed
+  // Check if any acquired balances changed, and read versions
   const tokens: Address[] = [];
   const balances: bigint[] = [];
+  const tokenVersions: bigint[] = [];
   let acquiredChanged = false;
 
   // First, add all tokens from calculated acquired balances
   for (const [token, newBalance] of acquiredBalances) {
-    const onChainBalance = await getOnChainAcquiredBalance(
-      moduleAddress,
-      subAccount,
-      token,
-    );
+    const [onChainBalance, tokenVer] = await Promise.all([
+      getOnChainAcquiredBalance(moduleAddress, subAccount, token),
+      getAcquiredBalanceVersion(moduleAddress, subAccount, token),
+    ]);
     if (newBalance !== onChainBalance) {
       acquiredChanged = true;
     }
     tokens.push(token);
     balances.push(newBalance);
+    tokenVersions.push(tokenVer);
   }
 
   // Also check for tokens that have on-chain balance but aren't in calculated map
@@ -1995,11 +2033,10 @@ async function prepareBatchUpdate(
   );
   for (const token of historicalTokens) {
     if (!acquiredBalances.has(token)) {
-      const onChainBalance = await getOnChainAcquiredBalance(
-        moduleAddress,
-        subAccount,
-        token,
-      );
+      const [onChainBalance, tokenVer] = await Promise.all([
+        getOnChainAcquiredBalance(moduleAddress, subAccount, token),
+        getAcquiredBalanceVersion(moduleAddress, subAccount, token),
+      ]);
       if (onChainBalance > 0n) {
         log(
           `  Clearing stale acquired balance for ${token}: ${onChainBalance} -> 0`,
@@ -2007,6 +2044,7 @@ async function prepareBatchUpdate(
         acquiredChanged = true;
         tokens.push(token);
         balances.push(0n);
+        tokenVersions.push(tokenVer);
       }
     }
   }
@@ -2038,7 +2076,14 @@ async function prepareBatchUpdate(
   log(`  Tokens: ${tokens.length}`);
 
   // Return timestamp to be set after successful tx confirmation (not before)
-  return { tokens, balances, allowanceChanged, timestamp: currentTimestamp };
+  return {
+    tokens,
+    balances,
+    allowanceChanged,
+    timestamp: currentTimestamp,
+    allowanceVersion: allowanceVer,
+    tokenVersions,
+  };
 }
 
 /**
@@ -2048,8 +2093,10 @@ async function prepareBatchUpdate(
 async function submitBatchUpdate(
   moduleAddress: Address,
   subAccount: Address,
+  expectedAllowanceVersion: bigint,
   newAllowance: bigint,
   tokens: Address[],
+  expectedTokenVersions: bigint[],
   balances: bigint[],
   nonce: number,
 ): Promise<`0x${string}`> {
@@ -2060,7 +2107,14 @@ async function submitBatchUpdate(
       address: moduleAddress,
       abi: DeFiInteractorModuleABI,
       functionName: "batchUpdate",
-      args: [subAccount, newAllowance, tokens, balances],
+      args: [
+        subAccount,
+        expectedAllowanceVersion,
+        newAllowance,
+        tokens,
+        expectedTokenVersions,
+        balances,
+      ],
       gas: config.gasLimit,
       nonce,
     });
@@ -2156,8 +2210,10 @@ async function pushBatchUpdate(
   const hash = await submitBatchUpdate(
     moduleAddress,
     subAccount,
+    prepared.allowanceVersion,
     newAllowance,
     prepared.tokens,
+    prepared.tokenVersions,
     prepared.balances,
     currentNonce!,
   );
