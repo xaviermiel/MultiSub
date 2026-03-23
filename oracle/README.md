@@ -37,7 +37,7 @@ The oracle wallet has constrained on-chain power, bounded by cumulative counters
 | Set `acquiredBalance` per token        | `_capToSafeBalance` + cumulative oracle acquired budget (`maxOracleAcquiredBps`, default 20%)     |
 | Update `safeValue`                     | Snapshotted at window start; mid-window inflation has no effect on spending cap                   |
 
-**If the oracle key is compromised**, maximum damage per window is capped to `absoluteMaxSpendingBps + maxOracleAcquiredBps` (default 20% + 20% = 40%) — enforced by on-chain cumulative counters. Swap acquired balances are marked trustlessly (Tier 1). See [`ORACLE_SECURITY.md`](./ORACLE_SECURITY.md) for full analysis.
+**If the oracle key is compromised**, maximum damage per window is capped to `absoluteMaxSpendingBps + maxOracleAcquiredBps` (default 20% + 20% = 40%) — enforced by on-chain cumulative counters. Swap acquired balances are marked trustlessly (Tier 1). Version counters prevent stale oracle writes from overwriting on-chain state changes. See [`ORACLE_SECURITY.md`](./ORACLE_SECURITY.md) for full analysis.
 
 **If the oracle goes down**, all subaccount operations freeze within `maxOracleAge` (default 60 minutes) due to staleness checks.
 

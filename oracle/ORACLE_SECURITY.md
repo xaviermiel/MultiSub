@@ -6,11 +6,11 @@
 
 The oracle EOA has three setter functions on `DeFiInteractorModule`:
 
-| Function                                           | What it controls                                 | On-chain cap                                                               |
-| -------------------------------------------------- | ------------------------------------------------ | -------------------------------------------------------------------------- |
-| `updateSafeValue(uint256)`                         | USD portfolio value used to compute spending cap | Snapshotted at window start; mid-window inflation has no effect            |
-| `updateSpendingAllowance(address, uint256)`        | USD budget for original tokens                   | `min(absoluteMaxSpendingBps * safeValue, maxSpendingUSD)` + cumulative cap |
-| `updateAcquiredBalance(address, address, uint256)` | Per-token balance that bypasses spending limits  | `_capToSafeBalance` + cumulative oracle acquired budget per window         |
+| Function                                                            | What it controls                                 | On-chain cap                                                                               |
+| ------------------------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------ |
+| `updateSafeValue(uint256)`                                          | USD portfolio value used to compute spending cap | Snapshotted at window start; mid-window inflation has no effect                            |
+| `updateSpendingAllowance(address, uint256 version, uint256)`        | USD budget for original tokens                   | `min(absoluteMaxSpendingBps * safeValue, maxSpendingUSD)` + cumulative cap + version check |
+| `updateAcquiredBalance(address, address, uint256 version, uint256)` | Per-token balance that bypasses spending limits  | `_capToSafeBalance` + cumulative oracle acquired budget + version check                    |
 
 ### What the Oracle Cannot Do (Enforced On-Chain)
 
@@ -18,6 +18,7 @@ The oracle EOA has three setter functions on `DeFiInteractorModule`:
 2. **Inflate `safeValue` mid-window** — `windowSafeValue` is snapshotted once per window at the first operation. Subsequent `updateSafeValue` calls don't affect the spending cap until the next window.
 3. **Grant unlimited acquired balance** — `cumulativeOracleGrantedUSD` tracks all oracle-granted acquired increases per window. Capped at `maxOracleAcquiredBps * windowSafeValue / 10000` (default 20%).
 4. **Set allowance above per-account USD cap** — `_enforceAllowanceCap` takes the minimum of the global cap and `maxSpendingUSD` for USD-mode sub-accounts.
+5. **Overwrite stale state** — monotonic version counters (`allowanceVersion`, `acquiredBalanceVersion`) require the oracle to pass the expected version it read. If on-chain state changed since the oracle read (e.g., agent spent, Tier 1 marked swap output), the update is skipped. Prevents the oracle from undoing on-chain mutations.
 
 ### Maximum Damage from Compromised Oracle (Per Window)
 
@@ -160,6 +161,26 @@ function _enforceAllowanceCap(address subAccount, uint256 newAllowance) internal
 }
 ```
 
+### Optimistic Concurrency (Version Counters)
+
+Every mutation to `spendingAllowance` or `acquiredBalance` bumps a monotonic version counter. The oracle must pass the version it read when computing; the contract skips the update if the version changed.
+
+```solidity
+mapping(address => uint256) public allowanceVersion;
+mapping(address => mapping(address => uint256)) public acquiredBalanceVersion;
+```
+
+**Why this matters:** Without version checks, a race condition exists:
+
+1. Tier 1 marks swap output as acquired (100 tokens)
+2. Agent spends all 100 → acquired balance returns to 0
+3. Oracle (computed before step 2) tries to SET acquired to 100
+4. Values match (both 0) → oracle overwrites, restoring 100 tokens as acquired
+
+With version counters, steps 1 and 2 each bump the version. The oracle's expected version (from before step 1) no longer matches → update is skipped.
+
+Updates that are skipped still refresh `lastOracleUpdate` (the oracle is alive) and emit `OracleUpdateSkipped`. The oracle retries on the next cycle with fresh versions.
+
 ---
 
 ## 3. Combined Protection Summary
@@ -171,14 +192,16 @@ function _enforceAllowanceCap(address subAccount, uint256 newAllowance) internal
 | Acquired balance reset (swaps)       | Marked on-chain at execution time      | Contract (`_executeWithSpendingCheck`) |
 | Acquired balance reset (withdrawals) | Cumulative oracle budget per window    | Contract (`updateAcquiredBalance`)     |
 | USD-mode allowance inflation         | Per-account `maxSpendingUSD` cap       | Contract (`_enforceAllowanceCap`)      |
+| Stale oracle overwrites              | Monotonic version counters             | Contract (all oracle update functions) |
 
 **Oracle role after mitigations:**
 
-| Before                                | After                                                                          |
-| ------------------------------------- | ------------------------------------------------------------------------------ |
-| Full control of spending allowance    | Provides freshness attestation; spending tracked on-chain                      |
-| Full control of all acquired balances | Only manages WITHDRAW/CLAIM acquired, within a capped budget                   |
-| Full control of `safeValue`           | `safeValue` is snapshotted at window start; mid-window inflation has no effect |
+| Before                                | After                                                                              |
+| ------------------------------------- | ---------------------------------------------------------------------------------- |
+| Full control of spending allowance    | Provides freshness attestation; spending tracked on-chain; version-gated writes    |
+| Full control of all acquired balances | Only manages WITHDRAW/CLAIM acquired, within a capped budget; version-gated writes |
+| Full control of `safeValue`           | `safeValue` is snapshotted at window start; mid-window inflation has no effect     |
+| Stateless overwrites                  | Version counters prevent overwriting state that changed since oracle read          |
 
 ---
 

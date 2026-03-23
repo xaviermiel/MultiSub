@@ -198,6 +198,10 @@ For WITHDRAW/CLAIM outputs, the oracle can mark tokens as acquired but is bounde
 
 For sub-accounts using fixed USD limits (`maxSpendingUSD`), the oracle cannot push the allowance above the per-account cap — `_enforceAllowanceCap` takes the minimum of the global BPS cap and the per-account USD limit.
 
+### 9. Optimistic Concurrency (Version Counters)
+
+Every mutation to `spendingAllowance` or `acquiredBalance` bumps a monotonic version counter. Oracle update functions require the expected version — if the on-chain version changed (e.g., agent spent tokens, Tier 1 marked swap output), the update is skipped rather than overwriting. This prevents the oracle from undoing on-chain state changes during the race window between oracle read and write.
+
 ---
 
 ## Key Design Decisions

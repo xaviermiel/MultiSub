@@ -128,6 +128,7 @@ This allows sub-accounts to chain operations (swap → deposit → withdraw) wit
 - **Swap Auto-Marking (Tier 1)**: Swap outputs auto-marked as acquired on-chain, no oracle needed
 - **Oracle Acquired Budget (Tier 2)**: `cumulativeOracleGrantedUSD` caps oracle's acquired grants per window (default 20%)
 - **Per-Account USD Cap**: `_enforceAllowanceCap` enforces `maxSpendingUSD` for USD-mode sub-accounts
+- **Version Counters**: Oracle must pass expected version; stale writes are skipped to prevent overwriting on-chain state changes
 - Emergency pause mechanism
 - Instant role revocation
 
