@@ -194,9 +194,9 @@ SWAP outputs are auto-marked as acquired **on-chain** immediately after executio
 
 For WITHDRAW/CLAIM outputs, the oracle can mark tokens as acquired but is bounded by a per-window cumulative budget (`maxOracleAcquiredBps`, default 20% of Safe value). This counter cannot be reset by the oracle.
 
-### 8. Per-Account USD Cap
+### 8. Per-Account Allowance Cap
 
-For sub-accounts using fixed USD limits (`maxSpendingUSD`), the oracle cannot push the allowance above the per-account cap — `_enforceAllowanceCap` takes the minimum of the global BPS cap and the per-account USD limit.
+`_enforceAllowanceCap` caps oracle-set allowances at the sub-account's configured limit: `maxSpendingUSD` for USD-mode accounts, or `maxSpendingBps * safeValue / 10000` for BPS-mode accounts. Unconfigured accounts fall back to `DEFAULT_MAX_SPENDING_BPS` (5%).
 
 ### 9. Optimistic Concurrency (Version Counters)
 

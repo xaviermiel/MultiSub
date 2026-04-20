@@ -181,9 +181,6 @@ mapping(address => ICalldataParser) public protocolParsers;
 
 // ============ Configuration ============
 
-/// @notice Absolute maximum spending (safety backstop, oracle cannot exceed)
-uint256 public absoluteMaxSpendingBps = 2000; // 20% hard cap
-
 /// @notice Portfolio value (updated by oracle)
 struct SafeValue {
     uint256 totalValueUSD;  // 18 decimals
@@ -2038,22 +2035,22 @@ Scenario 3: Different sub-account
 
 ### 8.9 On-Chain Safety Backstops
 
-Even with oracle management, keep hard limits on-chain:
+Even with oracle management, keep hard limits on-chain. The allowance cap is derived from the sub-account's own limit (BPS of Safe value, or fixed USD):
 
 ```solidity
-/// @notice Absolute maximum spending per window (safety backstop)
-uint256 public absoluteMaxSpendingBps = 2000; // 20% hard cap
+/// @notice Oracle cannot set allowance above the sub-account's configured cap
+function _enforceAllowanceCap(address subAccount, uint256 newAllowance) internal view {
+    (uint256 maxSpendingBps, uint256 maxSpendingUSD,) = getSubAccountLimits(subAccount);
 
-/// @notice Oracle cannot set allowance above this
-function updateSpendingAllowance(address subAccount, uint256 newAllowance) external onlyOracle {
-    uint256 portfolioValue = safeValue.totalValueUSD;
-    uint256 maxAllowed = (portfolioValue * absoluteMaxSpendingBps) / 10000;
+    uint256 maxAllowed;
+    if (maxSpendingUSD > 0) {
+        maxAllowed = maxSpendingUSD;
+    } else {
+        _requireFreshSafeValue();
+        maxAllowed = (safeValue.totalValueUSD * maxSpendingBps) / 10000;
+    }
 
-    // Oracle can only set up to the hard cap
-    uint256 effectiveAllowance = newAllowance > maxAllowed ? maxAllowed : newAllowance;
-
-    spendingAllowance[subAccount] = effectiveAllowance;
-    lastOracleUpdate[subAccount] = block.timestamp;
+    if (newAllowance > maxAllowed) revert ExceedsAllowanceCap(newAllowance, maxAllowed);
 }
 ```
 

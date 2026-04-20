@@ -127,12 +127,12 @@ This allows sub-accounts to chain operations (swap → deposit → withdraw) wit
 - **Safe Value Snapshot**: `windowSafeValue` frozen at window start — oracle can't inflate mid-window
 - **Swap Auto-Marking (Tier 1)**: Swap outputs auto-marked as acquired on-chain, no oracle needed
 - **Oracle Acquired Budget (Tier 2)**: `cumulativeOracleGrantedUSD` caps oracle's acquired grants per window (default 20%)
-- **Per-Account USD Cap**: `_enforceAllowanceCap` enforces `maxSpendingUSD` for USD-mode sub-accounts
+- **Per-Account Allowance Cap**: `_enforceAllowanceCap` enforces the sub-account's `maxSpendingBps` (BPS mode) or `maxSpendingUSD` (USD mode)
 - **Version Counters**: Oracle must pass expected version; stale writes are skipped to prevent overwriting on-chain state changes
 - Emergency pause mechanism
 - Instant role revocation
 
-**Max oracle compromise damage per window**: `absoluteMaxSpendingBps + maxOracleAcquiredBps` (default 20% + 20% = 40%). See [`oracle/ORACLE_SECURITY.md`](./oracle/ORACLE_SECURITY.md).
+**Max oracle compromise damage per window**: per-account spending cap (`maxSpendingBps` or `maxSpendingUSD`) + `maxOracleAcquiredBps` (default 20%). See [`oracle/ORACLE_SECURITY.md`](./oracle/ORACLE_SECURITY.md).
 
 ## Default Limits
 

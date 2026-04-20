@@ -6,27 +6,27 @@
 
 The oracle EOA has three setter functions on `DeFiInteractorModule`:
 
-| Function                                                            | What it controls                                 | On-chain cap                                                                               |
-| ------------------------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------ |
-| `updateSafeValue(uint256)`                                          | USD portfolio value used to compute spending cap | Snapshotted at window start; mid-window inflation has no effect                            |
-| `updateSpendingAllowance(address, uint256 version, uint256)`        | USD budget for original tokens                   | `min(absoluteMaxSpendingBps * safeValue, maxSpendingUSD)` + cumulative cap + version check |
-| `updateAcquiredBalance(address, address, uint256 version, uint256)` | Per-token balance that bypasses spending limits  | `_capToSafeBalance` + cumulative oracle acquired budget + version check                    |
+| Function                                                            | What it controls                                 | On-chain cap                                                                                        |
+| ------------------------------------------------------------------- | ------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| `updateSafeValue(uint256)`                                          | USD portfolio value used to compute spending cap | Snapshotted at window start; mid-window inflation has no effect                                     |
+| `updateSpendingAllowance(address, uint256 version, uint256)`        | USD budget for original tokens                   | Per-account cap (`maxSpendingBps * safeValue` or `maxSpendingUSD`) + cumulative cap + version check |
+| `updateAcquiredBalance(address, address, uint256 version, uint256)` | Per-token balance that bypasses spending limits  | `_capToSafeBalance` + cumulative oracle acquired budget + version check                             |
 
 ### What the Oracle Cannot Do (Enforced On-Chain)
 
 1. **Reset cumulative spending** — `cumulativeSpent` is only incremented by execution functions (`_executeWithSpendingCheck`, `transferToken`). The oracle has no write access.
 2. **Inflate `safeValue` mid-window** — `windowSafeValue` is snapshotted once per window at the first operation. Subsequent `updateSafeValue` calls don't affect the spending cap until the next window.
 3. **Grant unlimited acquired balance** — `cumulativeOracleGrantedUSD` tracks all oracle-granted acquired increases per window. Capped at `maxOracleAcquiredBps * windowSafeValue / 10000` (default 20%).
-4. **Set allowance above per-account USD cap** — `_enforceAllowanceCap` takes the minimum of the global cap and `maxSpendingUSD` for USD-mode sub-accounts.
+4. **Set allowance above the sub-account cap** — `_enforceAllowanceCap` enforces the per-account limit (`maxSpendingBps * safeValue` in BPS mode or `maxSpendingUSD` in USD mode). Unconfigured accounts fall back to `DEFAULT_MAX_SPENDING_BPS` (5%).
 5. **Overwrite stale state** — monotonic version counters (`allowanceVersion`, `acquiredBalanceVersion`) require the oracle to pass the expected version it read. If on-chain state changed since the oracle read (e.g., agent spent, Tier 1 marked swap output), the update is skipped. Prevents the oracle from undoing on-chain mutations.
 
 ### Maximum Damage from Compromised Oracle (Per Window)
 
 ```
-maxSpendingBps + maxOracleAcquiredBps  (default: 20% + 20% = 40%)
+(per-account) maxSpendingBps/maxSpendingUSD + maxOracleAcquiredBps
 ```
 
-Both are configurable by the Safe owner via `setAbsoluteMaxSpendingBps()` and `setMaxOracleAcquiredBps()`. This is a **mathematical guarantee** enforced by on-chain cumulative counters the oracle cannot reset.
+The per-account spending limit is configured via `setSubAccountLimits()`; the oracle acquired budget is configured via `setMaxOracleAcquiredBps()` (default 20%). This is a **mathematical guarantee** enforced by on-chain cumulative counters the oracle cannot reset.
 
 ---
 
@@ -62,14 +62,10 @@ function _trackCumulativeSpending(address subAccount, uint256 spendingCost) inte
 
     cumulativeSpent[subAccount] += spendingCost;
 
-    // Dual-mode cap computation
+    // Dual-mode cap computation (per-account)
     uint256 maxSpending = maxSpendingUSD > 0
         ? maxSpendingUSD
         : (windowSafeValue[subAccount] * maxSpendingBps) / 10000;
-
-    // Also cap by absolute maximum
-    uint256 absoluteMax = (windowSafeValue[subAccount] * absoluteMaxSpendingBps) / 10000;
-    if (absoluteMax < maxSpending) maxSpending = absoluteMax;
 
     if (cumulativeSpent[subAccount] > maxSpending) revert ExceedsCumulativeSpendingLimit(...);
 }
@@ -142,22 +138,23 @@ Called from `updateAcquiredBalance` and `batchUpdate`.
 
 ---
 
-### Per-Account USD Cap in `_enforceAllowanceCap`
+### Per-Account Cap in `_enforceAllowanceCap`
 
-For sub-accounts using fixed USD spending limits (`maxSpendingUSD`), the allowance cap also respects the per-account limit:
+The allowance cap is derived entirely from the sub-account's configured limit. USD-mode accounts cap at `maxSpendingUSD`; BPS-mode accounts cap at `maxSpendingBps * safeValue`. Unconfigured accounts fall back to `DEFAULT_MAX_SPENDING_BPS` (5%).
 
 ```solidity
 function _enforceAllowanceCap(address subAccount, uint256 newAllowance) internal view {
-    _requireFreshSafeValue();
-    uint256 maxAllowance = (safeValue.totalValueUSD * absoluteMaxSpendingBps) / 10000;
+    (uint256 maxSpendingBps, uint256 maxSpendingUSD,) = getSubAccountLimits(subAccount);
 
-    // In USD mode, take the stricter limit
-    SubAccountLimits storage limits = subAccountLimits[subAccount];
-    if (limits.isConfigured && limits.maxSpendingUSD > 0 && limits.maxSpendingUSD < maxAllowance) {
-        maxAllowance = limits.maxSpendingUSD;
+    uint256 maxAllowance;
+    if (maxSpendingUSD > 0) {
+        maxAllowance = maxSpendingUSD;
+    } else {
+        _requireFreshSafeValue();
+        maxAllowance = (safeValue.totalValueUSD * maxSpendingBps) / 10000;
     }
 
-    if (newAllowance > maxAllowance) revert ExceedsAbsoluteMaxSpending(newAllowance, maxAllowance);
+    if (newAllowance > maxAllowance) revert ExceedsAllowanceCap(newAllowance, maxAllowance);
 }
 ```
 
@@ -185,14 +182,14 @@ Updates that are skipped still refresh `lastOracleUpdate` (the oracle is alive) 
 
 ## 3. Combined Protection Summary
 
-| Attack Vector                        | Protection                             | Enforced By                            |
-| ------------------------------------ | -------------------------------------- | -------------------------------------- |
-| Spending allowance reset             | On-chain cumulative counter per window | Contract execution functions           |
-| `safeValue` inflation                | Window-start snapshot                  | Contract (first op in new window)      |
-| Acquired balance reset (swaps)       | Marked on-chain at execution time      | Contract (`_executeWithSpendingCheck`) |
-| Acquired balance reset (withdrawals) | Cumulative oracle budget per window    | Contract (`updateAcquiredBalance`)     |
-| USD-mode allowance inflation         | Per-account `maxSpendingUSD` cap       | Contract (`_enforceAllowanceCap`)      |
-| Stale oracle overwrites              | Monotonic version counters             | Contract (all oracle update functions) |
+| Attack Vector                        | Protection                                          | Enforced By                            |
+| ------------------------------------ | --------------------------------------------------- | -------------------------------------- |
+| Spending allowance reset             | On-chain cumulative counter per window              | Contract execution functions           |
+| `safeValue` inflation                | Window-start snapshot                               | Contract (first op in new window)      |
+| Acquired balance reset (swaps)       | Marked on-chain at execution time                   | Contract (`_executeWithSpendingCheck`) |
+| Acquired balance reset (withdrawals) | Cumulative oracle budget per window                 | Contract (`updateAcquiredBalance`)     |
+| Allowance inflation                  | Per-account `maxSpendingBps` / `maxSpendingUSD` cap | Contract (`_enforceAllowanceCap`)      |
+| Stale oracle overwrites              | Monotonic version counters                          | Contract (all oracle update functions) |
 
 **Oracle role after mitigations:**
 
@@ -207,13 +204,13 @@ Updates that are skipped still refresh `lastOracleUpdate` (the oracle is alive) 
 
 ## 4. Configuration
 
-| Parameter                | Default | Owner Function                | Description                                       |
-| ------------------------ | ------- | ----------------------------- | ------------------------------------------------- |
-| `absoluteMaxSpendingBps` | 2000    | `setAbsoluteMaxSpendingBps()` | Global spending cap (20%)                         |
-| `maxOracleAcquiredBps`   | 2000    | `setMaxOracleAcquiredBps()`   | Oracle acquired budget (20%)                      |
-| `maxSpendingUSD`         | —       | `setSubAccountLimits()`       | Per-account fixed USD cap (overrides BPS for cap) |
-| `maxOracleAge`           | 60 min  | —                             | Max staleness before operations freeze            |
-| `maxSafeValueAge`        | 60 min  | —                             | Max staleness for safe value                      |
+| Parameter              | Default       | Owner Function              | Description                                                        |
+| ---------------------- | ------------- | --------------------------- | ------------------------------------------------------------------ |
+| `maxSpendingBps`       | 500 (default) | `setSubAccountLimits()`     | Per-account spending cap as % of Safe value (BPS mode)             |
+| `maxSpendingUSD`       | —             | `setSubAccountLimits()`     | Per-account fixed USD cap (USD mode — mutually exclusive with BPS) |
+| `maxOracleAcquiredBps` | 2000          | `setMaxOracleAcquiredBps()` | Oracle acquired budget (20%)                                       |
+| `maxOracleAge`         | 60 min        | —                           | Max staleness before operations freeze                             |
+| `maxSafeValueAge`      | 60 min        | —                           | Max staleness for safe value                                       |
 
 **Tuning guidance:**
 
