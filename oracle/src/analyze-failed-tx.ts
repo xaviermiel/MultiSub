@@ -176,9 +176,11 @@ const CONTRACT_ERRORS: Record<
     description: "No calldata parser is registered for this protocol",
     solution: "Owner must register a parser using registerParser()",
   },
-  ExceedsAbsoluteMaxSpending: {
-    description: "Oracle tried to set spending above absolute max limit",
-    solution: "This is a safety limit - cannot be exceeded even by oracle",
+  ExceedsAllowanceCap: {
+    description:
+      "Oracle tried to set spending above the sub-account's configured max (BPS of Safe value or fixed USD)",
+    solution:
+      "Reduce the new allowance below the sub-account limit, or raise the sub-account limit via setSubAccountLimits()",
   },
   CannotRegisterUnknown: {
     description: "Cannot register a selector with UNKNOWN operation type",
@@ -273,7 +275,7 @@ const ERROR_ABI = parseAbi([
   "error ApprovalExceedsLimit()",
   "error SpenderNotAllowed()",
   "error NoParserRegistered(address target)",
-  "error ExceedsAbsoluteMaxSpending(uint256 requested, uint256 maximum)",
+  "error ExceedsAllowanceCap(uint256 requested, uint256 maximum)",
   "error CannotRegisterUnknown()",
   "error LengthMismatch()",
   "error ExceedsMaxBps()",
@@ -313,7 +315,6 @@ const MODULE_ABI = parseAbi([
   "function setTokenPriceFeed(address token, address priceFeed) external",
   "function setTokenPriceFeeds(address[] calldata tokens, address[] calldata priceFeeds) external",
   "function setAuthorizedOracle(address newOracle) external",
-  "function setAbsoluteMaxSpendingBps(uint256 newMaxBps) external",
   "function pause() external",
   "function unpause() external",
 ]);

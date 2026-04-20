@@ -299,10 +299,10 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         module.updateSpendingAllowance(subAccount1, 0, 50000 * 10 ** 18);
     }
 
-    function testAbsoluteMaxSpendingCap() public {
-        // Safe value is $1,000,000 and absoluteMaxSpendingBps is 2000 (20%)
-        // So max allowance is $200,000
-        uint256 maxAllowance = (1_000_000 * 10 ** 18 * 2000) / 10000; // $200,000
+    function testAllowanceCapUsesPerAccountBps() public {
+        // Configure subAccount1 at 2000 bps (20%) of $1M safe value → $200K cap
+        module.setSubAccountLimits(subAccount1, 2000, 0, 1 days);
+        uint256 maxAllowance = (1_000_000 * 10 ** 18 * 2000) / 10000;
 
         // Setting exactly at max should work
         module.updateSpendingAllowance(subAccount1, 0, maxAllowance);
@@ -310,39 +310,37 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
 
         // Setting above max should fail
         vm.expectRevert(
-            abi.encodeWithSelector(
-                DeFiInteractorModule.ExceedsAbsoluteMaxSpending.selector, maxAllowance + 1, maxAllowance
-            )
+            abi.encodeWithSelector(DeFiInteractorModule.ExceedsAllowanceCap.selector, maxAllowance + 1, maxAllowance)
         );
         module.updateSpendingAllowance(subAccount1, 1, maxAllowance + 1);
     }
 
-    function testAbsoluteMaxSpendingCapOnBatchUpdate() public {
-        uint256 maxAllowance = (1_000_000 * 10 ** 18 * 2000) / 10000; // $200,000
+    function testAllowanceCapOnBatchUpdate() public {
+        // Configure subAccount1 at 2000 bps (20%) of $1M safe value → $200K cap
+        module.setSubAccountLimits(subAccount1, 2000, 0, 1 days);
+        uint256 maxAllowance = (1_000_000 * 10 ** 18 * 2000) / 10000;
 
         address[] memory tokens = new address[](0);
         uint256[] memory balances = new uint256[](0);
 
         // Above max should fail
         vm.expectRevert(
-            abi.encodeWithSelector(
-                DeFiInteractorModule.ExceedsAbsoluteMaxSpending.selector, maxAllowance + 1, maxAllowance
-            )
+            abi.encodeWithSelector(DeFiInteractorModule.ExceedsAllowanceCap.selector, maxAllowance + 1, maxAllowance)
         );
         _batchUpdate(subAccount1, maxAllowance + 1, tokens, balances);
     }
 
-    function testSetAbsoluteMaxSpendingBps() public {
-        // Default is 2000 (20%)
-        assertEq(module.absoluteMaxSpendingBps(), 2000);
+    function testAllowanceCapUnconfiguredUsesDefaults() public {
+        // Unconfigured sub-account → DEFAULT_MAX_SPENDING_BPS (500 = 5%) of $1M = $50K
+        uint256 maxAllowance = (1_000_000 * 10 ** 18 * 500) / 10000;
 
-        // Owner can change it
-        module.setAbsoluteMaxSpendingBps(500); // 5%
-        assertEq(module.absoluteMaxSpendingBps(), 500);
+        module.updateSpendingAllowance(subAccount1, 0, maxAllowance);
+        assertEq(module.getSpendingAllowance(subAccount1), maxAllowance);
 
-        // Cannot exceed 100%
-        vm.expectRevert(DeFiInteractorModule.ExceedsMaxBps.selector);
-        module.setAbsoluteMaxSpendingBps(10001);
+        vm.expectRevert(
+            abi.encodeWithSelector(DeFiInteractorModule.ExceedsAllowanceCap.selector, maxAllowance + 1, maxAllowance)
+        );
+        module.updateSpendingAllowance(subAccount1, 1, maxAllowance + 1);
     }
 
     // ============ Execute On Protocol Tests ============
@@ -757,28 +755,24 @@ contract DeFiInteractorModuleTest is DeFiInteractorModuleBase {
         // Configure subAccount1 with $500 USD limit
         module.setSubAccountLimits(subAccount1, 0, 500e18, 1 days);
 
-        // Safe value = $1M, absoluteMaxSpendingBps = 2000 (20%) → global cap = $200K
-        // Per-account USD cap = $500 → should take minimum ($500)
         module.updateSpendingAllowance(subAccount1, 0, 500e18); // exactly $500 should work
 
         // $501 should revert — exceeds per-account USD cap
-        vm.expectRevert(
-            abi.encodeWithSelector(DeFiInteractorModule.ExceedsAbsoluteMaxSpending.selector, 501e18, 500e18)
-        );
+        vm.expectRevert(abi.encodeWithSelector(DeFiInteractorModule.ExceedsAllowanceCap.selector, 501e18, 500e18));
         module.updateSpendingAllowance(subAccount1, 1, 501e18);
     }
 
-    function testEnforceAllowanceCapBPSModeUnchanged() public {
+    function testEnforceAllowanceCapBPSMode() public {
         // BPS mode: 500 bps (5%) of $1M = $50K
         module.setSubAccountLimits(subAccount1, 500, 0, 1 days);
 
-        // Global cap: 2000 bps (20%) of $1M = $200K
-        module.updateSpendingAllowance(subAccount1, 0, 50000e18); // $50K within global cap
-        module.updateSpendingAllowance(subAccount1, 1, 200000e18); // $200K within global cap
+        module.updateSpendingAllowance(subAccount1, 0, 50000e18); // $50K at cap
 
-        // $200K + 1 should revert (exceeds global cap)
-        vm.expectRevert();
-        module.updateSpendingAllowance(subAccount1, 2, 200001e18);
+        // $50K + 1 should revert (exceeds per-account BPS cap)
+        vm.expectRevert(
+            abi.encodeWithSelector(DeFiInteractorModule.ExceedsAllowanceCap.selector, 50000e18 + 1, 50000e18)
+        );
+        module.updateSpendingAllowance(subAccount1, 1, 50000e18 + 1);
     }
 
     // ============ On-chain cumulative spending tracker ============

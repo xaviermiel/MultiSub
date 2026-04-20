@@ -178,6 +178,9 @@ contract DeFiModuleFuzzTests is Test {
 
         // Set Safe value (1M USD)
         module.updateSafeValue(1_000_000 * 10 ** 18);
+
+        // Configure subAccount at 20% BPS so allowance cap = $200K (matches pre-refactor fuzz budget)
+        module.setSubAccountLimits(subAccount, 2000, 0, 1 days);
     }
 
     // ============ USD Value Calculation Fuzz Tests ============
@@ -539,9 +542,10 @@ contract DeFiModuleFuzzTests is Test {
     function testFuzzAllowanceCapNoOverflow(uint256 safeValue, uint256 maxBps) public {
         // Bound to prevent overflow: safeValue * maxBps / 10000
         safeValue = bound(safeValue, 0, type(uint256).max / 10000);
-        maxBps = bound(maxBps, 0, 10000);
+        // setSubAccountLimits requires maxSpendingBps > 0 when in BPS mode
+        maxBps = bound(maxBps, 1, 10000);
 
-        module.setAbsoluteMaxSpendingBps(maxBps);
+        module.setSubAccountLimits(subAccount, maxBps, 0, 1 days);
         module.updateSafeValue(safeValue);
 
         uint256 maxAllowance = (safeValue * maxBps) / 10000;
@@ -554,8 +558,8 @@ contract DeFiModuleFuzzTests is Test {
             assertEq(module.getSpendingAllowance(subAccount), maxAllowance);
         }
 
-        // Should revert when above cap (if cap > 0)
-        if (maxAllowance < type(uint256).max && maxBps > 0) {
+        // Should revert when above cap
+        if (maxAllowance < type(uint256).max) {
             vm.expectRevert();
             module.updateSpendingAllowance(subAccount, currentVersion, maxAllowance + 1);
         }
